@@ -38,7 +38,24 @@ Each case reports:
 
 `layer-norm` intentionally uses a `bf16ish` policy, so L2/L3 may differ from the
 top-level real-number reference within a small tolerance. That difference is the
-precision diagnostic signal, not a failure.
+  precision diagnostic signal, not a failure.
+
+## Code Layout
+
+- `lib/language.ml`: language definition only. It contains dtypes, primitive
+  operation names, top commands, and the L1/L2/L3 IR datatypes plus pretty
+  printers.
+- `lib/effects.ml`: algebraic effect vocabulary used by the interpreter.
+- `lib/interpreter.ml`: the real interpreter: runtime state, effect handlers,
+  and evaluators for top/core/vector/memory-async levels.
+- `lib/lowering.ml`: lowering passes from top commands to core tasks, vector
+  tasks, and memory/async tasks.
+- `lib/examples.ml`: sourced examples and case metadata.
+- `lib/routes.ml`: best-effort external route status for MLIR runner, xDSL,
+  EmitC, and Triton.
+- `lib/report.ml`: comparison harness that runs all levels and produces a
+  readable report.
+- `test/test_unified_interpreter.ml`: acceptance tests over all five cases.
 
 ## Run
 
