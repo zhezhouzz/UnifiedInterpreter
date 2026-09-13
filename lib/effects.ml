@@ -1,5 +1,5 @@
 (* Unified effect vocabulary. Programs are shallow OCaml terms that perform
-   these operations; H1-H4 decide how each operation is executed or lowered. *)
+   these operations; H1-H5 decide how each operation is executed or lowered. *)
 
 open Effect
 open Language

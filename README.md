@@ -8,13 +8,14 @@ Lowering levels are not represented by separate ASTs. Instead, the same program
 is run under a nested stack of non-overlapping algebraic-effect handlers:
 
 ```ocaml
-H4 { H3 { H2 { H1 { program } } } }
+H5 { H4 { H3 { H2 { H1 { program } } } } }
 ```
 
 `H1` is the innermost, highest-level source scope. If `H1` sees an operation
 owned by a lower level, it deliberately does not handle it; the effect
-propagates outward to `H2`, `H3`, or `H4`. This is the extensibility story:
-users can explicitly control handler scope and mix levels in one execution.
+propagates outward to `H2`, `H3`, `H4`, or `H5`. This mirrors the five stages
+in the Huawei slide and is the extensibility story: users can explicitly
+control handler scope and mix levels in one execution.
 
 ## Examples
 
@@ -50,21 +51,25 @@ store ~ptr:out ~offsets ~values:sum ~mask ()
 
 ## Handlers
 
-- `H1/source`: owns source-region annotations and forwards executable effects.
-- `H2/core`: owns `program_id` and logical core/program instances.
-- `H3/vector`: owns vector operations, masks, maps, and reductions.
-- `H4/memory-async`: owns loads/stores and lowers them into local-buffer, async-copy,
-  wait, and barrier effects.
+- `H1/CV-before-map`: owns source-region annotations and forwards executable
+  effects.
+- `H2/CV-core-map`: owns `program_id` and logical CV core/program instances.
+- `H3/SIMD-T-map`: owns vector operations, masks, maps, and reductions.
+- `H4/on-chip-memory-map`: owns global `load`/`store` and maps them to UB-local
+  traffic.
+- `H5/sync-op-async-map`: owns `alloc.local`, `async.copy.in/out`, `wait`, and
+  `barrier`.
 
 The handlers are intentionally non-overlapping in the current prototype. For
 example, `load` is handled by `H4`, not by `H1`; `fadd` and `reduce_sum` are
-handled by `H3`, not by `H1`.
+handled by `H3`, not by `H1`; `async.copy` and `barrier` are handled by `H5`,
+not by `H4`.
 
 ## Code Layout
 
 - `lib/language.ml`: shared language types and pure helpers.
 - `lib/effects.ml`: unified effect declarations and shallow-embedding helpers.
-- `lib/interpreter.ml`: runtime state and H1-H4 handlers.
+- `lib/interpreter.ml`: runtime state and H1-H5 handlers.
 - `lib/examples.ml`: the two sourced Triton-like programs.
 - `lib/report.ml`: comparison harness for handler scopes.
 - `test/test_unified_interpreter.ml`: acceptance tests for both programs.

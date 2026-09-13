@@ -1,4 +1,4 @@
-(* Real interpreter: runtime state plus H1-H4 handlers over one unified language. *)
+(* Real interpreter: runtime state plus H1-H5 handlers over one unified language. *)
 
 open Effect.Deep
 open Language
@@ -109,7 +109,7 @@ let eval_store state { ptr; offsets; values; mask } =
     offsets
 
 module H1 = struct
-  let name = "H1/source"
+  let name = "H1/CV-before-map"
 
   let run state thunk =
     match_with thunk ()
@@ -122,14 +122,14 @@ module H1 = struct
             | Trace msg ->
                 Some
                   (fun (k : (a, _) continuation) ->
-                    add_trace state ("H1 source: " ^ msg);
+                    add_trace state ("H1 CV-before-map source: " ^ msg);
                     continue k ())
             | _ -> None);
       }
 end
 
 module H2 = struct
-  let name = "H2/core"
+  let name = "H2/CV-core-map"
 
   let run state thunk =
     match_with thunk ()
@@ -144,7 +144,7 @@ module H2 = struct
                   (fun (k : (a, _) continuation) ->
                     add_trace state
                       (Printf.sprintf
-                         "H2 bind program_id(axis=%d) to logical core %d" axis
+                         "H2 CV-core-map program_id(axis=%d) -> CV core %d" axis
                          state.current_pid);
                     continue k state.current_pid)
             | _ -> None);
@@ -152,7 +152,7 @@ module H2 = struct
 end
 
 module H3 = struct
-  let name = "H3/vector"
+  let name = "H3/SIMD-T-map"
 
   let run state thunk =
     match_with thunk ()
@@ -218,7 +218,7 @@ module H3 = struct
 end
 
 module H4 = struct
-  let name = "H4/memory-async"
+  let name = "H4/on-chip-memory-map"
 
   let run state thunk =
     match_with thunk ()
@@ -236,15 +236,18 @@ module H4 = struct
                     let width = Array.length load.offsets in
                     add_trace state
                       (Printf.sprintf
-                         "H4 lower load %s: alloc.local %s[%d], async.copy.in, wait"
+                         "H4 on-chip-memory-map load %s -> UB %s[%d]"
                          load.ptr local width);
-                    add_trace state
-                      (Printf.sprintf "H4 alloc.local core%d %s[%d]" core local
-                         width);
-                    add_trace state
-                      (Printf.sprintf "H4 async.copy.in core%d %s -> %s %s" core
-                         load.ptr local (pp_active load.mask width));
-                    add_trace state (Printf.sprintf "H4 wait core%d gm_to_ub" core);
+                    alloc_local core local width;
+                    async_copy_in
+                      {
+                        core;
+                        global = load.ptr;
+                        local;
+                        offsets = load.offsets;
+                        mask = load.mask;
+                      };
+                    wait core "gm_to_ub";
                     continue k (eval_load state load))
             | Store store ->
                 Some
@@ -254,31 +257,48 @@ module H4 = struct
                     let width = Array.length store.offsets in
                     add_trace state
                       (Printf.sprintf
-                         "H4 lower store %s: alloc.local %s[%d], barrier, async.copy.out"
+                         "H4 on-chip-memory-map store %s <- UB %s[%d]"
                          store.ptr local width);
-                    add_trace state
-                      (Printf.sprintf "H4 alloc.local core%d %s[%d]" core local
-                         width);
-                    add_trace state
-                      (Printf.sprintf "H4 barrier core%d before_store" core);
-                    add_trace state
-                      (Printf.sprintf "H4 async.copy.out core%d %s -> %s %s" core
-                         local store.ptr (pp_active store.mask width));
-                    add_trace state (Printf.sprintf "H4 wait core%d ub_to_gm" core);
+                    alloc_local core local width;
+                    barrier core "before_store";
+                    async_copy_out
+                      {
+                        core;
+                        global = store.ptr;
+                        local;
+                        offsets = store.offsets;
+                        mask = store.mask;
+                      };
+                    wait core "ub_to_gm";
                     eval_store state store;
                     continue k ())
+            | _ -> None);
+      }
+end
+
+module H5 = struct
+  let name = "H5/sync-op-async-map"
+
+  let run state thunk =
+    match_with thunk ()
+      {
+        retc = Fun.id;
+        exnc = raise;
+        effc =
+          (fun (type a) (eff : a Effect.t) ->
+            match eff with
             | Alloc_local (core, name, cells) ->
                 Some
                   (fun (k : (a, _) continuation) ->
                     add_trace state
-                      (Printf.sprintf "H4 alloc.local core%d %s[%d]" core name
+                      (Printf.sprintf "H5 alloc.local core%d %s[%d]" core name
                          cells);
                     continue k ())
             | Async_copy_in copy ->
                 Some
                   (fun (k : (a, _) continuation) ->
                     add_trace state
-                      (Printf.sprintf "H4 async.copy.in core%d %s -> %s %s"
+                      (Printf.sprintf "H5 async.copy.in core%d %s -> %s %s"
                          copy.core copy.global copy.local
                          (pp_active copy.mask (Array.length copy.offsets)));
                     continue k ())
@@ -286,36 +306,38 @@ module H4 = struct
                 Some
                   (fun (k : (a, _) continuation) ->
                     add_trace state
-                      (Printf.sprintf "H4 async.copy.out core%d %s -> %s %s"
+                      (Printf.sprintf "H5 async.copy.out core%d %s -> %s %s"
                          copy.core copy.local copy.global
                          (pp_active copy.mask (Array.length copy.offsets)));
                     continue k ())
             | Wait (core, token) ->
                 Some
                   (fun (k : (a, _) continuation) ->
-                    add_trace state (Printf.sprintf "H4 wait core%d %s" core token);
+                    add_trace state (Printf.sprintf "H5 wait core%d %s" core token);
                     continue k ())
             | Barrier (core, scope) ->
                 Some
                   (fun (k : (a, _) continuation) ->
                     add_trace state
-                      (Printf.sprintf "H4 barrier core%d %s" core scope);
+                      (Printf.sprintf "H5 barrier core%d %s" core scope);
                     continue k ())
             | _ -> None);
       }
 end
 
 type scope =
-  | H4_H3_H2_H1
+  | H5_H4_H3_H2_H1
 
 let pp_scope = function
-  | H4_H3_H2_H1 -> "H4 { H3 { H2 { H1 { program } } } }"
+  | H5_H4_H3_H2_H1 -> "H5 { H4 { H3 { H2 { H1 { program } } } } }"
 
 let run_scope state scope program =
   match scope with
-  | H4_H3_H2_H1 ->
-      H4.run state (fun () ->
-          H3.run state (fun () -> H2.run state (fun () -> H1.run state program)))
+  | H5_H4_H3_H2_H1 ->
+      H5.run state (fun () ->
+          H4.run state (fun () ->
+              H3.run state (fun () ->
+                  H2.run state (fun () -> H1.run state program))))
 
 let run_case scope (case : case) =
   let state = make_state case.inputs case.output case.output_dims in
@@ -330,7 +352,7 @@ let run_case scope (case : case) =
 
 let run_program thunk =
   let state = make_state [] "out" [ 0 ] in
-  run_scope state H4_H3_H2_H1 thunk;
+  run_scope state H5_H4_H3_H2_H1 thunk;
   state
 
 let same_tensor left left_name right right_name =
