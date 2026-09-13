@@ -9,16 +9,9 @@ type run_result = {
 
 type execution = { runs : run_result list }
 
-let scopes =
-  [ Interpreter.H5_H4_H3_H2_H1 ]
-
 let execute case =
-  {
-    runs =
-      List.map
-        (fun scope -> { scope; state = Interpreter.run_case scope case })
-        scopes;
-  }
+  let scope = case.handler_stack in
+  { runs = [ { scope; state = Interpreter.run_case scope case } ] }
 
 let reference_run execution =
   match execution.runs with
@@ -44,7 +37,7 @@ let trace_contains state needle =
          in
          needle_len = 0 || loop 0)
 
-let pp_trace_sample ?(limit = 18) state =
+let pp_trace_sample ?(limit = 28) state =
   let trace = Interpreter.trace state in
   let shown = trace |> List.to_seq |> Seq.take limit |> List.of_seq in
   let body = shown |> List.map (fun line -> "  " ^ line) |> String.concat "\n" in
@@ -77,10 +70,11 @@ let pp_case case execution =
       "";
       "- Source: " ^ case.source.title ^ " (" ^ case.source.url ^ ")";
       "- Source note: " ^ case.source.note;
+      "- Root handlers: " ^ Interpreter.pp_scope case.handler_stack;
       "- Grid: " ^ string_of_int case.grid;
       "";
       "### Triton-like Source";
-      "```python";
+      "```" ^ case.source_language;
       String.trim case.source_text;
       "```";
       "";

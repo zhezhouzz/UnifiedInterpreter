@@ -325,19 +325,48 @@ module H5 = struct
       }
 end
 
-type scope =
-  | H5_H4_H3_H2_H1
+type scope = handler_stage list
 
-let pp_scope = function
-  | H5_H4_H3_H2_H1 -> "H5 { H4 { H3 { H2 { H1 { program } } } } }"
+let pp_scope = pp_handler_stack
 
-let run_scope state scope program =
-  match scope with
-  | H5_H4_H3_H2_H1 ->
-      H5.run state (fun () ->
-          H4.run state (fun () ->
-              H3.run state (fun () ->
-                  H2.run state (fun () -> H1.run state program))))
+let run_stage state stage thunk =
+  match stage with
+  | CV_before_map -> H1.run state thunk
+  | CV_core_map -> H2.run state thunk
+  | SIMD_T_map -> H3.run state thunk
+  | On_chip_memory_map -> H4.run state thunk
+  | Sync_op_async_map -> H5.run state thunk
+
+let rec run_stages state stages thunk =
+  match stages with
+  | [] -> thunk ()
+  | stage :: rest ->
+      run_stage state stage (fun () -> run_stages state rest thunk)
+
+let rec run_with_user_scope state stages thunk =
+  run_stages state stages (fun () -> run_user_scope state thunk)
+
+and run_user_scope state thunk =
+  match_with thunk ()
+    {
+      retc = Fun.id;
+      exnc = raise;
+      effc =
+        (fun (type a) (eff : a Effect.t) ->
+          match eff with
+          | With_handlers (stages, body) ->
+              Some
+                (fun (k : (a, _) continuation) ->
+                  add_trace state
+                    (Printf.sprintf "user.scope enter %s"
+                       (pp_handler_stack stages));
+                  run_with_user_scope state stages body;
+                  add_trace state
+                    (Printf.sprintf "user.scope leave %s"
+                       (pp_handler_stack stages));
+                  continue k ())
+          | _ -> None);
+    }
 
 let run_case scope (case : case) =
   let state = make_state case.inputs case.output case.output_dims in
@@ -345,14 +374,14 @@ let run_case scope (case : case) =
   for pid = 0 to case.grid - 1 do
     state.current_pid <- pid;
     add_trace state (Printf.sprintf "launch logical program/core %d" pid);
-    run_scope state scope case.program;
+    run_with_user_scope state scope case.program;
     add_trace state (Printf.sprintf "join logical program/core %d" pid)
   done;
   state
 
 let run_program thunk =
   let state = make_state [] "out" [ 0 ] in
-  run_scope state H5_H4_H3_H2_H1 thunk;
+  run_with_user_scope state default_handler_stack thunk;
   state
 
 let same_tensor left left_name right right_name =

@@ -17,11 +17,45 @@ propagates outward to `H2`, `H3`, `H4`, or `H5`. This mirrors the five stages
 in the Huawei slide and is the extensibility story: users can explicitly
 control handler scope and mix levels in one execution.
 
+The root handler stack is data, not a hidden global choice. A case can run with
+the full stack:
+
+```ocaml
+default_handler_stack
+```
+
+or with only the higher layers:
+
+```ocaml
+source_to_simd_stack
+```
+
+The program itself can then introduce a lower-level region:
+
+```ocaml
+with_on_chip_memory (fun () ->
+  let x_vals = load ~ptr:x ~offsets ~mask ~other:0.0 () in
+  let y_vals = load ~ptr:y ~offsets ~mask ~other:0.0 () in
+  let sum = fadd x_vals y_vals in
+  with_sync_ops (fun () ->
+    alloc_local pid "manual_h5_midpoint" 1;
+    barrier pid "after_vector_fadd";
+    wait pid "after_vector_fadd");
+  store ~ptr:out ~offsets ~values:sum ~mask ())
+```
+
+In that example, most of the region is explicitly under the H4 on-chip-memory
+mapping; the middle block is explicitly H5 sync/async code. The `fadd` still
+belongs to H3, so it propagates outward to the surrounding SIMD/T handler.
+
 ## Examples
 
-The repository currently focuses only on two sourced Triton-like programs:
+The repository currently focuses on two sourced Triton-like programs plus one
+user-scoped variant:
 
 - `vector-add`: based on the Triton-Ascend Vector Addition example.
+- `vector-add-user-scoped`: the same vector-add computation, but with memory and
+  sync handler scopes chosen inside the program.
 - `fused-softmax`: based on the Triton-Ascend Fused Softmax example.
 
 Both are written as OCaml shallow embeddings using ordinary `let` plus
@@ -70,9 +104,9 @@ not by `H4`.
 - `lib/language.ml`: shared language types and pure helpers.
 - `lib/effects.ml`: unified effect declarations and shallow-embedding helpers.
 - `lib/interpreter.ml`: runtime state and H1-H5 handlers.
-- `lib/examples.ml`: the two sourced Triton-like programs.
+- `lib/examples.ml`: the sourced Triton-like programs and user-scoped variant.
 - `lib/report.ml`: comparison harness for handler scopes.
-- `test/test_unified_interpreter.ml`: acceptance tests for both programs.
+- `test/test_unified_interpreter.ml`: acceptance tests for all programs.
 
 ## Run
 

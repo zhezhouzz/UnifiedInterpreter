@@ -20,6 +20,38 @@ type source = {
   note : string;
 }
 
+type handler_stage =
+  | CV_before_map
+  | CV_core_map
+  | SIMD_T_map
+  | On_chip_memory_map
+  | Sync_op_async_map
+
+let pp_handler_stage = function
+  | CV_before_map -> "H1/CV-before-map"
+  | CV_core_map -> "H2/CV-core-map"
+  | SIMD_T_map -> "H3/SIMD-T-map"
+  | On_chip_memory_map -> "H4/on-chip-memory-map"
+  | Sync_op_async_map -> "H5/sync-op-async-map"
+
+let pp_handler_stack stages =
+  let rec go = function
+    | [] -> "program"
+    | stage :: rest -> pp_handler_stage stage ^ " { " ^ go rest ^ " }"
+  in
+  go stages
+
+let default_handler_stack =
+  [
+    Sync_op_async_map;
+    On_chip_memory_map;
+    SIMD_T_map;
+    CV_core_map;
+    CV_before_map;
+  ]
+
+let source_to_simd_stack = [ SIMD_T_map; CV_core_map; CV_before_map ]
+
 type program = unit -> unit
 
 type case = {
@@ -27,6 +59,8 @@ type case = {
   title : string;
   source : source;
   source_text : string;
+  source_language : string;
+  handler_stack : handler_stage list;
   grid : int;
   inputs : (string * Tensor.t) list;
   output : string;

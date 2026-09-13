@@ -20,6 +20,26 @@ let vector_add_program ~x ~y ~out ~n_elements ~block_size () =
   store ~ptr:out ~offsets ~values:sum ~mask ();
   trace "leave vector_add"
 
+let vector_add_user_scoped_program ~x ~y ~out ~n_elements ~block_size () =
+  trace "enter vector_add_user_scoped";
+  let pid = program_id 0 in
+  let offsets =
+    iadd
+      (ibroadcast block_size (pid * block_size))
+      (arange 0 block_size)
+  in
+  let mask = ilt offsets (ibroadcast block_size n_elements) in
+  with_on_chip_memory (fun () ->
+      let x_vals = load ~ptr:x ~offsets ~mask ~other:0.0 () in
+      let y_vals = load ~ptr:y ~offsets ~mask ~other:0.0 () in
+      let sum = fadd x_vals y_vals in
+      with_sync_ops (fun () ->
+          alloc_local pid "manual_h5_midpoint" 1;
+          barrier pid "after_vector_fadd";
+          wait pid "after_vector_fadd");
+      store ~ptr:out ~offsets ~values:sum ~mask ());
+  trace "leave vector_add_user_scoped"
+
 let fused_softmax_program ~x ~out ~n_rows:_ ~n_cols ~block_size () =
   trace "enter fused_softmax";
   let row_idx = program_id 0 in
@@ -49,6 +69,24 @@ def add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
     y = tl.load(y_ptr + offsets, mask=mask)
     output = x + y
     tl.store(output_ptr + offsets, output, mask=mask)
+|}
+
+let vector_add_user_scoped_source_text =
+  {|
+(* Same Triton-like vector-add body, but the user explicitly chooses
+   handler scopes for one region. The root only provides H1/H2/H3. *)
+let pid = program_id 0 in
+let offsets = pid * BLOCK_SIZE + arange 0 BLOCK_SIZE in
+let mask = offsets < n_elements in
+with_handlers [H5_sync_op_async_map; H4_on_chip_memory_map] (fun () ->
+  let x = load x_ptr offsets mask in
+  let y = load y_ptr offsets mask in
+  let output = x + y in
+  with_handlers [H5_sync_op_async_map] (fun () ->
+    alloc_local "manual_h5_midpoint";
+    barrier "after_vector_fadd";
+    wait "after_vector_fadd");
+  store output_ptr offsets output mask)
 |}
 
 let fused_softmax_source_text =
@@ -82,6 +120,8 @@ let cases () =
           "https://triton-ascend.readthedocs.io/zh-cn/latest/examples/01_vector_add_example.html"
           "Uses program_id, arange offsets, masked tl.load, and masked tl.store.";
       source_text = vector_add_source_text;
+      source_language = "python";
+      handler_stack = default_handler_stack;
       grid = ceil_div vector_n vector_block;
       inputs =
         [
@@ -95,6 +135,28 @@ let cases () =
           ~block_size:vector_block;
     };
     {
+      id = "vector-add-user-scoped";
+      title = "Vector Add With User Handler Scopes";
+      source =
+        triton_source "Triton-Ascend Vector Addition"
+          "https://triton-ascend.readthedocs.io/zh-cn/latest/examples/01_vector_add_example.html"
+          "Same vector-add computation, but memory/sync lowering scopes are chosen inside the program.";
+      source_text = vector_add_user_scoped_source_text;
+      source_language = "ocaml";
+      handler_stack = source_to_simd_stack;
+      grid = ceil_div vector_n vector_block;
+      inputs =
+        [
+          ("x", Tensor.of_array1 [| 0.; 1.; 2.; 3.; 4.; 5.; 6.; 7.; 8.; 9. |]);
+          ("y", Tensor.of_array1 [| 9.; 8.; 7.; 6.; 5.; 4.; 3.; 2.; 1.; 0. |]);
+        ];
+      output = "out";
+      output_dims = [ vector_n ];
+      program =
+        vector_add_user_scoped_program ~x:"x" ~y:"y" ~out:"out"
+          ~n_elements:vector_n ~block_size:vector_block;
+    };
+    {
       id = "fused-softmax";
       title = "Fused Softmax";
       source =
@@ -102,6 +164,8 @@ let cases () =
           "https://triton-ascend.readthedocs.io/zh-cn/latest/examples/02_fused_softmax_example.html"
           "Uses one program per row, power-of-two block padding, max/exp/sum reductions.";
       source_text = fused_softmax_source_text;
+      source_language = "python";
+      handler_stack = default_handler_stack;
       grid = softmax_rows;
       inputs =
         [
