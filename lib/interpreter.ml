@@ -122,110 +122,7 @@ module H1 = struct
             | Trace msg ->
                 Some
                   (fun (k : (a, _) continuation) ->
-                    add_trace state msg;
-                    continue k ())
-            | Program_id axis ->
-                Some
-                  (fun (k : (a, _) continuation) ->
-                    add_trace state
-                      (Printf.sprintf "H1 program_id(axis=%d) -> %d" axis
-                         state.current_pid);
-                    continue k state.current_pid)
-            | Arange (start, stop) ->
-                Some
-                  (fun (k : (a, _) continuation) ->
-                    let values = Array.init (stop - start) (fun i -> start + i) in
-                    add_trace state
-                      (Printf.sprintf "H1 arange(%d,%d) width=%d" start stop
-                         (Array.length values));
-                    continue k values)
-            | Int_binop (op, lhs, rhs) ->
-                Some
-                  (fun (k : (a, _) continuation) ->
-                    add_trace state
-                      (Printf.sprintf "H1 %s width=%d" (pp_int_binary op)
-                         (Array.length lhs));
-                    continue k (eval_int_binop op lhs rhs))
-            | Int_cmp (op, lhs, rhs) ->
-                Some
-                  (fun (k : (a, _) continuation) ->
-                    add_trace state
-                      (Printf.sprintf "H1 %s width=%d" (pp_int_cmp op)
-                         (Array.length lhs));
-                    continue k (eval_int_cmp op lhs rhs))
-            | Load load ->
-                Some
-                  (fun (k : (a, _) continuation) ->
-                    add_trace state
-                      (Printf.sprintf "H1 load %s width=%d %s" load.ptr
-                         (Array.length load.offsets)
-                         (pp_active load.mask (Array.length load.offsets)));
-                    continue k (eval_load state load))
-            | Store store ->
-                Some
-                  (fun (k : (a, _) continuation) ->
-                    add_trace state
-                      (Printf.sprintf "H1 store %s width=%d %s" store.ptr
-                         (Array.length store.offsets)
-                         (pp_active store.mask (Array.length store.offsets)));
-                    eval_store state store;
-                    continue k ())
-            | Float_binop (op, lhs, rhs, dtype) ->
-                Some
-                  (fun (k : (a, _) continuation) ->
-                    add_trace state
-                      (Printf.sprintf "H1 %s width=%d dtype=%s"
-                         (pp_float_binary op) (Array.length lhs) (pp_dtype dtype));
-                    continue k (eval_float_binop dtype op lhs rhs))
-            | Float_map (op, values, dtype) ->
-                Some
-                  (fun (k : (a, _) continuation) ->
-                    add_trace state
-                      (Printf.sprintf "H1 %s width=%d dtype=%s"
-                         (pp_elementwise op) (Array.length values)
-                         (pp_dtype dtype));
-                    continue k (eval_float_map dtype op values))
-            | Reduce (op, values, mask, dtype) ->
-                Some
-                  (fun (k : (a, _) continuation) ->
-                    add_trace state
-                      (Printf.sprintf "H1 reduce.%s width=%d %s dtype=%s"
-                         (pp_reduction op) (Array.length values)
-                         (pp_active mask (Array.length values))
-                         (pp_dtype dtype));
-                    continue k (eval_reduce dtype op values mask))
-            | Alloc_local (core, name, cells) ->
-                Some
-                  (fun (k : (a, _) continuation) ->
-                    add_trace state
-                      (Printf.sprintf "H1 observe alloc.local core%d %s[%d]" core
-                         name cells);
-                    continue k ())
-            | Async_copy_in copy ->
-                Some
-                  (fun (k : (a, _) continuation) ->
-                    add_trace state
-                      (Printf.sprintf "H1 observe async.copy.in core%d %s -> %s"
-                         copy.core copy.global copy.local);
-                    continue k ())
-            | Async_copy_out copy ->
-                Some
-                  (fun (k : (a, _) continuation) ->
-                    add_trace state
-                      (Printf.sprintf "H1 observe async.copy.out core%d %s -> %s"
-                         copy.core copy.local copy.global);
-                    continue k ())
-            | Wait (core, token) ->
-                Some
-                  (fun (k : (a, _) continuation) ->
-                    add_trace state
-                      (Printf.sprintf "H1 observe wait core%d %s" core token);
-                    continue k ())
-            | Barrier (core, scope) ->
-                Some
-                  (fun (k : (a, _) continuation) ->
-                    add_trace state
-                      (Printf.sprintf "H1 observe barrier core%d %s" core scope);
+                    add_trace state ("H1 source: " ^ msg);
                     continue k ())
             | _ -> None);
       }
@@ -341,10 +238,13 @@ module H4 = struct
                       (Printf.sprintf
                          "H4 lower load %s: alloc.local %s[%d], async.copy.in, wait"
                          load.ptr local width);
-                    alloc_local core local width;
-                    async_copy_in
-                      { core; global = load.ptr; local; offsets = load.offsets; mask = load.mask };
-                    wait core "gm_to_ub";
+                    add_trace state
+                      (Printf.sprintf "H4 alloc.local core%d %s[%d]" core local
+                         width);
+                    add_trace state
+                      (Printf.sprintf "H4 async.copy.in core%d %s -> %s %s" core
+                         load.ptr local (pp_active load.mask width));
+                    add_trace state (Printf.sprintf "H4 wait core%d gm_to_ub" core);
                     continue k (eval_load state load))
             | Store store ->
                 Some
@@ -356,11 +256,15 @@ module H4 = struct
                       (Printf.sprintf
                          "H4 lower store %s: alloc.local %s[%d], barrier, async.copy.out"
                          store.ptr local width);
-                    alloc_local core local width;
-                    barrier core "before_store";
-                    async_copy_out
-                      { core; global = store.ptr; local; offsets = store.offsets; mask = store.mask };
-                    wait core "ub_to_gm";
+                    add_trace state
+                      (Printf.sprintf "H4 alloc.local core%d %s[%d]" core local
+                         width);
+                    add_trace state
+                      (Printf.sprintf "H4 barrier core%d before_store" core);
+                    add_trace state
+                      (Printf.sprintf "H4 async.copy.out core%d %s -> %s %s" core
+                         local store.ptr (pp_active store.mask width));
+                    add_trace state (Printf.sprintf "H4 wait core%d ub_to_gm" core);
                     eval_store state store;
                     continue k ())
             | Alloc_local (core, name, cells) ->
@@ -402,27 +306,16 @@ module H4 = struct
 end
 
 type scope =
-  | Only_H1
-  | H1_H2
-  | H1_H3
-  | H1_H4
-  | H1_H4_H3
+  | H4_H3_H2_H1
 
 let pp_scope = function
-  | Only_H1 -> "H1 { program }"
-  | H1_H2 -> "H1 { H2 { program } }"
-  | H1_H3 -> "H1 { H3 { program } }"
-  | H1_H4 -> "H1 { H4 { program } }"
-  | H1_H4_H3 -> "H1 { H4 { H3 { program } } }"
+  | H4_H3_H2_H1 -> "H4 { H3 { H2 { H1 { program } } } }"
 
 let run_scope state scope program =
   match scope with
-  | Only_H1 -> H1.run state program
-  | H1_H2 -> H1.run state (fun () -> H2.run state program)
-  | H1_H3 -> H1.run state (fun () -> H3.run state program)
-  | H1_H4 -> H1.run state (fun () -> H4.run state program)
-  | H1_H4_H3 ->
-      H1.run state (fun () -> H4.run state (fun () -> H3.run state program))
+  | H4_H3_H2_H1 ->
+      H4.run state (fun () ->
+          H3.run state (fun () -> H2.run state (fun () -> H1.run state program)))
 
 let run_case scope (case : case) =
   let state = make_state case.inputs case.output case.output_dims in
@@ -437,7 +330,7 @@ let run_case scope (case : case) =
 
 let run_program thunk =
   let state = make_state [] "out" [ 0 ] in
-  run_scope state Only_H1 thunk;
+  run_scope state H4_H3_H2_H1 thunk;
   state
 
 let same_tensor left left_name right right_name =

@@ -7,25 +7,22 @@ let () =
       let execution = Report.execute case in
       Report.agreement case execution
       |> List.iter (fun (_scope, diff) -> assert (diff <= 1e-5));
-      let run scope =
-        List.find
-          (fun (r : Report.run_result) -> r.scope = scope)
-          execution.runs
-      in
-      let h3 = run Interpreter.H1_H3 in
-      let h4 = run Interpreter.H1_H4 in
-      let mixed = run Interpreter.H1_H4_H3 in
-      assert (Report.trace_contains h3.state "H3 vector");
-      assert (Report.trace_contains h4.state "H4 lower load");
-      assert (Report.trace_contains h4.state "async.copy.in");
-      assert (Report.trace_contains mixed.state "H3 vector");
-      assert (Report.trace_contains mixed.state "H4 lower store");
+      let run = List.hd execution.runs in
+      assert (run.scope = Interpreter.H4_H3_H2_H1);
+      assert (Report.trace_contains run.state "H1 source");
+      assert (Report.trace_contains run.state "H2 bind program_id");
+      assert (Report.trace_contains run.state "H3 vector");
+      assert (Report.trace_contains run.state "H4 lower load");
+      assert (Report.trace_contains run.state "H4 async.copy.in");
+      assert (Report.trace_contains run.state "H4 lower store");
+      assert (not (Report.trace_contains run.state "H1 load"));
+      assert (not (Report.trace_contains run.state "H1 fadd"));
       match case.id with
       | "vector-add" ->
-          assert (Report.trace_contains mixed.state "vector.fadd")
+          assert (Report.trace_contains run.state "vector.fadd")
       | "fused-softmax" ->
-          assert (Report.trace_contains mixed.state "vector.reduce.max");
-          assert (Report.trace_contains mixed.state "vector.exp");
-          assert (Report.trace_contains mixed.state "vector.reduce.sum")
+          assert (Report.trace_contains run.state "vector.reduce.max");
+          assert (Report.trace_contains run.state "vector.exp");
+          assert (Report.trace_contains run.state "vector.reduce.sum")
       | _ -> assert false)
     cases

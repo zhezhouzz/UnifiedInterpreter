@@ -5,18 +5,16 @@ interpreter design inspired by the Huawei AscendNPU IR interpreter question.
 
 The key design point is that there is **one shallow-embedded program language**.
 Lowering levels are not represented by separate ASTs. Instead, the same program
-is run under different algebraic-effect handlers:
+is run under a nested stack of non-overlapping algebraic-effect handlers:
 
 ```ocaml
-H1 { program }
-H1 { H2 { program } }
-H1 { H3 { program } }
-H1 { H4 { program } }
-H1 { H4 { H3 { program } } }
+H4 { H3 { H2 { H1 { program } } } }
 ```
 
-This is the extensibility story: users can explicitly control handler scope and
-mix levels in one execution.
+`H1` is the innermost, highest-level source scope. If `H1` sees an operation
+owned by a lower level, it deliberately does not handle it; the effect
+propagates outward to `H2`, `H3`, or `H4`. This is the extensibility story:
+users can explicitly control handler scope and mix levels in one execution.
 
 ## Examples
 
@@ -52,14 +50,15 @@ store ~ptr:out ~offsets ~values:sum ~mask ()
 
 ## Handlers
 
-- `H1/source`: direct source-level semantics.
-- `H2/core`: binds `program_id` to logical core/program instances.
-- `H3/vector`: handles vector operations, masks, maps, and reductions.
-- `H4/memory-async`: lowers loads/stores into local-buffer, async-copy,
+- `H1/source`: owns source-region annotations and forwards executable effects.
+- `H2/core`: owns `program_id` and logical core/program instances.
+- `H3/vector`: owns vector operations, masks, maps, and reductions.
+- `H4/memory-async`: owns loads/stores and lowers them into local-buffer, async-copy,
   wait, and barrier effects.
 
-`H1` is used as a fallback handler in the demo so that focused handlers can
-choose which effects to interpret and let the rest propagate outward.
+The handlers are intentionally non-overlapping in the current prototype. For
+example, `load` is handled by `H4`, not by `H1`; `fadd` and `reduce_sum` are
+handled by `H3`, not by `H1`.
 
 ## Code Layout
 

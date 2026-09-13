@@ -6,6 +6,7 @@ open Effects
 let triton_source title url note = { title; url; note }
 
 let vector_add_program ~x ~y ~out ~n_elements ~block_size () =
+  trace "enter vector_add";
   let pid = program_id 0 in
   let offsets =
     iadd
@@ -16,9 +17,11 @@ let vector_add_program ~x ~y ~out ~n_elements ~block_size () =
   let x_vals = load ~ptr:x ~offsets ~mask ~other:0.0 () in
   let y_vals = load ~ptr:y ~offsets ~mask ~other:0.0 () in
   let sum = fadd x_vals y_vals in
-  store ~ptr:out ~offsets ~values:sum ~mask ()
+  store ~ptr:out ~offsets ~values:sum ~mask ();
+  trace "leave vector_add"
 
 let fused_softmax_program ~x ~out ~n_rows:_ ~n_cols ~block_size () =
+  trace "enter fused_softmax";
   let row_idx = program_id 0 in
   let col_offsets = arange 0 block_size in
   let row_base = ibroadcast block_size (row_idx * n_cols) in
@@ -32,7 +35,8 @@ let fused_softmax_program ~x ~out ~n_rows:_ ~n_cols ~block_size () =
   let numerator = exp row_minus_max in
   let denominator = reduce_sum numerator ~mask () in
   let softmax_output = fdiv numerator (fbroadcast block_size denominator) in
-  store ~ptr:out ~offsets:linear_offsets ~values:softmax_output ~mask ()
+  store ~ptr:out ~offsets:linear_offsets ~values:softmax_output ~mask ();
+  trace "leave fused_softmax"
 
 let vector_add_source_text =
   {|

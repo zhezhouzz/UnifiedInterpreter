@@ -1,4 +1,4 @@
-(* Report/test harness: run the same shallow program under several handlers. *)
+(* Report/test harness for the nested, non-overlapping handler stack. *)
 
 open Language
 
@@ -10,13 +10,7 @@ type run_result = {
 type execution = { runs : run_result list }
 
 let scopes =
-  [
-    Interpreter.Only_H1;
-    Interpreter.H1_H2;
-    Interpreter.H1_H3;
-    Interpreter.H1_H4;
-    Interpreter.H1_H4_H3;
-  ]
+  [ Interpreter.H4_H3_H2_H1 ]
 
 let execute case =
   {
@@ -74,7 +68,7 @@ let pp_case case execution =
   let agreement_lines =
     agreement case execution
     |> List.map (fun (scope, diff) ->
-           Printf.sprintf "- %s max_abs_diff_vs_H1=%.6g" scope diff)
+           Printf.sprintf "- %s max_abs_diff_vs_reference=%.6g" scope diff)
     |> String.concat "\n"
   in
   String.concat "\n"
@@ -90,7 +84,7 @@ let pp_case case execution =
       String.trim case.source_text;
       "```";
       "";
-      "### Handler Agreement";
+      "### Handler Result";
       agreement_lines;
       "";
       "### Handler Runs";
