@@ -1,0 +1,4 @@
+(executable
+ (public_name unified-interpreter)
+ (name main)
+ (libraries unified_interpreter))
