@@ -103,6 +103,20 @@ let barrier core scope = perform (Barrier (core, scope))
 
 let with_handlers stages thunk = perform (With_handlers (stages, thunk))
 
+let default_handler_stack thunk =
+  with_handlers
+    [
+      Sync_op_async_map;
+      On_chip_memory_map;
+      SIMD_T_map;
+      CV_core_map;
+      CV_before_map;
+    ]
+    thunk
+
+let source_to_simd_stack thunk =
+  with_handlers [ SIMD_T_map; CV_core_map; CV_before_map ] thunk
+
 let with_sync_ops thunk = with_handlers [ Sync_op_async_map ] thunk
 
 let with_on_chip_memory thunk =

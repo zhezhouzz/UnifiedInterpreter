@@ -368,20 +368,21 @@ and run_user_scope state thunk =
           | _ -> None);
     }
 
-let run_case scope (case : case) =
+let run_case (case : case) =
   let state = make_state case.inputs case.output case.output_dims in
-  add_trace state (Printf.sprintf "run %s over grid=%d" (pp_scope scope) case.grid);
+  add_trace state
+    (Printf.sprintf "run in-program handler scopes over grid=%d" case.grid);
   for pid = 0 to case.grid - 1 do
     state.current_pid <- pid;
     add_trace state (Printf.sprintf "launch logical program/core %d" pid);
-    run_with_user_scope state scope case.program;
+    run_user_scope state case.program;
     add_trace state (Printf.sprintf "join logical program/core %d" pid)
   done;
   state
 
-let run_program ~root_handlers thunk =
+let run_program thunk =
   let state = make_state [] "out" [ 0 ] in
-  run_with_user_scope state root_handlers thunk;
+  run_user_scope state thunk;
   state
 
 let same_tensor left left_name right right_name =

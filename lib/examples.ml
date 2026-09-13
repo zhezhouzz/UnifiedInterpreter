@@ -6,103 +6,115 @@ open Effects
 let triton_source title url note = { title; url; note }
 
 let vector_add_program ~x ~y ~out ~n_elements ~block_size () =
-  trace "enter vector_add";
-  let pid = program_id 0 in
-  let offsets =
-    iadd
-      (ibroadcast block_size (pid * block_size))
-      (arange 0 block_size)
-  in
-  let mask = ilt offsets (ibroadcast block_size n_elements) in
-  let x_vals = load ~ptr:x ~offsets ~mask ~other:0.0 () in
-  let y_vals = load ~ptr:y ~offsets ~mask ~other:0.0 () in
-  let sum = fadd x_vals y_vals in
-  store ~ptr:out ~offsets ~values:sum ~mask ();
-  trace "leave vector_add"
-
-let vector_add_user_scoped_program ~x ~y ~out ~n_elements ~block_size () =
-  trace "enter vector_add_user_scoped";
-  let pid = program_id 0 in
-  let offsets =
-    iadd
-      (ibroadcast block_size (pid * block_size))
-      (arange 0 block_size)
-  in
-  let mask = ilt offsets (ibroadcast block_size n_elements) in
-  with_on_chip_memory (fun () ->
+  default_handler_stack (fun () ->
+      trace "enter vector_add";
+      let pid = program_id 0 in
+      let offsets =
+        iadd
+          (ibroadcast block_size (pid * block_size))
+          (arange 0 block_size)
+      in
+      let mask = ilt offsets (ibroadcast block_size n_elements) in
       let x_vals = load ~ptr:x ~offsets ~mask ~other:0.0 () in
       let y_vals = load ~ptr:y ~offsets ~mask ~other:0.0 () in
       let sum = fadd x_vals y_vals in
-      with_sync_ops (fun () ->
-          alloc_local pid "manual_h5_midpoint" 1;
-          barrier pid "after_vector_fadd";
-          wait pid "after_vector_fadd");
-      store ~ptr:out ~offsets ~values:sum ~mask ());
-  trace "leave vector_add_user_scoped"
+      store ~ptr:out ~offsets ~values:sum ~mask ();
+      trace "leave vector_add")
+
+let vector_add_user_scoped_program ~x ~y ~out ~n_elements ~block_size () =
+  source_to_simd_stack (fun () ->
+      trace "enter vector_add_user_scoped";
+      let pid = program_id 0 in
+      let offsets =
+        iadd
+          (ibroadcast block_size (pid * block_size))
+          (arange 0 block_size)
+      in
+      let mask = ilt offsets (ibroadcast block_size n_elements) in
+      with_on_chip_memory (fun () ->
+          let x_vals = load ~ptr:x ~offsets ~mask ~other:0.0 () in
+          let y_vals = load ~ptr:y ~offsets ~mask ~other:0.0 () in
+          let sum = fadd x_vals y_vals in
+          with_sync_ops (fun () ->
+              alloc_local pid "manual_h5_midpoint" 1;
+              barrier pid "after_vector_fadd";
+              wait pid "after_vector_fadd");
+          store ~ptr:out ~offsets ~values:sum ~mask ());
+      trace "leave vector_add_user_scoped")
 
 let fused_softmax_program ~x ~out ~n_rows:_ ~n_cols ~block_size () =
-  trace "enter fused_softmax";
-  let row_idx = program_id 0 in
-  let col_offsets = arange 0 block_size in
-  let row_base = ibroadcast block_size (row_idx * n_cols) in
-  let linear_offsets = iadd row_base col_offsets in
-  let mask = ilt col_offsets (ibroadcast block_size n_cols) in
-  let row =
-    load ~ptr:x ~offsets:linear_offsets ~mask ~other:neg_infinity ()
-  in
-  let row_max = reduce_max row ~mask () in
-  let row_minus_max = fsub row (fbroadcast block_size row_max) in
-  let numerator = exp row_minus_max in
-  let denominator = reduce_sum numerator ~mask () in
-  let softmax_output = fdiv numerator (fbroadcast block_size denominator) in
-  store ~ptr:out ~offsets:linear_offsets ~values:softmax_output ~mask ();
-  trace "leave fused_softmax"
+  default_handler_stack (fun () ->
+      trace "enter fused_softmax";
+      let row_idx = program_id 0 in
+      let col_offsets = arange 0 block_size in
+      let row_base = ibroadcast block_size (row_idx * n_cols) in
+      let linear_offsets = iadd row_base col_offsets in
+      let mask = ilt col_offsets (ibroadcast block_size n_cols) in
+      let row =
+        load ~ptr:x ~offsets:linear_offsets ~mask ~other:neg_infinity ()
+      in
+      let row_max = reduce_max row ~mask () in
+      let row_minus_max = fsub row (fbroadcast block_size row_max) in
+      let numerator = exp row_minus_max in
+      let denominator = reduce_sum numerator ~mask () in
+      let softmax_output = fdiv numerator (fbroadcast block_size denominator) in
+      store ~ptr:out ~offsets:linear_offsets ~values:softmax_output ~mask ();
+      trace "leave fused_softmax")
 
 let vector_add_source_text =
   {|
-@triton.jit
-def add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
-    pid = tl.program_id(axis=0)
-    offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-    mask = offsets < n_elements
-    x = tl.load(x_ptr + offsets, mask=mask)
-    y = tl.load(y_ptr + offsets, mask=mask)
-    output = x + y
-    tl.store(output_ptr + offsets, output, mask=mask)
+default_handler_stack (fun () ->
+  let pid = program_id 0 in
+  let offsets =
+    iadd
+      (ibroadcast BLOCK_SIZE (pid * BLOCK_SIZE))
+      (arange 0 BLOCK_SIZE)
+  in
+  let mask = ilt offsets (ibroadcast BLOCK_SIZE n_elements) in
+  let x = load ~ptr:x_ptr ~offsets ~mask ~other:0.0 () in
+  let y = load ~ptr:y_ptr ~offsets ~mask ~other:0.0 () in
+  let output = fadd x y in
+  store ~ptr:output_ptr ~offsets ~values:output ~mask ())
 |}
 
 let vector_add_user_scoped_source_text =
   {|
 (* Same Triton-like vector-add body, but the user explicitly chooses
-   handler scopes for one region. The root only provides H1/H2/H3. *)
-let pid = program_id 0 in
-let offsets = pid * BLOCK_SIZE + arange 0 BLOCK_SIZE in
-let mask = offsets < n_elements in
-with_handlers [H5_sync_op_async_map; H4_on_chip_memory_map] (fun () ->
-  let x = load x_ptr offsets mask in
-  let y = load y_ptr offsets mask in
-  let output = x + y in
-  with_handlers [H5_sync_op_async_map] (fun () ->
-    alloc_local "manual_h5_midpoint";
-    barrier "after_vector_fadd";
-    wait "after_vector_fadd");
-  store output_ptr offsets output mask)
+   handler scopes as part of the program term. *)
+source_to_simd_stack (fun () ->
+  let pid = program_id 0 in
+  let offsets = pid * BLOCK_SIZE + arange 0 BLOCK_SIZE in
+  let mask = offsets < n_elements in
+  with_on_chip_memory (fun () ->
+    let x = load x_ptr offsets mask in
+    let y = load y_ptr offsets mask in
+    let output = x + y in
+    with_sync_ops (fun () ->
+      alloc_local "manual_h5_midpoint";
+      barrier "after_vector_fadd";
+      wait "after_vector_fadd");
+    store output_ptr offsets output mask))
 |}
 
 let fused_softmax_source_text =
   {|
-@triton.jit
-def softmax_kernel(input_ptr, output_ptr, n_rows, n_cols, BLOCK_SIZE: tl.constexpr):
-    row_idx = tl.program_id(0)
-    col_offsets = tl.arange(0, BLOCK_SIZE)
-    input_offsets = row_idx * n_cols + col_offsets
-    mask = col_offsets < n_cols
-    row = tl.load(input_ptr + input_offsets, mask=mask, other=-float("inf"))
-    row_minus_max = row - tl.max(row, axis=0)
-    numerator = tl.exp(row_minus_max)
-    denominator = tl.sum(numerator, axis=0)
-    softmax_output = numerator / denominator
-    tl.store(output_ptr + input_offsets, softmax_output, mask=mask)
+default_handler_stack (fun () ->
+  let row_idx = program_id 0 in
+  let col_offsets = arange 0 BLOCK_SIZE in
+  let input_offsets =
+    iadd (ibroadcast BLOCK_SIZE (row_idx * n_cols)) col_offsets
+  in
+  let mask = ilt col_offsets (ibroadcast BLOCK_SIZE n_cols) in
+  let row =
+    load ~ptr:input_ptr ~offsets:input_offsets ~mask ~other:neg_infinity ()
+  in
+  let row_minus_max =
+    fsub row (fbroadcast BLOCK_SIZE (reduce_max row ~mask ()))
+  in
+  let numerator = exp row_minus_max in
+  let denominator = reduce_sum numerator ~mask () in
+  let softmax_output = fdiv numerator (fbroadcast BLOCK_SIZE denominator) in
+  store ~ptr:output_ptr ~offsets:input_offsets ~values:softmax_output ~mask ())
 |}
 
 let cases () =
@@ -120,7 +132,7 @@ let cases () =
           "https://triton-ascend.readthedocs.io/zh-cn/latest/examples/01_vector_add_example.html"
           "Uses program_id, arange offsets, masked tl.load, and masked tl.store.";
       source_text = vector_add_source_text;
-      source_language = "python";
+      source_language = "ocaml";
       grid = ceil_div vector_n vector_block;
       inputs =
         [
@@ -162,7 +174,7 @@ let cases () =
           "https://triton-ascend.readthedocs.io/zh-cn/latest/examples/02_fused_softmax_example.html"
           "Uses one program per row, power-of-two block padding, max/exp/sum reductions.";
       source_text = fused_softmax_source_text;
-      source_language = "python";
+      source_language = "ocaml";
       grid = softmax_rows;
       inputs =
         [
@@ -180,26 +192,4 @@ let cases () =
         fused_softmax_program ~x:"x" ~out:"out" ~n_rows:softmax_rows
           ~n_cols:softmax_cols ~block_size:softmax_block;
     };
-  ]
-
-let program_input ~input_id ~input_title ~root_handlers case =
-  { input_id; input_title; case; root_handlers }
-
-let find_case id cases = List.find (fun case -> case.id = id) cases
-
-let program_inputs () =
-  let cases = cases () in
-  let vector_add = find_case "vector-add" cases in
-  let vector_add_user_scoped = find_case "vector-add-user-scoped" cases in
-  let fused_softmax = find_case "fused-softmax" cases in
-  [
-    program_input ~input_id:"vector-add-full-root"
-      ~input_title:"Vector Add, Full Root Stack"
-      ~root_handlers:default_handler_stack vector_add;
-    program_input ~input_id:"vector-add-user-root"
-      ~input_title:"Vector Add, User-Scoped Memory/Sync"
-      ~root_handlers:source_to_simd_stack vector_add_user_scoped;
-    program_input ~input_id:"fused-softmax-full-root"
-      ~input_title:"Fused Softmax, Full Root Stack"
-      ~root_handlers:default_handler_stack fused_softmax;
   ]

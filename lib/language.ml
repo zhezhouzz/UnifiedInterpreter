@@ -41,17 +41,6 @@ let pp_handler_stack stages =
   in
   go stages
 
-let default_handler_stack =
-  [
-    Sync_op_async_map;
-    On_chip_memory_map;
-    SIMD_T_map;
-    CV_core_map;
-    CV_before_map;
-  ]
-
-let source_to_simd_stack = [ SIMD_T_map; CV_core_map; CV_before_map ]
-
 type program = unit -> unit
 
 type case = {
@@ -65,13 +54,6 @@ type case = {
   output : string;
   output_dims : int list;
   program : program;
-}
-
-type program_input = {
-  input_id : string;
-  input_title : string;
-  case : case;
-  root_handlers : handler_stage list;
 }
 
 let ceil_div x y = (x + y - 1) / y

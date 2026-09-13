@@ -17,22 +17,25 @@ propagates outward to `H2`, `H3`, `H4`, or `H5`. This mirrors the five stages
 in the Huawei slide and is the extensibility story: users can explicitly
 control handler scope and mix levels in one execution.
 
-The root handler stack is part of the user's program input, not a hidden global
-choice and not a property baked into the program definition. A `case` only
-defines the program and data; a `program_input` pairs that case with the root
-handlers chosen for this run. The same case can run with the full stack:
+Handler stacks are ordinary program combinators, not hidden interpreter
+configuration. The program itself chooses the surrounding handler stack. A
+program can run with the full stack by wrapping its body:
 
 ```ocaml
-default_handler_stack
+default_handler_stack (fun () ->
+  trace "enter vector_add";
+  ...)
 ```
 
 or with only the higher layers:
 
 ```ocaml
-source_to_simd_stack
+source_to_simd_stack (fun () ->
+  trace "enter vector_add_user_scoped";
+  ...)
 ```
 
-The program itself can then introduce a lower-level region:
+That same program can then introduce a lower-level region:
 
 ```ocaml
 with_on_chip_memory (fun () ->
@@ -60,22 +63,20 @@ user-scoped variant:
   sync handler scopes chosen inside the program.
 - `fused-softmax`: based on the Triton-Ascend Fused Softmax example.
 
-`Examples.program_inputs ()` provides three sample user inputs for the CLI demo,
-but those are examples of how to call the interpreter. Users can construct their
-own input directly:
+The handler choice is visible in the example source. For instance,
+`vector_add_user_scoped_program` starts with:
 
 ```ocaml
-let input =
-  Examples.program_input
-    ~input_id:"my-run"
-    ~input_title:"My Custom Handler Run"
-    ~root_handlers:[SIMD_T_map; CV_core_map; CV_before_map]
-    my_case
-in
-Report.execute input
+let vector_add_user_scoped_program ... () =
+  source_to_simd_stack (fun () ->
+    ...
+    with_on_chip_memory (fun () ->
+      ...
+      with_sync_ops (fun () -> ...)
+      ...))
 ```
 
-Both are written as OCaml shallow embeddings using ordinary `let` plus
+All are written as OCaml shallow embeddings using ordinary `let` plus
 effectful operations such as:
 
 - `program_id`
@@ -89,15 +90,16 @@ effectful operations such as:
 For example, vector add is not a single primitive command. It is a program:
 
 ```ocaml
-let pid = program_id 0 in
-let offsets =
-  iadd (ibroadcast block_size (pid * block_size)) (arange 0 block_size)
-in
-let mask = ilt offsets (ibroadcast block_size n_elements) in
-let x_vals = load ~ptr:x ~offsets ~mask ~other:0.0 () in
-let y_vals = load ~ptr:y ~offsets ~mask ~other:0.0 () in
-let sum = fadd x_vals y_vals in
-store ~ptr:out ~offsets ~values:sum ~mask ()
+default_handler_stack (fun () ->
+  let pid = program_id 0 in
+  let offsets =
+    iadd (ibroadcast block_size (pid * block_size)) (arange 0 block_size)
+  in
+  let mask = ilt offsets (ibroadcast block_size n_elements) in
+  let x_vals = load ~ptr:x ~offsets ~mask ~other:0.0 () in
+  let y_vals = load ~ptr:y ~offsets ~mask ~other:0.0 () in
+  let sum = fadd x_vals y_vals in
+  store ~ptr:out ~offsets ~values:sum ~mask ())
 ```
 
 ## Handlers
@@ -118,8 +120,7 @@ not by `H4`.
 
 ## Code Layout
 
-- `lib/language.ml`: shared language types, handler-stage names, and
-  `program_input`.
+- `lib/language.ml`: shared language types and handler-stage names.
 - `lib/effects.ml`: unified effect declarations and shallow-embedding helpers.
 - `lib/interpreter.ml`: runtime state and H1-H5 handlers.
 - `lib/examples.ml`: the sourced Triton-like programs and user-scoped variant.
