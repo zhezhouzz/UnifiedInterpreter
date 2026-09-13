@@ -1,51 +1,61 @@
 # UnifiedInterpreter
 
-This is a small OCaml 5 prototype for explaining why an AscendNPU IR
-interpreter should support multiple IR levels instead of only one final IR.
+UnifiedInterpreter is an OCaml 5 prototype for comparing a mixed-level,
+effect-based AscendNPU-style interpreter with the four routes already explored
+in the Huawei problem statement:
 
-The example is a tiny CV-style tensor command:
+- `mlir-runner` / `mlir-cpu-runner`
+- `xdsl-run`
+- `EmitC`
+- Triton interpreter / Triton-Ascend
 
-```text
-C[M,N] = relu(A[M,K] @ B[K,N] + Bias[N])
-```
+The current goal is not automatic derivation from Reynolds-style semantic
+definitions yet. The current goal is to make the cross-layer effects executable:
+program/core mapping, SIMD/T vector behavior, GM/UB memory movement, async copy,
+wait/barrier, masks, reductions, and precision points.
 
-For a real convolution, `M` can stand for `batch * height * width`, `N` for
-output channels, and `K` for input channels. This keeps the example compact
-while still exposing the compilation issues that matter: CV-core mapping,
-SIMD/T vectorization, on-chip memory, DMA, waits, barriers, and precision
-points.
+## Cases
 
-## IR levels
+The demo uses five sourced examples, adapted into a compact internal IR:
 
-- `L0 Top`: one tensor command.
-- `L1 Core`: tile the output matrix and launch one CV-core task per tile.
-- `L2 Vector`: lower each tile to vector FMA and vector max blocks.
-- `L3 MemAsync`: make global memory, on-chip buffers, async copies, waits,
-  barriers, and stores explicit.
+- `vector-add`: Triton-Ascend Vector Addition.
+- `fused-softmax`: Triton-Ascend Fused Softmax.
+- `layer-norm`: Triton-Ascend Layer Normalization.
+- `matmul-bias`: Triton-Ascend Matrix Multiplication, `output = x @ y + z`.
+- `toy-transpose-mul`: MLIR Toy Tutorial Chapter 5 partial lowering example.
 
-All evaluators are written against the same OCaml 5 algebraic effects:
+Each case reports:
 
-- `Read_tensor` / `Write_tensor`
-- `Launch_core`
-- `Vector_fma` / `Vector_max`
-- `Alloc_local` / `Read_local` / `Write_local`
-- `Async_copy_in` / `Async_copy_out`
-- `Wait` / `Barrier`
-- `Trace`
+- source URL and source note
+- top IR
+- L1 core/program mapping
+- L2 vector mapping
+- L3 memory/async mapping
+- internal numerical agreement
+- best-effort status for the four external routes
+- extra effect trace explaining what our interpreter can expose when a route is
+  unsupported or too low-level
 
-The point is not to derive the interpreter automatically yet. The point is to
-first make the cross-layer effects explicit and executable.
+`layer-norm` intentionally uses a `bf16ish` policy, so L2/L3 may differ from the
+top-level real-number reference within a small tolerance. That difference is the
+precision diagnostic signal, not a failure.
 
 ## Run
 
 Use an OCaml 5 switch:
 
 ```sh
-opam exec --switch=5.2.0 -- dune exec unified-interpreter
+opam exec --switch=5.2.0 -- dune exec ./bin/main.exe
 ```
 
-Run the agreement test:
+Run the agreement and trace-marker tests:
 
 ```sh
 opam exec --switch=5.2.0 -- dune test
+```
+
+Optional external Python tools can be installed into an isolated local venv:
+
+```sh
+./scripts/bootstrap_external_tools.sh
 ```
