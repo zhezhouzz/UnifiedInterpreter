@@ -1,187 +1,118 @@
-(* Sourced examples and test-case metadata. No interpreter logic lives here. *)
+(* Two sourced Triton-like programs, shallow-embedded in OCaml. *)
 
 open Language
+open Effects
 
-type source_kind = TritonAscend | MlirToy
+let triton_source title url note = { title; url; note }
 
-type source = {
-  kind : source_kind;
-  title : string;
-  url : string;
-  note : string;
-}
+let vector_add_program ~x ~y ~out ~n_elements ~block_size () =
+  let pid = program_id 0 in
+  let offsets =
+    iadd
+      (ibroadcast block_size (pid * block_size))
+      (arange 0 block_size)
+  in
+  let mask = ilt offsets (ibroadcast block_size n_elements) in
+  let x_vals = load ~ptr:x ~offsets ~mask ~other:0.0 () in
+  let y_vals = load ~ptr:y ~offsets ~mask ~other:0.0 () in
+  let sum = fadd x_vals y_vals in
+  store ~ptr:out ~offsets ~values:sum ~mask ()
 
-type case = {
-  id : string;
-  title : string;
-  source : source;
-  command : top_command;
-  inputs : (string * Tensor.t) list;
-  output : string;
-  route_expectations : (string * string) list;
-}
+let fused_softmax_program ~x ~out ~n_rows:_ ~n_cols ~block_size () =
+  let row_idx = program_id 0 in
+  let col_offsets = arange 0 block_size in
+  let row_base = ibroadcast block_size (row_idx * n_cols) in
+  let linear_offsets = iadd row_base col_offsets in
+  let mask = ilt col_offsets (ibroadcast block_size n_cols) in
+  let row =
+    load ~ptr:x ~offsets:linear_offsets ~mask ~other:neg_infinity ()
+  in
+  let row_max = reduce_max row ~mask () in
+  let row_minus_max = fsub row (fbroadcast block_size row_max) in
+  let numerator = exp row_minus_max in
+  let denominator = reduce_sum numerator ~mask () in
+  let softmax_output = fdiv numerator (fbroadcast block_size denominator) in
+  store ~ptr:out ~offsets:linear_offsets ~values:softmax_output ~mask ()
 
-  let triton_source title url note = { kind = TritonAscend; title; url; note }
+let vector_add_source_text =
+  {|
+@triton.jit
+def add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+    pid = tl.program_id(axis=0)
+    offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < n_elements
+    x = tl.load(x_ptr + offsets, mask=mask)
+    y = tl.load(y_ptr + offsets, mask=mask)
+    output = x + y
+    tl.store(output_ptr + offsets, output, mask=mask)
+|}
 
-  let cases () =
-    [
-      {
-        id = "vector-add";
-        title = "Vector Add";
-        source =
-          triton_source "Triton-Ascend Vector Addition"
-            "https://triton-ascend.readthedocs.io/zh-cn/latest/examples/01_vector_add_example.html"
-            "Uses program_id, arange offsets, masked tl.load, and masked tl.store.";
-        command = Vector_add { x = "x"; y = "y"; out = "out"; n = 10; block = 4 };
-        inputs =
-          [
-            ("x", Tensor.of_array1 [| 0.; 1.; 2.; 3.; 4.; 5.; 6.; 7.; 8.; 9. |]);
-            ("y", Tensor.of_array1 [| 9.; 8.; 7.; 6.; 5.; 4.; 3.; 2.; 1.; 0. |]);
-          ];
-        output = "out";
-        route_expectations =
-          [
-            ("triton", "Native source route; CPU interpreter if Triton is installed.");
-            ("mlir", "Equivalent tensor/memref subset can be checked, but not Triton SPMD syntax.");
-            ("xdsl", "Equivalent arith/memref loop subset can be interpreted if xDSL is installed.");
-            ("emitc", "Scalarized C route is possible for this subset.");
-          ];
-      };
-      {
-        id = "fused-softmax";
-        title = "Fused Softmax";
-        source =
-          triton_source "Triton-Ascend Fused Softmax"
-            "https://triton-ascend.readthedocs.io/zh-cn/latest/examples/02_fused_softmax_example.html"
-            "Uses one program per row, power-of-two block padding, max/exp/sum reductions.";
-        command = Fused_softmax { x = "x"; out = "out"; rows = 3; cols = 5; block = 8 };
-        inputs =
-          [
-            ( "x",
-              Tensor.of_array2
-                [|
-                  [| 1.; 2.; 3.; 4.; 5. |];
-                  [| 1.; 1.; 2.; 3.; 5. |];
-                  [| -2.; -1.; 0.; 1.; 2. |];
-                |] );
-          ];
-        output = "out";
-        route_expectations =
-          [
-            ("triton", "Native route; exp/reduction supported except backend-specific gaps.");
-            ("mlir", "Equivalent math/arith/memref route is possible, not Triton padding syntax.");
-            ("xdsl", "Depends on math.exp and vector/reduction support.");
-            ("emitc", "Scalarized C route is possible.");
-          ];
-      };
-      {
-        id = "layer-norm";
-        title = "LayerNorm";
-        source =
-          triton_source "Triton-Ascend Layer Normalization"
-            "https://triton-ascend.readthedocs.io/zh-cn/latest/examples/03_layer_norm_example.html"
-            "Uses mean/variance reductions, sqrt, affine scale/bias, and dtype-sensitive tests.";
-        command =
-          Layer_norm
-            {
-              x = "x";
-              weight = "weight";
-              bias = "bias";
-              out = "out";
-              rows = 2;
-              cols = 4;
-              eps = 1e-5;
-              dtype = BF16ish;
-            };
-        inputs =
-          [
-            ("x", Tensor.of_array2 [| [| 1.; 2.; 3.; 4. |]; [| 2.; 4.; 6.; 8. |] |]);
-            ("weight", Tensor.of_array1 [| 1.; 1.5; 0.5; 2. |]);
-            ("bias", Tensor.of_array1 [| 0.; 0.1; -0.2; 0.3 |]);
-          ];
-        output = "out";
-        route_expectations =
-          [
-            ("triton", "Native route, but Triton interpreter documents bfloat16 limitations.");
-            ("mlir", "Equivalent math/arith/memref route is possible after scalarization.");
-            ("xdsl", "Depends on math.sqrt and reduction support.");
-            ("emitc", "Scalarized C route is possible.");
-          ];
-      };
-      {
-        id = "matmul-bias";
-        title = "MatMul + Bias";
-        source =
-          triton_source "Triton-Ascend Matrix Multiplication"
-            "https://triton-ascend.readthedocs.io/zh-cn/latest/examples/05_matrix_multiplication_example.html"
-            "Computes output = x @ y + z using tl.dot and tiled/broadcasted indices.";
-        command =
-          Matmul_bias
-            {
-              a = "a";
-              b = "b";
-              z = "z";
-              out = "out";
-              m = 4;
-              n = 4;
-              k = 4;
-              block_m = 2;
-              block_n = 2;
-            };
-        inputs =
-          [
-            ( "a",
-              Tensor.of_array2
-                [|
-                  [| 1.; 2.; 3.; 4. |];
-                  [| 2.; 1.; 0.; 1. |];
-                  [| 0.; 1.; 2.; 3. |];
-                  [| 3.; 1.; 1.; 0. |];
-                |] );
-            ( "b",
-              Tensor.of_array2
-                [|
-                  [| 1.; 0.; 2.; 1. |];
-                  [| 0.; 1.; 1.; 0. |];
-                  [| 2.; 1.; 0.; 1. |];
-                  [| 1.; 2.; 1.; 0. |];
-                |] );
-            ("z", Tensor.of_array1 [| 0.5; -1.; 1.5; 0. |]);
-          ];
-        output = "out";
-        route_expectations =
-          [
-            ("triton", "Native tl.dot route if Triton/Triton-Ascend is installed.");
-            ("mlir", "Scalar/vector lowerable subset can run on CPU.");
-            ("xdsl", "Equivalent linalg/memref/vector shape is a natural xDSL target.");
-            ("emitc", "Scalarized C route is possible.");
-          ];
-      };
-      {
-        id = "toy-transpose-mul";
-        title = "Toy Transpose + Mul";
-        source =
-          {
-            kind = MlirToy;
-            title = "MLIR Toy Tutorial Chapter 5";
-            url = "https://mlir.llvm.org/docs/Tutorials/Toy/Ch-5/";
-            note =
-              "Shows partial lowering of toy.transpose and toy.mul into affine/arith/func/memref.";
-          };
-        command =
-          Toy_transpose_mul { a = "a"; b = "b"; out = "out"; rows = 2; cols = 3 };
-        inputs =
-          [
-            ("a", Tensor.of_array2 [| [| 1.; 2.; 3. |]; [| 4.; 5.; 6. |] |]);
-            ("b", Tensor.of_array2 [| [| 6.; 5.; 4. |]; [| 3.; 2.; 1. |] |]);
-          ];
-        output = "out";
-        route_expectations =
-          [
-            ("triton", "Not a Triton source; only equivalent tensor code would apply.");
-            ("mlir", "Native conceptual route for partial lowering.");
-            ("xdsl", "Equivalent affine/memref subset is feasible.");
-            ("emitc", "EmitC route is feasible after lowering.");
-          ];
-      };
-    ]
+let fused_softmax_source_text =
+  {|
+@triton.jit
+def softmax_kernel(input_ptr, output_ptr, n_rows, n_cols, BLOCK_SIZE: tl.constexpr):
+    row_idx = tl.program_id(0)
+    col_offsets = tl.arange(0, BLOCK_SIZE)
+    input_offsets = row_idx * n_cols + col_offsets
+    mask = col_offsets < n_cols
+    row = tl.load(input_ptr + input_offsets, mask=mask, other=-float("inf"))
+    row_minus_max = row - tl.max(row, axis=0)
+    numerator = tl.exp(row_minus_max)
+    denominator = tl.sum(numerator, axis=0)
+    softmax_output = numerator / denominator
+    tl.store(output_ptr + input_offsets, softmax_output, mask=mask)
+|}
+
+let cases () =
+  let vector_n = 10 in
+  let vector_block = 4 in
+  let softmax_rows = 3 in
+  let softmax_cols = 5 in
+  let softmax_block = 8 in
+  [
+    {
+      id = "vector-add";
+      title = "Vector Add";
+      source =
+        triton_source "Triton-Ascend Vector Addition"
+          "https://triton-ascend.readthedocs.io/zh-cn/latest/examples/01_vector_add_example.html"
+          "Uses program_id, arange offsets, masked tl.load, and masked tl.store.";
+      source_text = vector_add_source_text;
+      grid = ceil_div vector_n vector_block;
+      inputs =
+        [
+          ("x", Tensor.of_array1 [| 0.; 1.; 2.; 3.; 4.; 5.; 6.; 7.; 8.; 9. |]);
+          ("y", Tensor.of_array1 [| 9.; 8.; 7.; 6.; 5.; 4.; 3.; 2.; 1.; 0. |]);
+        ];
+      output = "out";
+      output_dims = [ vector_n ];
+      program =
+        vector_add_program ~x:"x" ~y:"y" ~out:"out" ~n_elements:vector_n
+          ~block_size:vector_block;
+    };
+    {
+      id = "fused-softmax";
+      title = "Fused Softmax";
+      source =
+        triton_source "Triton-Ascend Fused Softmax"
+          "https://triton-ascend.readthedocs.io/zh-cn/latest/examples/02_fused_softmax_example.html"
+          "Uses one program per row, power-of-two block padding, max/exp/sum reductions.";
+      source_text = fused_softmax_source_text;
+      grid = softmax_rows;
+      inputs =
+        [
+          ( "x",
+            Tensor.of_array2
+              [|
+                [| 1.; 2.; 3.; 4.; 5. |];
+                [| 1.; 1.; 2.; 3.; 5. |];
+                [| -2.; -1.; 0.; 1.; 2. |];
+              |] );
+        ];
+      output = "out";
+      output_dims = [ softmax_rows; softmax_cols ];
+      program =
+        fused_softmax_program ~x:"x" ~out:"out" ~n_rows:softmax_rows
+          ~n_cols:softmax_cols ~block_size:softmax_block;
+    };
+  ]

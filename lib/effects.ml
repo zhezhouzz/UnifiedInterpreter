@@ -1,106 +1,101 @@
-(* Effect vocabulary: the observable actions an interpreter can handle. *)
+(* Unified effect vocabulary. Programs are shallow OCaml terms that perform
+   these operations; H1-H4 decide how each operation is executed or lowered. *)
 
 open Effect
+open Language
 
-type dtype = Language.dtype = F32 | F16ish | BF16ish
-type binary = Language.binary = Add | Mul
-type reduction = Language.reduction = Max | Sum
-type elementwise = Language.elementwise = Exp | Sqrt | Relu
+type load = {
+  ptr : string;
+  offsets : int array;
+  mask : bool array option;
+  other : float;
+}
 
-let pp_dtype = Language.pp_dtype
+type store = {
+  ptr : string;
+  offsets : int array;
+  values : float array;
+  mask : bool array option;
+}
 
-  type vector_binop = {
-    core : int option;
-    op : binary;
-    lhs : float array;
-    rhs : float array;
-    mask : bool array option;
-    dtype : dtype;
-  }
+type async_copy = {
+  core : int;
+  global : string;
+  local : string;
+  offsets : int array;
+  mask : bool array option;
+}
 
-  type vector_fma = {
-    core : int option;
-    acc : float array;
-    a : float array;
-    b : float array;
-    mask : bool array option;
-    dtype : dtype;
-  }
+type _ Effect.t += Trace : string -> unit Effect.t
+type _ Effect.t += Program_id : int -> int Effect.t
+type _ Effect.t += Arange : int * int -> int array Effect.t
+type _ Effect.t += Int_binop : int_binary * int array * int array -> int array Effect.t
+type _ Effect.t += Int_cmp : int_cmp * int array * int array -> bool array Effect.t
+type _ Effect.t += Load : load -> float array Effect.t
+type _ Effect.t += Store : store -> unit Effect.t
+type _ Effect.t += Float_binop : float_binary * float array * float array * dtype -> float array Effect.t
+type _ Effect.t += Float_map : elementwise * float array * dtype -> float array Effect.t
+type _ Effect.t += Reduce : reduction * float array * bool array option * dtype -> float Effect.t
+type _ Effect.t += Alloc_local : int * string * int -> unit Effect.t
+type _ Effect.t += Async_copy_in : async_copy -> unit Effect.t
+type _ Effect.t += Async_copy_out : async_copy -> unit Effect.t
+type _ Effect.t += Wait : int * string -> unit Effect.t
+type _ Effect.t += Barrier : int * string -> unit Effect.t
 
-  type vector_reduce = {
-    core : int option;
-    op : reduction;
-    values : float array;
-    mask : bool array option;
-    dtype : dtype;
-  }
+let trace msg = perform (Trace msg)
 
-  type vector_map = {
-    core : int option;
-    op : elementwise;
-    values : float array;
-    dtype : dtype;
-  }
+let program_id axis = perform (Program_id axis)
 
-  type copy_plan = {
-    core : int;
-    local : string;
-    global : string;
-    pairs : (int list * int list) list;
-  }
+let arange start stop = perform (Arange (start, stop))
 
-  type _ Effect.t += Trace : string -> unit Effect.t
-  type _ Effect.t += Read_tensor : string * int list -> float Effect.t
-  type _ Effect.t += Write_tensor : string * int list * float -> unit Effect.t
-  type _ Effect.t += Launch_core : int * (unit -> unit) -> unit Effect.t
-  type _ Effect.t += Masked_load : string * int list array * bool array * float -> float array Effect.t
-  type _ Effect.t += Masked_store : string * int list array * bool array * float array -> unit Effect.t
-  type _ Effect.t += Vector_binop : vector_binop -> float array Effect.t
-  type _ Effect.t += Vector_fma : vector_fma -> float array Effect.t
-  type _ Effect.t += Vector_reduce : vector_reduce -> float Effect.t
-  type _ Effect.t += Vector_map : vector_map -> float array Effect.t
-  type _ Effect.t += Cast : dtype * dtype * float -> float Effect.t
-  type _ Effect.t += Alloc_local : int * string * int list -> unit Effect.t
-  type _ Effect.t += Read_local : int * string * int list -> float Effect.t
-  type _ Effect.t += Write_local : int * string * int list * float -> unit Effect.t
-  type _ Effect.t += Async_copy_in : copy_plan -> unit Effect.t
-  type _ Effect.t += Async_copy_out : copy_plan -> unit Effect.t
-  type _ Effect.t += Wait : int * string -> unit Effect.t
-  type _ Effect.t += Barrier : int * string -> unit Effect.t
+let int_binop op lhs rhs = perform (Int_binop (op, lhs, rhs))
 
-  let trace msg = perform (Trace msg)
+let iadd lhs rhs = int_binop IAdd lhs rhs
 
-  let read_tensor name idx = perform (Read_tensor (name, idx))
+let imul lhs rhs = int_binop IMul lhs rhs
 
-  let write_tensor name idx value = perform (Write_tensor (name, idx, value))
+let int_cmp op lhs rhs = perform (Int_cmp (op, lhs, rhs))
 
-  let launch_core core body = perform (Launch_core (core, body))
+let ilt lhs rhs = int_cmp ILt lhs rhs
 
-  let masked_load name indices mask other = perform (Masked_load (name, indices, mask, other))
+let load ~ptr ~offsets ?mask ~other () =
+  perform (Load { ptr; offsets; mask; other })
 
-  let masked_store name indices mask values = perform (Masked_store (name, indices, mask, values))
+let store ~ptr ~offsets ~values ?mask () =
+  perform (Store { ptr; offsets; values; mask })
 
-  let vector_binop core op lhs rhs mask dtype =
-    perform (Vector_binop { core; op; lhs; rhs; mask; dtype })
+let float_binop ?(dtype = F32) op lhs rhs =
+  perform (Float_binop (op, lhs, rhs, dtype))
 
-  let vector_fma core acc a b mask dtype = perform (Vector_fma { core; acc; a; b; mask; dtype })
+let fadd ?dtype lhs rhs = float_binop ?dtype FAdd lhs rhs
 
-  let vector_reduce core op values mask dtype = perform (Vector_reduce { core; op; values; mask; dtype })
+let fsub ?dtype lhs rhs = float_binop ?dtype FSub lhs rhs
 
-  let vector_map core op values dtype = perform (Vector_map { core; op; values; dtype })
+let fmul ?dtype lhs rhs = float_binop ?dtype FMul lhs rhs
 
-  let cast from_dtype to_dtype value = perform (Cast (from_dtype, to_dtype, value))
+let fdiv ?dtype lhs rhs = float_binop ?dtype FDiv lhs rhs
 
-  let alloc_local core name dims = perform (Alloc_local (core, name, dims))
+let float_map ?(dtype = F32) op values = perform (Float_map (op, values, dtype))
 
-  let read_local core name idx = perform (Read_local (core, name, idx))
+let exp ?dtype values = float_map ?dtype Exp values
 
-  let write_local core name idx value = perform (Write_local (core, name, idx, value))
+let sqrt ?dtype values = float_map ?dtype Sqrt values
 
-  let async_copy_in plan = perform (Async_copy_in plan)
+let relu ?dtype values = float_map ?dtype Relu values
 
-  let async_copy_out plan = perform (Async_copy_out plan)
+let reduce ?(dtype = F32) op values ?mask () =
+  perform (Reduce (op, values, mask, dtype))
 
-  let wait core token = perform (Wait (core, token))
+let reduce_max ?dtype values ?mask () = reduce ?dtype Max values ?mask ()
 
-  let barrier core scope = perform (Barrier (core, scope))
+let reduce_sum ?dtype values ?mask () = reduce ?dtype Sum values ?mask ()
+
+let alloc_local core name cells = perform (Alloc_local (core, name, cells))
+
+let async_copy_in copy = perform (Async_copy_in copy)
+
+let async_copy_out copy = perform (Async_copy_out copy)
+
+let wait core token = perform (Wait (core, token))
+
+let barrier core scope = perform (Barrier (core, scope))

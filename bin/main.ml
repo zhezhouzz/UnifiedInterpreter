@@ -1,4 +1,3 @@
 let () =
   let open Unified_interpreter in
-  let example = Example.make () in
-  Demo.run example
+  Demo.run_all ()

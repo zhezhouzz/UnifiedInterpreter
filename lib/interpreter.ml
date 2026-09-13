@@ -1,63 +1,120 @@
-(* True interpreter: effect handlers plus evaluators for each IR level. *)
+(* Real interpreter: runtime state plus H1-H4 handlers over one unified language. *)
 
 open Effect.Deep
+open Language
+open Effects
 
-  open Effects
+type state = {
+  global : (string, Tensor.t) Hashtbl.t;
+  mutable trace : string list;
+  mutable current_pid : int;
+}
 
-  type state = {
-    global : (string, Tensor.t) Hashtbl.t;
-    local : (string, Tensor.t) Hashtbl.t;
-    mutable trace : string list;
-  }
+let make_state inputs output output_dims =
+  let global = Hashtbl.create 16 in
+  List.iter
+    (fun (name, tensor) -> Hashtbl.replace global name (Tensor.copy tensor))
+    inputs;
+  Hashtbl.replace global output (Tensor.zeros output_dims);
+  { global; trace = []; current_pid = 0 }
 
-  let local_key core name = Printf.sprintf "core%d:%s" core name
+let add_trace state msg = state.trace <- msg :: state.trace
 
-  let add_trace state msg = state.trace <- msg :: state.trace
+let trace state = List.rev state.trace
 
-  let set_global global name tensor = Hashtbl.replace global name (Tensor.copy tensor)
+let tensor state name =
+  match Hashtbl.find_opt state.global name with
+  | Some tensor -> Tensor.copy tensor
+  | None -> failwith ("unknown tensor: " ^ name)
 
-  let make_state inputs output output_dims =
-    let global = Hashtbl.create 16 in
-    List.iter (fun (name, tensor) -> set_global global name tensor) inputs;
-    Hashtbl.replace global output (Tensor.zeros output_dims);
-    { global; local = Hashtbl.create 64; trace = [] }
+let get_tensor state name =
+  match Hashtbl.find_opt state.global name with
+  | Some tensor -> tensor
+  | None -> failwith ("unknown tensor: " ^ name)
 
-  let get_global state name =
-    match Hashtbl.find_opt state.global name with Some t -> t | None -> failwith ("unknown global tensor: " ^ name)
+let active mask lane =
+  match mask with None -> true | Some mask -> mask.(lane)
 
-  let get_local state core name =
-    match Hashtbl.find_opt state.local (local_key core name) with
-    | Some t -> t
-    | None -> failwith ("unknown local tensor: " ^ local_key core name)
+let active_count mask =
+  match mask with
+  | None -> -1
+  | Some mask -> Array.fold_left (fun n bit -> if bit then n + 1 else n) 0 mask
 
-  let round dtype x =
-    match dtype with
-    | F32 -> x
-    | F16ish -> Float.round (x *. 1024.0) /. 1024.0
-    | BF16ish -> Float.round (x *. 128.0) /. 128.0
+let pp_active mask width =
+  match active_count mask with
+  | -1 -> Printf.sprintf "active=%d/%d" width width
+  | n -> Printf.sprintf "active=%d/%d" n width
 
-  let pp_core = function None -> "host" | Some core -> Printf.sprintf "core%d" core
+let round dtype x =
+  match dtype with
+  | F32 -> x
+  | F16ish -> Float.round (x *. 1024.0) /. 1024.0
+  | BF16ish -> Float.round (x *. 128.0) /. 128.0
 
-  let active_count mask = Array.fold_left (fun n b -> if b then n + 1 else n) 0 mask
+let map2 name lhs rhs f =
+  if Array.length lhs <> Array.length rhs then
+    invalid_arg (name ^ ": vector width mismatch");
+  Array.mapi (fun i x -> f x rhs.(i)) lhs
 
-  let valid_values values mask =
-    match mask with
-    | None -> Array.to_list values
-    | Some mask ->
-        Array.to_list (Array.mapi (fun i x -> (mask.(i), x)) values)
-        |> List.filter_map (fun (keep, x) -> if keep then Some x else None)
+let eval_int_binop op lhs rhs =
+  let f = match op with IAdd -> ( + ) | IMul -> ( * ) in
+  map2 (pp_int_binary op) lhs rhs f
 
-  let map_masked2 dtype op lhs rhs mask =
-    Array.mapi
-      (fun i x ->
-        let active = Option.fold ~none:true ~some:(fun m -> m.(i)) mask in
-        if active then round dtype (op x rhs.(i)) else x)
-      lhs
+let eval_int_cmp op lhs rhs =
+  let f = match op with ILt -> ( < ) in
+  map2 (pp_int_cmp op) lhs rhs f
 
-  let rec run state thunk =
+let eval_float_binop dtype op lhs rhs =
+  let f =
+    match op with
+    | FAdd -> ( +. )
+    | FSub -> ( -. )
+    | FMul -> ( *. )
+    | FDiv -> ( /. )
+  in
+  map2 (pp_float_binary op) lhs rhs (fun x y -> round dtype (f x y))
+
+let eval_float_map dtype op values =
+  let f =
+    match op with
+    | Exp -> Float.exp
+    | Sqrt -> Float.sqrt
+    | Relu -> fun x -> Float.max 0.0 x
+  in
+  Array.map (fun x -> round dtype (f x)) values
+
+let eval_reduce dtype op values mask =
+  let values =
+    Array.to_list (Array.mapi (fun i value -> (i, value)) values)
+    |> List.filter_map (fun (i, value) ->
+           if active mask i then Some value else None)
+  in
+  match (op, values) with
+  | Max, [] -> neg_infinity
+  | Max, x :: xs -> List.fold_left Float.max x xs
+  | Sum, xs -> List.fold_left (fun acc x -> round dtype (acc +. x)) 0.0 xs
+
+let eval_load state { ptr; offsets; mask; other } =
+  let tensor = get_tensor state ptr in
+  Array.mapi
+    (fun lane offset ->
+      if active mask lane then Tensor.get_linear tensor offset else other)
+    offsets
+
+let eval_store state { ptr; offsets; values; mask } =
+  let tensor = get_tensor state ptr in
+  Array.iteri
+    (fun lane offset ->
+      if active mask lane then Tensor.set_linear tensor offset values.(lane))
+    offsets
+
+module H1 = struct
+  let name = "H1/source"
+
+  let run state thunk =
     match_with thunk ()
       {
-        retc = (fun value -> value);
+        retc = Fun.id;
         exnc = raise;
         effc =
           (fun (type a) (eff : a Effect.t) ->
@@ -67,475 +124,321 @@ open Effect.Deep
                   (fun (k : (a, _) continuation) ->
                     add_trace state msg;
                     continue k ())
-            | Read_tensor (name, idx) ->
+            | Program_id axis ->
                 Some
                   (fun (k : (a, _) continuation) ->
-                    let value = Tensor.get (get_global state name) idx in
-                    add_trace state (Printf.sprintf "read %s%s = %.4f" name (Tensor.pp_index idx) value);
-                    continue k value)
-            | Write_tensor (name, idx, value) ->
-                Some
-                  (fun (k : (a, _) continuation) ->
-                    Tensor.set (get_global state name) idx value;
-                    add_trace state (Printf.sprintf "write %s%s = %.4f" name (Tensor.pp_index idx) value);
-                    continue k ())
-            | Launch_core (core, body) ->
-                Some
-                  (fun (k : (a, _) continuation) ->
-                    add_trace state (Printf.sprintf "launch program_id/core%d" core);
-                    run state body;
-                    add_trace state (Printf.sprintf "join core%d" core);
-                    continue k ())
-            | Masked_load (name, indices, mask, other) ->
-                Some
-                  (fun (k : (a, _) continuation) ->
-                    let tensor = get_global state name in
-                    let values = Array.mapi (fun i idx -> if mask.(i) then Tensor.get tensor idx else other) indices in
                     add_trace state
-                      (Printf.sprintf "masked.load %s lanes=%d active=%d" name (Array.length mask) (active_count mask));
+                      (Printf.sprintf "H1 program_id(axis=%d) -> %d" axis
+                         state.current_pid);
+                    continue k state.current_pid)
+            | Arange (start, stop) ->
+                Some
+                  (fun (k : (a, _) continuation) ->
+                    let values = Array.init (stop - start) (fun i -> start + i) in
+                    add_trace state
+                      (Printf.sprintf "H1 arange(%d,%d) width=%d" start stop
+                         (Array.length values));
                     continue k values)
-            | Masked_store (name, indices, mask, values) ->
+            | Int_binop (op, lhs, rhs) ->
                 Some
                   (fun (k : (a, _) continuation) ->
-                    let tensor = get_global state name in
-                    Array.iteri (fun i idx -> if mask.(i) then Tensor.set tensor idx values.(i)) indices;
                     add_trace state
-                      (Printf.sprintf "masked.store %s lanes=%d active=%d" name (Array.length mask) (active_count mask));
+                      (Printf.sprintf "H1 %s width=%d" (pp_int_binary op)
+                         (Array.length lhs));
+                    continue k (eval_int_binop op lhs rhs))
+            | Int_cmp (op, lhs, rhs) ->
+                Some
+                  (fun (k : (a, _) continuation) ->
+                    add_trace state
+                      (Printf.sprintf "H1 %s width=%d" (pp_int_cmp op)
+                         (Array.length lhs));
+                    continue k (eval_int_cmp op lhs rhs))
+            | Load load ->
+                Some
+                  (fun (k : (a, _) continuation) ->
+                    add_trace state
+                      (Printf.sprintf "H1 load %s width=%d %s" load.ptr
+                         (Array.length load.offsets)
+                         (pp_active load.mask (Array.length load.offsets)));
+                    continue k (eval_load state load))
+            | Store store ->
+                Some
+                  (fun (k : (a, _) continuation) ->
+                    add_trace state
+                      (Printf.sprintf "H1 store %s width=%d %s" store.ptr
+                         (Array.length store.offsets)
+                         (pp_active store.mask (Array.length store.offsets)));
+                    eval_store state store;
                     continue k ())
-            | Vector_binop { core; op; lhs; rhs; mask; dtype } ->
+            | Float_binop (op, lhs, rhs, dtype) ->
                 Some
                   (fun (k : (a, _) continuation) ->
-                    let f = match op with Add -> ( +. ) | Mul -> ( *. ) in
-                    let result = map_masked2 dtype f lhs rhs mask in
-                    let opname = match op with Add -> "vector.add" | Mul -> "vector.mul" in
                     add_trace state
-                      (Printf.sprintf "%s %s width=%d dtype=%s" (pp_core core) opname (Array.length lhs) (pp_dtype dtype));
-                    continue k result)
-            | Vector_fma { core; acc; a; b; mask; dtype } ->
+                      (Printf.sprintf "H1 %s width=%d dtype=%s"
+                         (pp_float_binary op) (Array.length lhs) (pp_dtype dtype));
+                    continue k (eval_float_binop dtype op lhs rhs))
+            | Float_map (op, values, dtype) ->
                 Some
                   (fun (k : (a, _) continuation) ->
-                    let result =
-                      Array.mapi
-                        (fun i x ->
-                          let active = Option.fold ~none:true ~some:(fun m -> m.(i)) mask in
-                          if active then round dtype (x +. (a.(i) *. b.(i))) else x)
-                        acc
-                    in
                     add_trace state
-                      (Printf.sprintf "%s vector.fma width=%d dtype=%s" (pp_core core) (Array.length acc) (pp_dtype dtype));
-                    continue k result)
-            | Vector_reduce { core; op; values; mask; dtype } ->
+                      (Printf.sprintf "H1 %s width=%d dtype=%s"
+                         (pp_elementwise op) (Array.length values)
+                         (pp_dtype dtype));
+                    continue k (eval_float_map dtype op values))
+            | Reduce (op, values, mask, dtype) ->
                 Some
                   (fun (k : (a, _) continuation) ->
-                    let valid = valid_values values mask in
-                    let value =
-                      match (op, valid) with
-                      | Max, [] -> neg_infinity
-                      | Max, x :: xs -> List.fold_left Float.max x xs
-                      | Sum, xs -> List.fold_left (fun acc x -> round dtype (acc +. x)) 0.0 xs
-                    in
-                    let opname = match op with Max -> "vector.reduce.max" | Sum -> "vector.reduce.sum" in
                     add_trace state
-                      (Printf.sprintf "%s %s lanes=%d active=%d dtype=%s" (pp_core core) opname (Array.length values)
-                         (List.length valid) (pp_dtype dtype));
-                    continue k value)
-            | Vector_map { core; op; values; dtype } ->
+                      (Printf.sprintf "H1 reduce.%s width=%d %s dtype=%s"
+                         (pp_reduction op) (Array.length values)
+                         (pp_active mask (Array.length values))
+                         (pp_dtype dtype));
+                    continue k (eval_reduce dtype op values mask))
+            | Alloc_local (core, name, cells) ->
                 Some
                   (fun (k : (a, _) continuation) ->
-                    let f = match op with Exp -> Float.exp | Sqrt -> Float.sqrt | Relu -> fun x -> Float.max 0.0 x in
-                    let result = Array.map (fun x -> round dtype (f x)) values in
-                    let opname = match op with Exp -> "vector.exp" | Sqrt -> "vector.sqrt" | Relu -> "vector.relu" in
                     add_trace state
-                      (Printf.sprintf "%s %s width=%d dtype=%s" (pp_core core) opname (Array.length values) (pp_dtype dtype));
-                    continue k result)
-            | Cast (from_dtype, to_dtype, value) ->
-                Some
-                  (fun (k : (a, _) continuation) ->
-                    let result = round to_dtype value in
-                    add_trace state
-                      (Printf.sprintf "cast %s -> %s %.6f -> %.6f" (pp_dtype from_dtype) (pp_dtype to_dtype) value result);
-                    continue k result)
-            | Alloc_local (core, name, dims) ->
-                Some
-                  (fun (k : (a, _) continuation) ->
-                    Hashtbl.replace state.local (local_key core name) (Tensor.zeros dims);
-                    add_trace state (Printf.sprintf "core%d alloc.local %s%s" core name (Tensor.pp_dims dims));
+                      (Printf.sprintf "H1 observe alloc.local core%d %s[%d]" core
+                         name cells);
                     continue k ())
-            | Read_local (core, name, idx) ->
+            | Async_copy_in copy ->
                 Some
                   (fun (k : (a, _) continuation) ->
-                    continue k (Tensor.get (get_local state core name) idx))
-            | Write_local (core, name, idx, value) ->
-                Some
-                  (fun (k : (a, _) continuation) ->
-                    Tensor.set (get_local state core name) idx value;
-                    continue k ())
-            | Async_copy_in { core; local; global; pairs } ->
-                Some
-                  (fun (k : (a, _) continuation) ->
-                    let src = get_global state global in
-                    let dst = get_local state core local in
-                    List.iter (fun (local_idx, global_idx) -> Tensor.set dst local_idx (Tensor.get src global_idx)) pairs;
                     add_trace state
-                      (Printf.sprintf "core%d async.copy %s -> %s (%d cells)" core global local (List.length pairs));
+                      (Printf.sprintf "H1 observe async.copy.in core%d %s -> %s"
+                         copy.core copy.global copy.local);
                     continue k ())
-            | Async_copy_out { core; local; global; pairs } ->
+            | Async_copy_out copy ->
                 Some
                   (fun (k : (a, _) continuation) ->
-                    let src = get_local state core local in
-                    let dst = get_global state global in
-                    List.iter (fun (local_idx, global_idx) -> Tensor.set dst global_idx (Tensor.get src local_idx)) pairs;
                     add_trace state
-                      (Printf.sprintf "core%d async.copy %s -> %s (%d cells)" core local global (List.length pairs));
+                      (Printf.sprintf "H1 observe async.copy.out core%d %s -> %s"
+                         copy.core copy.local copy.global);
                     continue k ())
             | Wait (core, token) ->
                 Some
                   (fun (k : (a, _) continuation) ->
-                    add_trace state (Printf.sprintf "core%d wait %s" core token);
+                    add_trace state
+                      (Printf.sprintf "H1 observe wait core%d %s" core token);
                     continue k ())
             | Barrier (core, scope) ->
                 Some
                   (fun (k : (a, _) continuation) ->
-                    add_trace state (Printf.sprintf "core%d barrier %s" core scope);
+                    add_trace state
+                      (Printf.sprintf "H1 observe barrier core%d %s" core scope);
                     continue k ())
             | _ -> None);
       }
-
-  let trace state = List.rev state.trace
-
-  let tensor state name = Tensor.copy (get_global state name)
-
-module Eval = struct
-  open Effects
-  open Language
-
-  let mask start width n = Array.init width (fun lane -> start + lane < n)
-
-  let vector_indices_1 start width = Array.init width (fun lane -> [ start + lane ])
-
-  let row_indices row width = Array.init width (fun lane -> [ row; lane ])
-
-  let top_output_dims = function
-    | Vector_add { n; _ } -> [ n ]
-    | Fused_softmax { rows; cols; _ } -> [ rows; cols ]
-    | Layer_norm { rows; cols; _ } -> [ rows; cols ]
-    | Matmul_bias { m; n; _ } -> [ m; n ]
-    | Toy_transpose_mul { rows; cols; _ } -> [ cols; rows ]
-
-  let run_case (case : Examples.case) eval_program program =
-    let state = make_state case.inputs case.output (top_output_dims case.command) in
-    run state (fun () -> eval_program program);
-    state
-
-  let eval_top = function
-    | Vector_add { x; y; out; n; _ } ->
-        trace "L0 top: Triton-style vector add command";
-        for i = 0 to n - 1 do
-          write_tensor out [ i ] (read_tensor x [ i ] +. read_tensor y [ i ])
-        done
-    | Fused_softmax { x; out; rows; cols; _ } ->
-        trace "L0 top: row-wise fused softmax";
-        for row = 0 to rows - 1 do
-          let max_v = ref neg_infinity in
-          for col = 0 to cols - 1 do
-            max_v := Float.max !max_v (read_tensor x [ row; col ])
-          done;
-          let denom = ref 0.0 in
-          for col = 0 to cols - 1 do
-            denom := !denom +. Float.exp (read_tensor x [ row; col ] -. !max_v)
-          done;
-          for col = 0 to cols - 1 do
-            write_tensor out [ row; col ]
-              (Float.exp (read_tensor x [ row; col ] -. !max_v) /. !denom)
-          done
-        done
-    | Layer_norm { x; weight; bias; out; rows; cols; eps; dtype } ->
-        trace "L0 top: layer normalization with dtype-sensitive accumulation";
-        for row = 0 to rows - 1 do
-          let sum = ref 0.0 in
-          for col = 0 to cols - 1 do
-            sum := !sum +. cast F32 dtype (read_tensor x [ row; col ])
-          done;
-          let mean = !sum /. float cols in
-          let var_sum = ref 0.0 in
-          for col = 0 to cols - 1 do
-            let centered = cast F32 dtype (read_tensor x [ row; col ] -. mean) in
-            var_sum := !var_sum +. (centered *. centered)
-          done;
-          let inv_std = 1.0 /. Float.sqrt ((!var_sum /. float cols) +. eps) in
-          for col = 0 to cols - 1 do
-            let normalized = (read_tensor x [ row; col ] -. mean) *. inv_std in
-            write_tensor out [ row; col ]
-              ((normalized *. read_tensor weight [ col ]) +. read_tensor bias [ col ])
-          done
-        done
-    | Matmul_bias { a; b; z; out; m; n; k; _ } ->
-        trace "L0 top: matmul plus bias";
-        for i = 0 to m - 1 do
-          for j = 0 to n - 1 do
-            let acc = ref (read_tensor z [ j ]) in
-            for kk = 0 to k - 1 do
-              acc := !acc +. (read_tensor a [ i; kk ] *. read_tensor b [ kk; j ])
-            done;
-            write_tensor out [ i; j ] !acc
-          done
-        done
-    | Toy_transpose_mul { a; b; out; rows; cols } ->
-        trace "L0 top: MLIR Toy transpose(a) * transpose(b)";
-        for i = 0 to rows - 1 do
-          for j = 0 to cols - 1 do
-            write_tensor out [ j; i ] (read_tensor a [ i; j ] *. read_tensor b [ i; j ])
-          done
-        done
-
-  let eval_core_task = function
-    | Core_vector_add { core; x; y; out; start; block; n } ->
-        launch_core core (fun () ->
-            for lane = 0 to block - 1 do
-              let i = start + lane in
-              if i < n then write_tensor out [ i ] (read_tensor x [ i ] +. read_tensor y [ i ])
-              else trace (Printf.sprintf "core%d skip masked lane offset=%d" core i)
-            done)
-    | Core_row_softmax { core; x; out; row; cols; block } ->
-        launch_core core (fun () ->
-            trace (Printf.sprintf "core%d row program with padded block=%d" core block);
-            let values = Array.init cols (fun col -> read_tensor x [ row; col ]) in
-            let max_v = Array.fold_left Float.max neg_infinity values in
-            let exps = Array.map (fun v -> Float.exp (v -. max_v)) values in
-            let denom = Array.fold_left ( +. ) 0.0 exps in
-            Array.iteri (fun col v -> write_tensor out [ row; col ] (v /. denom)) exps)
-    | Core_row_layer_norm { core; x; weight; bias; out; row; cols; eps; dtype } ->
-        launch_core core (fun () ->
-            trace (Printf.sprintf "core%d layernorm row program dtype=%s" core (pp_dtype dtype));
-            let values = Array.init cols (fun col -> read_tensor x [ row; col ]) in
-            let mean = Array.fold_left ( +. ) 0.0 values /. float cols in
-            let var =
-              Array.fold_left (fun acc v -> acc +. ((v -. mean) *. (v -. mean))) 0.0 values
-              /. float cols
-            in
-            let inv_std = 1.0 /. Float.sqrt (var +. eps) in
-            for col = 0 to cols - 1 do
-              write_tensor out [ row; col ]
-                (((values.(col) -. mean) *. inv_std *. read_tensor weight [ col ])
-                +. read_tensor bias [ col ])
-            done)
-    | Core_matmul_tile { core; a; b; z; out; row_lo; row_hi; col_lo; col_hi; k } ->
-        launch_core core (fun () ->
-            for i = row_lo to row_hi - 1 do
-              for j = col_lo to col_hi - 1 do
-                let acc = ref (read_tensor z [ j ]) in
-                for kk = 0 to k - 1 do
-                  acc := !acc +. (read_tensor a [ i; kk ] *. read_tensor b [ kk; j ])
-                done;
-                write_tensor out [ i; j ] !acc
-              done
-            done)
-    | Core_toy_transpose_mul { core; a; b; out; rows; cols } ->
-        launch_core core (fun () ->
-            trace "partial lowering keeps transpose/mul semantics but exposes memref loop order";
-            for i = 0 to rows - 1 do
-              for j = 0 to cols - 1 do
-                write_tensor out [ j; i ] (read_tensor a [ i; j ] *. read_tensor b [ i; j ])
-              done
-            done)
-
-  let eval_core program =
-    trace "L1 core/program mapping";
-    List.iter eval_core_task program
-
-  let eval_vector_task = function
-    | Vec_vector_add { core; x; y; out; start; width; n } ->
-        launch_core core (fun () ->
-            let mask = mask start width n in
-            let indices = vector_indices_1 start width in
-            let xs = masked_load x indices mask 0.0 in
-            let ys = masked_load y indices mask 0.0 in
-            let zs = vector_binop (Some core) Add xs ys (Some mask) F32 in
-            masked_store out indices mask zs)
-    | Vec_row_softmax { core; x; out; row; cols; width } ->
-        launch_core core (fun () ->
-            let mask = Array.init width (fun lane -> lane < cols) in
-            let indices = row_indices row width in
-            let vals = masked_load x indices mask neg_infinity in
-            let max_v = vector_reduce (Some core) Max vals (Some mask) F32 in
-            let shifted = Array.map (fun v -> v -. max_v) vals in
-            let exp_vals = vector_map (Some core) Exp shifted F32 in
-            let denom = vector_reduce (Some core) Sum exp_vals (Some mask) F32 in
-            let result = Array.mapi (fun i v -> if mask.(i) then v /. denom else 0.0) exp_vals in
-            masked_store out indices mask result)
-    | Vec_row_layer_norm { core; x; weight; bias; out; row; cols; dtype; eps } ->
-        launch_core core (fun () ->
-            let all = Array.make cols true in
-            let indices = row_indices row cols in
-            let vals = masked_load x indices all 0.0 in
-            let sum = vector_reduce (Some core) Sum vals (Some all) dtype in
-            let mean = sum /. float cols in
-            let centered = Array.map (fun v -> v -. mean) vals in
-            let sq = vector_binop (Some core) Mul centered centered (Some all) dtype in
-            let var = vector_reduce (Some core) Sum sq (Some all) dtype /. float cols in
-            let inv_std = 1.0 /. (vector_map (Some core) Sqrt [| var +. eps |] dtype).(0) in
-            let normalized = Array.map (fun v -> (v -. mean) *. inv_std) vals in
-            let gamma = masked_load weight (vector_indices_1 0 cols) all 0.0 in
-            let beta = masked_load bias (vector_indices_1 0 cols) all 0.0 in
-            let scaled = vector_binop (Some core) Mul normalized gamma (Some all) dtype in
-            let result = vector_binop (Some core) Add scaled beta (Some all) F32 in
-            masked_store out indices all result)
-    | Vec_matmul_tile { core; a; b; z; out; row_lo; row_hi; col_lo; width; k } ->
-        launch_core core (fun () ->
-            for i = row_lo to row_hi - 1 do
-              let acc = Array.init width (fun lane -> read_tensor z [ col_lo + lane ]) in
-              let acc = ref acc in
-              for kk = 0 to k - 1 do
-                let a_vec = Array.make width (read_tensor a [ i; kk ]) in
-                let b_vec = Array.init width (fun lane -> read_tensor b [ kk; col_lo + lane ]) in
-                acc := vector_fma (Some core) !acc a_vec b_vec None F32
-              done;
-              Array.iteri (fun lane value -> write_tensor out [ i; col_lo + lane ] value) !acc
-            done)
-    | Vec_toy_transpose_mul { core; a; b; out; rows; cols } ->
-        launch_core core (fun () ->
-            trace "tensor-to-memref partial lowering: affine loop order i,j stores transposed indices";
-            for i = 0 to rows - 1 do
-              let lhs = Array.init cols (fun j -> read_tensor a [ i; j ]) in
-              let rhs = Array.init cols (fun j -> read_tensor b [ i; j ]) in
-              let product = vector_binop (Some core) Mul lhs rhs None F32 in
-              Array.iteri (fun j v -> write_tensor out [ j; i ] v) product
-            done)
-
-  let eval_vector program =
-    trace "L2 SIMD/T vector mapping";
-    List.iter eval_vector_task program
-
-  let pairs_1 start width n =
-    List.init width (fun lane -> ([ lane ], [ start + lane ]))
-    |> List.filter (function _, [ i ] -> i < n | _ -> true)
-
-  let eval_mem_task = function
-    | Vec_vector_add { core; x; y; out; start; width; n } ->
-        launch_core core (fun () ->
-            let active = Int.min width (Int.max 0 (n - start)) in
-            let pairs = pairs_1 start width n in
-            alloc_local core "x_ub" [ active ];
-            alloc_local core "y_ub" [ active ];
-            alloc_local core "out_ub" [ active ];
-            async_copy_in { core; local = "x_ub"; global = x; pairs };
-            async_copy_in { core; local = "y_ub"; global = y; pairs };
-            wait core "gm_to_ub";
-            let lhs = Array.init active (fun i -> read_local core "x_ub" [ i ]) in
-            let rhs = Array.init active (fun i -> read_local core "y_ub" [ i ]) in
-            let result = vector_binop (Some core) Add lhs rhs None F32 in
-            Array.iteri (fun i v -> write_local core "out_ub" [ i ] v) result;
-            barrier core "before_store";
-            async_copy_out { core; local = "out_ub"; global = out; pairs };
-            wait core "ub_to_gm")
-    | Vec_row_softmax { core; x; out; row; cols; width } ->
-        launch_core core (fun () ->
-            let mask = Array.init width (fun lane -> lane < cols) in
-            alloc_local core "row_ub" [ width ];
-            alloc_local core "out_ub" [ width ];
-            let pairs = List.init cols (fun col -> ([ col ], [ row; col ])) in
-            async_copy_in { core; local = "row_ub"; global = x; pairs };
-            wait core "gm_to_ub";
-            let vals =
-              Array.init width (fun lane ->
-                  if mask.(lane) then read_local core "row_ub" [ lane ] else neg_infinity)
-            in
-            let max_v = vector_reduce (Some core) Max vals (Some mask) F32 in
-            let exps = vector_map (Some core) Exp (Array.map (fun v -> v -. max_v) vals) F32 in
-            let denom = vector_reduce (Some core) Sum exps (Some mask) F32 in
-            Array.iteri
-              (fun lane v -> if mask.(lane) then write_local core "out_ub" [ lane ] (v /. denom))
-              exps;
-            barrier core "before_store";
-            async_copy_out { core; local = "out_ub"; global = out; pairs };
-            wait core "ub_to_gm")
-    | Vec_row_layer_norm { core; x; weight; bias; out; row; cols; dtype; eps } ->
-        launch_core core (fun () ->
-            let all = Array.make cols true in
-            alloc_local core "x_ub" [ cols ];
-            alloc_local core "weight_ub" [ cols ];
-            alloc_local core "bias_ub" [ cols ];
-            alloc_local core "out_ub" [ cols ];
-            let row_pairs = List.init cols (fun col -> ([ col ], [ row; col ])) in
-            let vec_pairs = List.init cols (fun col -> ([ col ], [ col ])) in
-            async_copy_in { core; local = "x_ub"; global = x; pairs = row_pairs };
-            async_copy_in { core; local = "weight_ub"; global = weight; pairs = vec_pairs };
-            async_copy_in { core; local = "bias_ub"; global = bias; pairs = vec_pairs };
-            wait core "gm_to_ub";
-            let vals = Array.init cols (fun col -> read_local core "x_ub" [ col ]) in
-            let mean = vector_reduce (Some core) Sum vals (Some all) dtype /. float cols in
-            let centered = Array.map (fun v -> v -. mean) vals in
-            let sq = vector_binop (Some core) Mul centered centered (Some all) dtype in
-            let var = vector_reduce (Some core) Sum sq (Some all) dtype /. float cols in
-            let inv_std = 1.0 /. (vector_map (Some core) Sqrt [| var +. eps |] dtype).(0) in
-            for col = 0 to cols - 1 do
-              let normalized = (vals.(col) -. mean) *. inv_std in
-              let result =
-                (normalized *. read_local core "weight_ub" [ col ])
-                +. read_local core "bias_ub" [ col ]
-              in
-              write_local core "out_ub" [ col ] result
-            done;
-            barrier core "before_store";
-            async_copy_out { core; local = "out_ub"; global = out; pairs = row_pairs };
-            wait core "ub_to_gm")
-    | Vec_matmul_tile { core; a; b; z; out; row_lo; row_hi; col_lo; width; k } ->
-        launch_core core (fun () ->
-            let rows = row_hi - row_lo in
-            alloc_local core "a_ub" [ rows; k ];
-            alloc_local core "b_ub" [ k; width ];
-            alloc_local core "z_ub" [ width ];
-            alloc_local core "out_ub" [ rows; width ];
-            let a_pairs =
-              List.concat (List.init rows (fun ri -> List.init k (fun kk -> ([ ri; kk ], [ row_lo + ri; kk ]))))
-            in
-            let b_pairs =
-              List.concat (List.init k (fun kk -> List.init width (fun lane -> ([ kk; lane ], [ kk; col_lo + lane ]))))
-            in
-            let z_pairs = List.init width (fun lane -> ([ lane ], [ col_lo + lane ])) in
-            async_copy_in { core; local = "a_ub"; global = a; pairs = a_pairs };
-            async_copy_in { core; local = "b_ub"; global = b; pairs = b_pairs };
-            async_copy_in { core; local = "z_ub"; global = z; pairs = z_pairs };
-            wait core "gm_to_ub";
-            for ri = 0 to rows - 1 do
-              let acc = Array.init width (fun lane -> read_local core "z_ub" [ lane ]) in
-              let acc = ref acc in
-              for kk = 0 to k - 1 do
-                let avec = Array.make width (read_local core "a_ub" [ ri; kk ]) in
-                let bvec = Array.init width (fun lane -> read_local core "b_ub" [ kk; lane ]) in
-                acc := vector_fma (Some core) !acc avec bvec None F32
-              done;
-              Array.iteri (fun lane value -> write_local core "out_ub" [ ri; lane ] value) !acc
-            done;
-            barrier core "before_store";
-            let out_pairs =
-              List.concat
-                (List.init rows (fun ri ->
-                     List.init width (fun lane -> ([ ri; lane ], [ row_lo + ri; col_lo + lane ]))))
-            in
-            async_copy_out { core; local = "out_ub"; global = out; pairs = out_pairs };
-            wait core "ub_to_gm")
-    | Vec_toy_transpose_mul { core; a; b; out; rows; cols } ->
-        launch_core core (fun () ->
-            alloc_local core "a_memref" [ rows; cols ];
-            alloc_local core "b_memref" [ rows; cols ];
-            alloc_local core "out_memref" [ cols; rows ];
-            let pairs = List.concat (List.init rows (fun i -> List.init cols (fun j -> ([ i; j ], [ i; j ])))) in
-            async_copy_in { core; local = "a_memref"; global = a; pairs };
-            async_copy_in { core; local = "b_memref"; global = b; pairs };
-            wait core "tensor_to_memref";
-            for i = 0 to rows - 1 do
-              let lhs = Array.init cols (fun j -> read_local core "a_memref" [ i; j ]) in
-              let rhs = Array.init cols (fun j -> read_local core "b_memref" [ i; j ]) in
-              let result = vector_binop (Some core) Mul lhs rhs None F32 in
-              Array.iteri (fun j v -> write_local core "out_memref" [ j; i ] v) result
-            done;
-            barrier core "after_affine_loop";
-            let out_pairs = List.concat (List.init cols (fun i -> List.init rows (fun j -> ([ i; j ], [ i; j ])))) in
-            async_copy_out { core; local = "out_memref"; global = out; pairs = out_pairs };
-            wait core "memref_to_tensor")
-
-  let eval_mem_async program =
-    trace "L3 memory/async mapping";
-    List.iter eval_mem_task program
 end
+
+module H2 = struct
+  let name = "H2/core"
+
+  let run state thunk =
+    match_with thunk ()
+      {
+        retc = Fun.id;
+        exnc = raise;
+        effc =
+          (fun (type a) (eff : a Effect.t) ->
+            match eff with
+            | Program_id axis ->
+                Some
+                  (fun (k : (a, _) continuation) ->
+                    add_trace state
+                      (Printf.sprintf
+                         "H2 bind program_id(axis=%d) to logical core %d" axis
+                         state.current_pid);
+                    continue k state.current_pid)
+            | _ -> None);
+      }
+end
+
+module H3 = struct
+  let name = "H3/vector"
+
+  let run state thunk =
+    match_with thunk ()
+      {
+        retc = Fun.id;
+        exnc = raise;
+        effc =
+          (fun (type a) (eff : a Effect.t) ->
+            match eff with
+            | Arange (start, stop) ->
+                Some
+                  (fun (k : (a, _) continuation) ->
+                    let values = Array.init (stop - start) (fun i -> start + i) in
+                    add_trace state
+                      (Printf.sprintf "H3 vector.arange(%d,%d) width=%d" start
+                         stop (Array.length values));
+                    continue k values)
+            | Int_binop (op, lhs, rhs) ->
+                Some
+                  (fun (k : (a, _) continuation) ->
+                    add_trace state
+                      (Printf.sprintf "H3 vector.%s width=%d" (pp_int_binary op)
+                         (Array.length lhs));
+                    continue k (eval_int_binop op lhs rhs))
+            | Int_cmp (op, lhs, rhs) ->
+                Some
+                  (fun (k : (a, _) continuation) ->
+                    let result = eval_int_cmp op lhs rhs in
+                    add_trace state
+                      (Printf.sprintf "H3 vector.%s width=%d active=%d"
+                         (pp_int_cmp op) (Array.length lhs)
+                         (Array.fold_left
+                            (fun n bit -> if bit then n + 1 else n)
+                            0 result));
+                    continue k result)
+            | Float_binop (op, lhs, rhs, dtype) ->
+                Some
+                  (fun (k : (a, _) continuation) ->
+                    add_trace state
+                      (Printf.sprintf "H3 vector.%s width=%d dtype=%s"
+                         (pp_float_binary op) (Array.length lhs)
+                         (pp_dtype dtype));
+                    continue k (eval_float_binop dtype op lhs rhs))
+            | Float_map (op, values, dtype) ->
+                Some
+                  (fun (k : (a, _) continuation) ->
+                    add_trace state
+                      (Printf.sprintf "H3 vector.%s width=%d dtype=%s"
+                         (pp_elementwise op) (Array.length values)
+                         (pp_dtype dtype));
+                    continue k (eval_float_map dtype op values))
+            | Reduce (op, values, mask, dtype) ->
+                Some
+                  (fun (k : (a, _) continuation) ->
+                    add_trace state
+                      (Printf.sprintf "H3 vector.reduce.%s width=%d %s dtype=%s"
+                         (pp_reduction op) (Array.length values)
+                         (pp_active mask (Array.length values))
+                         (pp_dtype dtype));
+                    continue k (eval_reduce dtype op values mask))
+            | _ -> None);
+      }
+end
+
+module H4 = struct
+  let name = "H4/memory-async"
+
+  let run state thunk =
+    match_with thunk ()
+      {
+        retc = Fun.id;
+        exnc = raise;
+        effc =
+          (fun (type a) (eff : a Effect.t) ->
+            match eff with
+            | Load load ->
+                Some
+                  (fun (k : (a, _) continuation) ->
+                    let core = state.current_pid in
+                    let local = load.ptr ^ "_ub" in
+                    let width = Array.length load.offsets in
+                    add_trace state
+                      (Printf.sprintf
+                         "H4 lower load %s: alloc.local %s[%d], async.copy.in, wait"
+                         load.ptr local width);
+                    alloc_local core local width;
+                    async_copy_in
+                      { core; global = load.ptr; local; offsets = load.offsets; mask = load.mask };
+                    wait core "gm_to_ub";
+                    continue k (eval_load state load))
+            | Store store ->
+                Some
+                  (fun (k : (a, _) continuation) ->
+                    let core = state.current_pid in
+                    let local = store.ptr ^ "_ub" in
+                    let width = Array.length store.offsets in
+                    add_trace state
+                      (Printf.sprintf
+                         "H4 lower store %s: alloc.local %s[%d], barrier, async.copy.out"
+                         store.ptr local width);
+                    alloc_local core local width;
+                    barrier core "before_store";
+                    async_copy_out
+                      { core; global = store.ptr; local; offsets = store.offsets; mask = store.mask };
+                    wait core "ub_to_gm";
+                    eval_store state store;
+                    continue k ())
+            | Alloc_local (core, name, cells) ->
+                Some
+                  (fun (k : (a, _) continuation) ->
+                    add_trace state
+                      (Printf.sprintf "H4 alloc.local core%d %s[%d]" core name
+                         cells);
+                    continue k ())
+            | Async_copy_in copy ->
+                Some
+                  (fun (k : (a, _) continuation) ->
+                    add_trace state
+                      (Printf.sprintf "H4 async.copy.in core%d %s -> %s %s"
+                         copy.core copy.global copy.local
+                         (pp_active copy.mask (Array.length copy.offsets)));
+                    continue k ())
+            | Async_copy_out copy ->
+                Some
+                  (fun (k : (a, _) continuation) ->
+                    add_trace state
+                      (Printf.sprintf "H4 async.copy.out core%d %s -> %s %s"
+                         copy.core copy.local copy.global
+                         (pp_active copy.mask (Array.length copy.offsets)));
+                    continue k ())
+            | Wait (core, token) ->
+                Some
+                  (fun (k : (a, _) continuation) ->
+                    add_trace state (Printf.sprintf "H4 wait core%d %s" core token);
+                    continue k ())
+            | Barrier (core, scope) ->
+                Some
+                  (fun (k : (a, _) continuation) ->
+                    add_trace state
+                      (Printf.sprintf "H4 barrier core%d %s" core scope);
+                    continue k ())
+            | _ -> None);
+      }
+end
+
+type scope =
+  | Only_H1
+  | H1_H2
+  | H1_H3
+  | H1_H4
+  | H1_H4_H3
+
+let pp_scope = function
+  | Only_H1 -> "H1 { program }"
+  | H1_H2 -> "H1 { H2 { program } }"
+  | H1_H3 -> "H1 { H3 { program } }"
+  | H1_H4 -> "H1 { H4 { program } }"
+  | H1_H4_H3 -> "H1 { H4 { H3 { program } } }"
+
+let run_scope state scope program =
+  match scope with
+  | Only_H1 -> H1.run state program
+  | H1_H2 -> H1.run state (fun () -> H2.run state program)
+  | H1_H3 -> H1.run state (fun () -> H3.run state program)
+  | H1_H4 -> H1.run state (fun () -> H4.run state program)
+  | H1_H4_H3 ->
+      H1.run state (fun () -> H4.run state (fun () -> H3.run state program))
+
+let run_case scope (case : case) =
+  let state = make_state case.inputs case.output case.output_dims in
+  add_trace state (Printf.sprintf "run %s over grid=%d" (pp_scope scope) case.grid);
+  for pid = 0 to case.grid - 1 do
+    state.current_pid <- pid;
+    add_trace state (Printf.sprintf "launch logical program/core %d" pid);
+    run_scope state scope case.program;
+    add_trace state (Printf.sprintf "join logical program/core %d" pid)
+  done;
+  state
+
+let run_program thunk =
+  let state = make_state [] "out" [ 0 ] in
+  run_scope state Only_H1 thunk;
+  state
+
+let same_tensor left left_name right right_name =
+  Tensor.equal (tensor left left_name) (tensor right right_name)

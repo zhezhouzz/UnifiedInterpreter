@@ -31,9 +31,19 @@ type t = { dims : int list; data : float array }
         (i * product ds) + offset ds is
     | _ -> invalid_arg "rank mismatch"
 
-  let get t idxs = t.data.(offset t.dims idxs)
+let get t idxs = t.data.(offset t.dims idxs)
 
-  let set t idxs value = t.data.(offset t.dims idxs) <- value
+let set t idxs value = t.data.(offset t.dims idxs) <- value
+
+let get_linear t offset =
+  if offset < 0 || offset >= Array.length t.data then
+    invalid_arg "linear tensor offset out of bounds";
+  t.data.(offset)
+
+let set_linear t offset value =
+  if offset < 0 || offset >= Array.length t.data then
+    invalid_arg "linear tensor offset out of bounds";
+  t.data.(offset) <- value
 
   let max_abs_diff a b =
     if a.dims <> b.dims then infinity

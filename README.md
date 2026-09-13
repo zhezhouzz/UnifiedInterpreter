@@ -1,61 +1,74 @@
 # UnifiedInterpreter
 
-UnifiedInterpreter is an OCaml 5 prototype for comparing a mixed-level,
-effect-based AscendNPU-style interpreter with the four routes already explored
-in the Huawei problem statement:
+UnifiedInterpreter is an OCaml 5 prototype for a unified, effect-based
+interpreter design inspired by the Huawei AscendNPU IR interpreter question.
 
-- `mlir-runner` / `mlir-cpu-runner`
-- `xdsl-run`
-- `EmitC`
-- Triton interpreter / Triton-Ascend
+The key design point is that there is **one shallow-embedded program language**.
+Lowering levels are not represented by separate ASTs. Instead, the same program
+is run under different algebraic-effect handlers:
 
-The current goal is not automatic derivation from Reynolds-style semantic
-definitions yet. The current goal is to make the cross-layer effects executable:
-program/core mapping, SIMD/T vector behavior, GM/UB memory movement, async copy,
-wait/barrier, masks, reductions, and precision points.
+```ocaml
+H1 { program }
+H1 { H2 { program } }
+H1 { H3 { program } }
+H1 { H4 { program } }
+H1 { H4 { H3 { program } } }
+```
 
-## Cases
+This is the extensibility story: users can explicitly control handler scope and
+mix levels in one execution.
 
-The demo uses five sourced examples, adapted into a compact internal IR:
+## Examples
 
-- `vector-add`: Triton-Ascend Vector Addition.
-- `fused-softmax`: Triton-Ascend Fused Softmax.
-- `layer-norm`: Triton-Ascend Layer Normalization.
-- `matmul-bias`: Triton-Ascend Matrix Multiplication, `output = x @ y + z`.
-- `toy-transpose-mul`: MLIR Toy Tutorial Chapter 5 partial lowering example.
+The repository currently focuses only on two sourced Triton-like programs:
 
-Each case reports:
+- `vector-add`: based on the Triton-Ascend Vector Addition example.
+- `fused-softmax`: based on the Triton-Ascend Fused Softmax example.
 
-- source URL and source note
-- top IR
-- L1 core/program mapping
-- L2 vector mapping
-- L3 memory/async mapping
-- internal numerical agreement
-- best-effort status for the four external routes
-- extra effect trace explaining what our interpreter can expose when a route is
-  unsupported or too low-level
+Both are written as OCaml shallow embeddings using ordinary `let` plus
+effectful operations such as:
 
-`layer-norm` intentionally uses a `bf16ish` policy, so L2/L3 may differ from the
-top-level real-number reference within a small tolerance. That difference is the
-  precision diagnostic signal, not a failure.
+- `program_id`
+- `arange`
+- `load` / `store`
+- `iadd`, `imul`, `ilt`
+- `fadd`, `fsub`, `fdiv`
+- `exp`
+- `reduce_max`, `reduce_sum`
+
+For example, vector add is not a single primitive command. It is a program:
+
+```ocaml
+let pid = program_id 0 in
+let offsets =
+  iadd (ibroadcast block_size (pid * block_size)) (arange 0 block_size)
+in
+let mask = ilt offsets (ibroadcast block_size n_elements) in
+let x_vals = load ~ptr:x ~offsets ~mask ~other:0.0 () in
+let y_vals = load ~ptr:y ~offsets ~mask ~other:0.0 () in
+let sum = fadd x_vals y_vals in
+store ~ptr:out ~offsets ~values:sum ~mask ()
+```
+
+## Handlers
+
+- `H1/source`: direct source-level semantics.
+- `H2/core`: binds `program_id` to logical core/program instances.
+- `H3/vector`: handles vector operations, masks, maps, and reductions.
+- `H4/memory-async`: lowers loads/stores into local-buffer, async-copy,
+  wait, and barrier effects.
+
+`H1` is used as a fallback handler in the demo so that focused handlers can
+choose which effects to interpret and let the rest propagate outward.
 
 ## Code Layout
 
-- `lib/language.ml`: language definition only. It contains dtypes, primitive
-  operation names, top commands, and the L1/L2/L3 IR datatypes plus pretty
-  printers.
-- `lib/effects.ml`: algebraic effect vocabulary used by the interpreter.
-- `lib/interpreter.ml`: the real interpreter: runtime state, effect handlers,
-  and evaluators for top/core/vector/memory-async levels.
-- `lib/lowering.ml`: lowering passes from top commands to core tasks, vector
-  tasks, and memory/async tasks.
-- `lib/examples.ml`: sourced examples and case metadata.
-- `lib/routes.ml`: best-effort external route status for MLIR runner, xDSL,
-  EmitC, and Triton.
-- `lib/report.ml`: comparison harness that runs all levels and produces a
-  readable report.
-- `test/test_unified_interpreter.ml`: acceptance tests over all five cases.
+- `lib/language.ml`: shared language types and pure helpers.
+- `lib/effects.ml`: unified effect declarations and shallow-embedding helpers.
+- `lib/interpreter.ml`: runtime state and H1-H4 handlers.
+- `lib/examples.ml`: the two sourced Triton-like programs.
+- `lib/report.ml`: comparison harness for handler scopes.
+- `test/test_unified_interpreter.ml`: acceptance tests for both programs.
 
 ## Run
 
@@ -65,7 +78,7 @@ Use an OCaml 5 switch:
 opam exec --switch=5.2.0 -- dune exec ./bin/main.exe
 ```
 
-Run the agreement and trace-marker tests:
+Run tests:
 
 ```sh
 opam exec --switch=5.2.0 -- dune test
