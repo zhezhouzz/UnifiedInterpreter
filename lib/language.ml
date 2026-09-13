@@ -60,12 +60,18 @@ type case = {
   source : source;
   source_text : string;
   source_language : string;
-  handler_stack : handler_stage list;
   grid : int;
   inputs : (string * Tensor.t) list;
   output : string;
   output_dims : int list;
   program : program;
+}
+
+type program_input = {
+  input_id : string;
+  input_title : string;
+  case : case;
+  root_handlers : handler_stage list;
 }
 
 let ceil_div x y = (x + y - 1) / y

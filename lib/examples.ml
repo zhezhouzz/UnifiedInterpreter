@@ -121,7 +121,6 @@ let cases () =
           "Uses program_id, arange offsets, masked tl.load, and masked tl.store.";
       source_text = vector_add_source_text;
       source_language = "python";
-      handler_stack = default_handler_stack;
       grid = ceil_div vector_n vector_block;
       inputs =
         [
@@ -143,7 +142,6 @@ let cases () =
           "Same vector-add computation, but memory/sync lowering scopes are chosen inside the program.";
       source_text = vector_add_user_scoped_source_text;
       source_language = "ocaml";
-      handler_stack = source_to_simd_stack;
       grid = ceil_div vector_n vector_block;
       inputs =
         [
@@ -165,7 +163,6 @@ let cases () =
           "Uses one program per row, power-of-two block padding, max/exp/sum reductions.";
       source_text = fused_softmax_source_text;
       source_language = "python";
-      handler_stack = default_handler_stack;
       grid = softmax_rows;
       inputs =
         [
@@ -183,4 +180,26 @@ let cases () =
         fused_softmax_program ~x:"x" ~out:"out" ~n_rows:softmax_rows
           ~n_cols:softmax_cols ~block_size:softmax_block;
     };
+  ]
+
+let program_input ~input_id ~input_title ~root_handlers case =
+  { input_id; input_title; case; root_handlers }
+
+let find_case id cases = List.find (fun case -> case.id = id) cases
+
+let program_inputs () =
+  let cases = cases () in
+  let vector_add = find_case "vector-add" cases in
+  let vector_add_user_scoped = find_case "vector-add-user-scoped" cases in
+  let fused_softmax = find_case "fused-softmax" cases in
+  [
+    program_input ~input_id:"vector-add-full-root"
+      ~input_title:"Vector Add, Full Root Stack"
+      ~root_handlers:default_handler_stack vector_add;
+    program_input ~input_id:"vector-add-user-root"
+      ~input_title:"Vector Add, User-Scoped Memory/Sync"
+      ~root_handlers:source_to_simd_stack vector_add_user_scoped;
+    program_input ~input_id:"fused-softmax-full-root"
+      ~input_title:"Fused Softmax, Full Root Stack"
+      ~root_handlers:default_handler_stack fused_softmax;
   ]

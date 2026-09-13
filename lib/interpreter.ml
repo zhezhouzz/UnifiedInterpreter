@@ -379,9 +379,9 @@ let run_case scope (case : case) =
   done;
   state
 
-let run_program thunk =
+let run_program ~root_handlers thunk =
   let state = make_state [] "out" [ 0 ] in
-  run_with_user_scope state default_handler_stack thunk;
+  run_with_user_scope state root_handlers thunk;
   state
 
 let same_tensor left left_name right right_name =

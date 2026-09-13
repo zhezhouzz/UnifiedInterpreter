@@ -17,8 +17,10 @@ propagates outward to `H2`, `H3`, `H4`, or `H5`. This mirrors the five stages
 in the Huawei slide and is the extensibility story: users can explicitly
 control handler scope and mix levels in one execution.
 
-The root handler stack is data, not a hidden global choice. A case can run with
-the full stack:
+The root handler stack is part of the user's program input, not a hidden global
+choice and not a property baked into the program definition. A `case` only
+defines the program and data; a `program_input` pairs that case with the root
+handlers chosen for this run. The same case can run with the full stack:
 
 ```ocaml
 default_handler_stack
@@ -57,6 +59,21 @@ user-scoped variant:
 - `vector-add-user-scoped`: the same vector-add computation, but with memory and
   sync handler scopes chosen inside the program.
 - `fused-softmax`: based on the Triton-Ascend Fused Softmax example.
+
+`Examples.program_inputs ()` provides three sample user inputs for the CLI demo,
+but those are examples of how to call the interpreter. Users can construct their
+own input directly:
+
+```ocaml
+let input =
+  Examples.program_input
+    ~input_id:"my-run"
+    ~input_title:"My Custom Handler Run"
+    ~root_handlers:[SIMD_T_map; CV_core_map; CV_before_map]
+    my_case
+in
+Report.execute input
+```
 
 Both are written as OCaml shallow embeddings using ordinary `let` plus
 effectful operations such as:
@@ -101,7 +118,8 @@ not by `H4`.
 
 ## Code Layout
 
-- `lib/language.ml`: shared language types and pure helpers.
+- `lib/language.ml`: shared language types, handler-stage names, and
+  `program_input`.
 - `lib/effects.ml`: unified effect declarations and shallow-embedding helpers.
 - `lib/interpreter.ml`: runtime state and H1-H5 handlers.
 - `lib/examples.ml`: the sourced Triton-like programs and user-scoped variant.
