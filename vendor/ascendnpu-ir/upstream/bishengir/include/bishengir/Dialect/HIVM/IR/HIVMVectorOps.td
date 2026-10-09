@@ -1,0 +1,2411 @@
+//===- HIVMVectorOps.td - HIVM dialect vector op defs. -----*- tablegen -*-===//
+//
+// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//===----------------------------------------------------------------------===//
+//
+// This is the definition file for HIVM dialect vector operations.
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef BISHENGIR_DIALECT_HIVM_IR_HIVMVECTOROPS_TD
+#define BISHENGIR_DIALECT_HIVM_IR_HIVMVECTOROPS_TD
+
+include "bishengir/Dialect/HIVM/IR/HIVMBase.td"
+include "bishengir/Dialect/HIVM/IR/HIVMAttrs.td"
+include "bishengir/Dialect/HIVM/IR/HIVMTraits.td"
+
+//===----------------------------------------------------------------------===//
+// HIVM Vector Operations.
+//===----------------------------------------------------------------------===//
+
+class HIVM_VectorOp<string mnemonic, list<Trait> traits = [],
+  list<Trait> vecSpecialTraits=[OpPipeTrait<"PIPE::PIPE_V">, VectorCoreTypeTrait]> :
+  HIVM_StructuredOp<mnemonic, !listconcat(!listconcat(
+    [AlwaysSpeculatable, SinglePipeOpTrait,
+     DeclareOpInterfaceMethods<VectorizableOpInterface>
+    ], vecSpecialTraits), traits)> {
+  code vectorOpBaseDecls = [{
+    ::mlir::LogicalResult fold(FoldAdaptor adaptor,
+        SmallVectorImpl<OpFoldResult> &results) {
+      return memref::foldMemRefCast(*this);
+    }
+
+    // Implement functions necessary for DestinationStyleOpInterface.
+    ::mlir::MutableOperandRange getDpsInitsMutable() {
+        return getDstMutable();
+    }
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Elementwise N-ary Vector Ops
+//===----------------------------------------------------------------------===//
+
+class HIVM_ElementwiseNaryOp<string mnemonic, list<Trait> traits = [], Type srcType = AnyType>
+    : HIVM_VectorOp<mnemonic, !listconcat([AttrSizedOperandSegments,
+                                           HIVMOpSameOperandsAndResultRank,
+                                           UniformReassociationFlattenTrait,
+                                           CollapsibleConsecutiveTargetDimsTrait,
+                                           TransposableOTF], traits)> {
+  string baseClassDescription = [{
+    *From the Elementwise Nary Vector Op template:*
+
+    This operation performs element-wise operation on N operands and produces a single result.
+    It may perform either transpose or broadcast along the way (but not both).
+
+    Common constraints:
+      1. Follows DestinationStyleOpInterface.
+      2. The number of input operands is N; the number of output/result is one.
+      3. The input/init operands and result have the same rank.
+      4. The first input is vector-only.
+  }];
+  dag extraArguments = (ins);
+  let arguments = !con((ins Variadic<srcType>:$src,
+                       Variadic<AnyShaped>:$dst), extraArguments, (ins
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$transpose,
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$broadcast
+  ));
+  let results = (outs Variadic<AnyRankedTensor>:$result);
+  string extraAssemblyFormat = "";
+  let assemblyFormat = [{
+      attr-dict (`ins` `(` $src^ `:` type($src) `)`)?
+      (`outs` `(` $dst^  `:` type($dst) `)`)?
+      }] # extraAssemblyFormat # [{
+      (`broadcast` `=` $broadcast^)?
+      (`transpose` `=` $transpose^)?
+      (`->` type($result)^)?
+  }];
+  code elementwiseDeclaration = [{
+    /// Elementwise reassociation group is not included in redistribute like because it has transpose
+    FailureOr<mlir::hivm::FlattenResult> getFlattened(mlir::hivm::FlattenOptions &options) {
+      return mlir::hivm::detail::getFlattenedElementwise(*this, options);
+    }
+    SmallVector<int64_t> getLimitedAxes() {
+      return mlir::hivm::detail::computeElementwiseLimitation(*this);
+    }
+    void adjustTargetDimensions(OpBuilder &builder, const FlattenResult &result) {
+      return mlir::hivm::detail::adjustElementwiseTargetDimensions(builder, *this, result);
+    }
+    ArrayAttr getIndexingMaps() {
+      return ::mlir::hivm::detail::getIndexingMapsElementwiseImpl(*this);
+    }
+  }];
+  code elemwiseOpBaseDecls = vectorOpBaseDecls
+                             # opNameDeclaration
+                             # elementwiseDeclaration;
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Elementwise Unary Vector Ops
+//===----------------------------------------------------------------------===//
+
+class HIVM_ElementwiseUnaryOp<string mnemonic, list<Trait> traits = [], Type srcType = AnyType> :
+  HIVM_ElementwiseNaryOp<mnemonic,
+                         !listconcat([ElementwiseNaryOpTrait<1>], traits), srcType>;
+
+def VExpOp : HIVM_ElementwiseUnaryOp<"vexp",
+    [SameOperandsElementType,
+     VectorizableTrait,
+     VectorOnlyTrait<0>,
+     OperElemTypeConstraints<[0, 1], [F16, F32]>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface,
+       ["getExtraBufferSize"]>,
+     BroadcastableOTF
+    ]> {
+  let summary = "Elementwise Vector Exponential Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+  }];
+  let arguments = (ins Variadic<AnyShaped>:$src,
+                       Variadic<AnyShaped>:$dst,
+                       Optional<AnyMemRef>:$temp_buffer,
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$transpose,
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$broadcast
+  );
+  let builders = [OpBuilder<(ins "TypeRange":$result, "ValueRange":$src,
+      "ValueRange":$dst, CArg<"DenseI64ArrayAttr", "nullptr">:$transpose,
+      CArg<"DenseI64ArrayAttr", "nullptr">:$broadcast)>];
+  let assemblyFormat = [{
+      attr-dict `ins` `(` $src `:` type($src) `)`
+      `outs` `(` $dst  `:` type($dst) `)`
+      (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+      (`broadcast` `=` $broadcast^)?
+      (`transpose` `=` $transpose^)?
+      (`->` type($result)^)?
+  }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VExp2Op : HIVM_ElementwiseUnaryOp<"vexp2",
+    [SameOperandsElementType,
+     NotVectorizableTrait,
+     OperElemTypeConstraints<[0], [F16, F32]>,
+     VectorOnlyTrait<0>, NoLibraryFunctionTrait
+    ]> {
+  let summary = "Elementwise Vector Base-2 Exponential Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+      2. The supported element types are f16 and f32.
+      3. This op is a normalize-only source form and should be lowered by
+         HIVM normalize
+  }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VAbsOp : HIVM_ElementwiseUnaryOp<"vabs",
+    [SameOperandsElementType,
+     VectorizableTrait,
+     VectorOnlyTrait<0>,
+     OperElemTypeConstraints<[0], [F16, F32, I8, I16, I32, I64]>,
+     DeclareOpInterfaceMethods<ImplByScalarOpInterface>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface,
+       ["getExtraBufferSize"]>,
+     BroadcastableOTF
+    ]> {
+  let summary = "Elementwise Vector Absolute Value Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+  }];
+  let arguments = (ins Variadic<AnyShaped>:$src,
+                       Variadic<AnyShaped>:$dst,
+                       Optional<AnyMemRef>:$temp_buffer,
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$transpose,
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$broadcast
+  );
+  let builders = [OpBuilder<(ins "TypeRange":$result, "ValueRange":$src,
+      "ValueRange":$dst, CArg<"DenseI64ArrayAttr", "nullptr">:$transpose,
+      CArg<"DenseI64ArrayAttr", "nullptr">:$broadcast)>];
+  let assemblyFormat = [{
+      attr-dict `ins` `(` $src `:` type($src) `)`
+      `outs` `(` $dst  `:` type($dst) `)`
+      (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+      (`broadcast` `=` $broadcast^)?
+      (`transpose` `=` $transpose^)?
+      (`->` type($result)^)?
+    }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VLnOp : HIVM_ElementwiseUnaryOp<"vln",
+    [SameOperandsElementType,
+     VectorizableTrait,
+     VectorOnlyTrait<0>,
+     OperElemTypeConstraints<[0], [F16, F32]>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface,
+       ["getExtraBufferSize"]>,
+     BroadcastableOTF
+    ]> {
+  let summary = "Elementwise Vector Natural Logarithm Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+  }];
+  let arguments = (ins Variadic<AnyShaped>:$src,
+                       Variadic<AnyShaped>:$dst,
+                       Optional<AnyMemRef>:$temp_buffer,
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$transpose,
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$broadcast
+  );
+  let builders = [OpBuilder<(ins "TypeRange":$result, "ValueRange":$src,
+      "ValueRange":$dst, CArg<"DenseI64ArrayAttr", "nullptr">:$transpose,
+      CArg<"DenseI64ArrayAttr", "nullptr">:$broadcast)>];
+  let assemblyFormat = [{
+      attr-dict `ins` `(` $src `:` type($src) `)`
+      `outs` `(` $dst  `:` type($dst) `)`
+      (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+      (`broadcast` `=` $broadcast^)?
+      (`transpose` `=` $transpose^)?
+      (`->` type($result)^)?
+    }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VLog2Op : HIVM_ElementwiseUnaryOp<"vlog2",
+    [SameOperandsElementType,
+     NotVectorizableTrait,
+     VectorOnlyTrait<0>,
+     OperElemTypeConstraints<[0], [F16, F32]>,
+     NoLibraryFunctionTrait
+    ]> {
+  let summary = "Elementwise Vector Base-2 Logarithm Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+  }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VLog10Op : HIVM_ElementwiseUnaryOp<"vlog10",
+    [SameOperandsElementType,
+     NotVectorizableTrait,
+     VectorOnlyTrait<0>,
+     OperElemTypeConstraints<[0], [F16, F32]>,
+     NoLibraryFunctionTrait
+    ]> {
+  let summary = "Elementwise Vector Base-10 Logarithm Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+  }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VLog1pOp : HIVM_ElementwiseUnaryOp<"vlog1p",
+    [SameOperandsElementType,
+     NotVectorizableTrait,
+     VectorOnlyTrait<0>,
+     OperElemTypeConstraints<[0], [F16, F32]>,
+     NoLibraryFunctionTrait
+    ]> {
+  let summary = "Elementwise Vector log(1 + x) Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+  }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VExpM1Op : HIVM_ElementwiseUnaryOp<"vexpm1",
+    [SameOperandsElementType,
+     NotVectorizableTrait,
+     VectorOnlyTrait<0>,
+     OperElemTypeConstraints<[0], [F16, F32]>,
+     NoLibraryFunctionTrait
+    ]> {
+  let summary = "Elementwise Vector exp(x) - 1 Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+  }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VIlogbOp : HIVM_ElementwiseUnaryOp<"vilogb",
+    [SameOperandsElementType,
+     NotVectorizableTrait,
+     VectorOnlyTrait<0>,
+     OperElemTypeConstraints<[0], [F16, F32]>,
+     NoLibraryFunctionTrait
+    ]> {
+  let summary = "Elementwise Vector ilogb Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+  }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VReluOp : HIVM_ElementwiseUnaryOp<"vrelu",
+    [SameOperandsElementType,
+     VectorizableTrait,
+     VectorOnlyTrait<0>,
+     OperElemTypeConstraints<[0], [F16, F32, I32]>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface,
+       ["getExtraBufferSize"]>,
+     BroadcastableOTF
+    ]> {
+  let summary = "Elementwise Vector Rectified Linear Unit Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+  }];
+  let arguments = (ins Variadic<AnyShaped>:$src,
+                       Variadic<AnyShaped>:$dst,
+                       Optional<AnyMemRef>:$temp_buffer,
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$transpose,
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$broadcast
+  );
+  let builders = [OpBuilder<(ins "TypeRange":$result, "ValueRange":$src,
+      "ValueRange":$dst, CArg<"DenseI64ArrayAttr", "nullptr">:$transpose,
+      CArg<"DenseI64ArrayAttr", "nullptr">:$broadcast)>];
+  let assemblyFormat = [{
+      attr-dict `ins` `(` $src `:` type($src) `)`
+      `outs` `(` $dst  `:` type($dst) `)`
+      (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+      (`broadcast` `=` $broadcast^)?
+      (`transpose` `=` $transpose^)?
+      (`->` type($result)^)?
+    }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VRsqrtOp : HIVM_ElementwiseUnaryOp<"vrsqrt",
+    [SameOperandsElementType,
+     VectorizableTrait,
+     VectorOnlyTrait<0>,
+     OperElemTypeConstraints<[0], [F16, F32]>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface,
+       ["getExtraBufferSize"]>,
+     BroadcastableOTF
+    ]> {
+  let summary = "Elementwise Vector Reciprocal Square Root Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+  }];
+  let arguments = (ins Variadic<AnyShaped>:$src,
+                       Variadic<AnyShaped>:$dst,
+                       Optional<AnyMemRef>:$temp_buffer,
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$transpose,
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$broadcast
+  );
+  let builders = [OpBuilder<(ins "TypeRange":$result, "ValueRange":$src,
+      "ValueRange":$dst, CArg<"DenseI64ArrayAttr", "nullptr">:$transpose,
+      CArg<"DenseI64ArrayAttr", "nullptr">:$broadcast)>];
+  let assemblyFormat = [{
+      attr-dict `ins` `(` $src `:` type($src) `)`
+      `outs` `(` $dst  `:` type($dst) `)`
+      (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+      (`broadcast` `=` $broadcast^)?
+      (`transpose` `=` $transpose^)?
+      (`->` type($result)^)?
+    }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VSqrtOp : HIVM_ElementwiseUnaryOp<"vsqrt",
+    [SameOperandsElementType,
+     VectorizableTrait,
+     VectorOnlyTrait<0>,
+     OperElemTypeConstraints<[0], [F16, F32]>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface,
+       ["getExtraBufferSize"]>,
+     BroadcastableOTF
+    ]> {
+  let summary = "Elementwise Vector Square Root Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+  }];
+  let arguments = (ins Variadic<AnyShaped>:$src,
+                       Variadic<AnyShaped>:$dst,
+                       Optional<AnyMemRef>:$temp_buffer,
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$transpose,
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$broadcast
+  );
+  let builders = [OpBuilder<(ins "TypeRange":$result, "ValueRange":$src,
+      "ValueRange":$dst, CArg<"DenseI64ArrayAttr", "nullptr">:$transpose,
+      CArg<"DenseI64ArrayAttr", "nullptr">:$broadcast)>];
+  let assemblyFormat = [{
+      attr-dict `ins` `(` $src `:` type($src) `)`
+      `outs` `(` $dst  `:` type($dst) `)`
+      (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+      (`broadcast` `=` $broadcast^)?
+      (`transpose` `=` $transpose^)?
+      (`->` type($result)^)?
+    }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VTanhOp : HIVM_ElementwiseUnaryOp<"vtanh",
+    [SameOperandsElementType,
+     VectorizableTrait,
+     VectorOnlyTrait<0>, NoLibraryFunctionTrait
+    ]> {
+  let summary = "Elementwise Vector Hyperbolic Tangent Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+  }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VSinOp : HIVM_ElementwiseUnaryOp<"vsin",
+    [SameOperandsElementType,
+     VectorizableTrait,
+     VectorOnlyTrait<0>, NoLibraryFunctionTrait
+    ]> {
+  let summary = "Elementwise Vector Sine Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+  }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VCosOp : HIVM_ElementwiseUnaryOp<"vcos",
+    [SameOperandsElementType,
+     VectorizableTrait,
+     VectorOnlyTrait<0>, NoLibraryFunctionTrait
+    ]> {
+  let summary = "Elementwise Vector Cosine Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+  }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VAtanOp : HIVM_ElementwiseUnaryOp<"vatan",
+    [SameOperandsElementType,
+     NotVectorizableTrait,
+     VectorOnlyTrait<0>, NoLibraryFunctionTrait
+    ]> {
+  let summary = "Elementwise Vector Arctangent Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+  }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VTanOp : HIVM_ElementwiseUnaryOp<"vtan",
+    [SameOperandsElementType,
+     NotVectorizableTrait,
+     VectorOnlyTrait<0>, NoLibraryFunctionTrait
+    ]> {
+  let summary = "Elementwise Vector Tangent Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+  }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VErfOp : HIVM_ElementwiseUnaryOp<"verf",
+    [SameOperandsElementType,
+     VectorizableTrait,
+     VectorOnlyTrait<0>, NoLibraryFunctionTrait
+    ]> {
+  let summary = "Elementwise Vector Error function Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+  }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VRecOp : HIVM_ElementwiseUnaryOp<"vrec",
+    [SameOperandsElementType,
+     VectorizableTrait,
+     VectorOnlyTrait<0>,
+     OperElemTypeConstraints<[0], [F16, F32]>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface,
+       ["getExtraBufferSize"]>,
+     BroadcastableOTF
+    ]> {
+  let summary = "Elementwise Vector Reciprocal Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+  }];
+  let arguments = (ins Variadic<AnyShaped>:$src,
+                       Variadic<AnyShaped>:$dst,
+                       Optional<AnyMemRef>:$temp_buffer,
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$transpose,
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$broadcast
+  );
+  let builders = [OpBuilder<(ins "TypeRange":$result, "ValueRange":$src,
+      "ValueRange":$dst, CArg<"DenseI64ArrayAttr", "nullptr">:$transpose,
+      CArg<"DenseI64ArrayAttr", "nullptr">:$broadcast)>];
+  let assemblyFormat = [{
+      attr-dict `ins` `(` $src `:` type($src) `)`
+      `outs` `(` $dst  `:` type($dst) `)`
+      (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+      (`broadcast` `=` $broadcast^)?
+      (`transpose` `=` $transpose^)?
+      (`->` type($result)^)?
+    }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VNotOp : HIVM_ElementwiseUnaryOp<"vnot",
+    [SameOperandsElementType,
+     VectorizableTrait,
+     VectorOnlyTrait<0>,
+     OperElemTypeConstraints<[0],
+       [I1, I8, UI8, I16, UI16, I32, UI32, I64, UI64, F16, BF16, F32]>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface,
+       ["getExtraBufferSize"]>,
+     BroadcastableOTF
+    ]> {
+  let summary = "Elementwise Vector Not Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+  }];
+  let arguments = (ins Variadic<AnyShaped>:$src,
+                       Variadic<AnyShaped>:$dst,
+                       Optional<AnyMemRef>:$temp_buffer,
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$transpose,
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$broadcast
+  );
+  let builders = [OpBuilder<(ins "TypeRange":$result, "ValueRange":$src,
+      "ValueRange":$dst, CArg<"DenseI64ArrayAttr", "nullptr">:$transpose,
+      CArg<"DenseI64ArrayAttr", "nullptr">:$broadcast)>];
+  let assemblyFormat = [{
+      attr-dict `ins` `(` $src `:` type($src) `)`
+      `outs` `(` $dst  `:` type($dst) `)`
+      (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+      (`broadcast` `=` $broadcast^)?
+      (`transpose` `=` $transpose^)?
+      (`->` type($result)^)?
+    }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VCastOp : HIVM_ElementwiseUnaryOp<"vcast",
+    [VectorOnlyTrait<0>, HIVMOpSameOperandsAndResultRank,
+     VectorizableTrait,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface>,
+     BroadcastableOTF
+    ]> {
+  let summary = "Elementwise Vector Type Conversion Op";
+  let description = baseClassDescription # [{
+     Additional constraints:
+       1. Supports the following conversions:
+
+        | src    | dst    | roundingmode                                  |
+        |--------|--------|-----------------------------------------------|
+        | f32    | i1     | trunc, rint                                   |
+        | f32    | i8     | round, rint, floor, ceil, trunc               |
+        | f32    | i16    | truncwithoverflow                             |
+        | f32    | i32    | truncwithoverflow                             |
+        | f32    | ui64   | trunc                                         |
+        | f32    | f8e5m2 | rint                                          |
+        | f32    | f8e4m3 | rint                                          |
+        | f16    | i1     | rint                                          |
+        | f16    | f16    | ceil, floor                                   |
+        | bf16   | i1     | rint                                          |
+        | bf16   | bf16   | ceil, floor                                   |
+        | i1     | i8     | rint                                          |
+        | i1     | i16    | rint                                          |
+        | i1     | i32    | rint                                          |
+        | i1     | i64    | rint                                          |
+        | i1     | ui16   | rint                                          |
+        | i1     | ui32   | rint                                          |
+        | i1     | f16    | rint, trunc                                   |
+        | i1     | f32    | rint, trunc                                   |
+        | i1     | bf16   | rint, trunc                                   |
+        | i4     | i8     | rint                                          |
+        | i8     | i1     | rint                                          |
+        | i8     | i16    | rint, round                                   |
+        | i8     | i32    | rint                                          |
+        | i8     | f16    | round                                         |
+        | i8     | f32    | trunc                                         |
+        | i8     | bf16   | rint                                          |
+        | i16    | i1     | rint                                          |
+        | i16    | i8     | truncwithoverflow, trunc                      |
+        | i16    | i32    | rint                                          |
+        | i32    | i1     | rint                                          |
+        | i32    | i8     | truncwithoverflow, trunc                      |
+        | i32    | i16    | truncwithoverflow, trunc                      |
+        | i32    | i64    | round                                         |
+        | i64    | i1     | rint                                          |
+        | i64    | i8     | rint                                          |
+        | i64    | i16    | rint                                          |
+        | i64    | i32    | truncwithoverflow                             |
+        | i64    | f16    | trunc                                         |
+        | ui8    | ui16   | rint                                          |
+        | ui8    | ui32   | rint                                          |
+        | ui16   | ui8    | truncwithoverflow                             |
+        | ui16   | f32    | rint                                          |
+        | ui16   | ui32   | rint                                          |
+        | ui32   | ui8    | trunc                                         |
+        | ui32   | ui16   | trunc                                         |
+        | ui32   | ui64   | rint                                          |
+        | ui32   | f32    | rint                                          |
+        | ui32   | bf16   | rint                                          |
+        | ui64   | f32    | rint                                          |
+        | f8e4m3 | f32    | rint                                          |
+        | f8e5m2 | f32    | rint                                          |
+  }];
+  let extraArguments = (ins Optional<AnyMemRef>:$temp_buffer,
+                            DefaultValuedAttr<HIVM_RoundModeAttr, "RoundMode::RINT">:$round_mode,
+                            DefaultValuedAttr<HIVM_TypeFnAttr, "TypeFn::cast_signed">:$cast
+  );
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result, "ValueRange":$src, "ValueRange":$dst,
+                   "hivm::RoundModeAttr":$round_mode,
+                   "hivm::TypeFnAttr":$cast,
+                   CArg<"DenseI64ArrayAttr", "nullptr">:$transpose,
+                   CArg<"DenseI64ArrayAttr", "nullptr">:$broadcast)>,
+    OpBuilder<(ins "TypeRange":$result, "ValueRange":$src, "ValueRange":$dst,
+                   CArg<"hivm::RoundMode", "RoundMode::RINT">:$round_mode,
+                   CArg<"hivm::TypeFn", "TypeFn::cast_signed">:$cast,
+                   CArg<"ArrayRef<int64_t> ", "{}">:$transpose,
+                   CArg<"ArrayRef<int64_t>", "{}">:$broadcast)>
+  ];
+  let extraAssemblyFormat = [{
+      (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+      (`round_mode` `=` $round_mode^)?
+      (`cast` `=` $cast^)?
+    }];
+  let hasVerifier = 1; // verify parameter according to hardware version
+  let extraClassDeclaration = elemwiseOpBaseDecls # [{
+    // Get the cast name based on src and dst types.
+    std::string getCastName(bool withMode);
+
+    Value getSingleSrc() { return getSrc()[0]; }
+    Value getSingleDst() { return getDst()[0]; }
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Elementwise Binary Vector Ops
+//===----------------------------------------------------------------------===//
+
+class HIVM_ElementwiseBinaryOp<string mnemonic, list<Trait> traits = [], Type srcType = AnyType> :
+  HIVM_ElementwiseNaryOp<mnemonic,
+                         !listconcat([ElementwiseNaryOpTrait<2>], traits), srcType>;
+
+def VAddOp : HIVM_ElementwiseBinaryOp<"vadd",
+    [SameOperandsElementType,
+     VectorizableTrait,
+     OperElemTypeConstraints<[0, 1], [I8, I16, I32, F16, F32, I64]>,
+     CommutativeOpTrait, VectorOnlyTrait<0>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface,
+       ["getExtraBufferSize"]>,
+     DeclareOpInterfaceMethods<ImplByScalarOpInterface>,
+     DeclareOpInterfaceMethods<BiShengIRAggregatedOpInterface,
+       ["decomposeOperation","getDecomposePhase"]>,
+     BroadcastableOTF
+    ]> {
+  let summary = "Elementwise Binary Vector Addition Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+      2. Support both Vector-Vector and Vector-Scalar operation.
+  }];
+  let arguments = (ins Variadic<AnyType>:$src, Variadic<AnyShaped>:$dst,
+      Optional<AnyMemRef>:$temp_buffer,
+      DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$transpose,
+      DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$broadcast);
+  let builders = [OpBuilder<(ins "TypeRange":$result, "ValueRange":$src,
+      "ValueRange":$dst, CArg<"DenseI64ArrayAttr", "nullptr">:$transpose,
+      CArg<"DenseI64ArrayAttr", "nullptr">:$broadcast)>];
+  let assemblyFormat = [{
+      attr-dict `ins` `(` $src `:` type($src) `)`
+      `outs` `(` $dst  `:` type($dst) `)`
+      (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+      (`broadcast` `=` $broadcast^)?
+      (`transpose` `=` $transpose^)?
+      (`->` type($result)^)?
+    }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VMulOp : HIVM_ElementwiseBinaryOp<"vmul",
+    [SameOperandsElementType,
+     VectorizableTrait,
+     OperElemTypeConstraints<[0, 1], [I8, I16, I32, F16, F32, I64]>,
+     CommutativeOpTrait, VectorOnlyTrait<0>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface,
+       ["getExtraBufferSize"]>,
+     DeclareOpInterfaceMethods<ImplByScalarOpInterface>,
+     DeclareOpInterfaceMethods<BiShengIRAggregatedOpInterface,
+       ["decomposeOperation","getDecomposePhase"]>,
+     BroadcastableOTF
+    ]> {
+  let summary = "Elementwise Binary Vector Multiplication Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+      2. Support both Vector-Vector and Vector-Scalar operation.
+  }];
+  let arguments = (ins Variadic<AnyType>:$src, Variadic<AnyShaped>:$dst,
+      Optional<AnyMemRef>:$temp_buffer,
+      DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$transpose,
+      DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$broadcast);
+  let builders = [OpBuilder<(ins "TypeRange":$result, "ValueRange":$src,
+      "ValueRange":$dst, CArg<"DenseI64ArrayAttr", "nullptr">:$transpose,
+      CArg<"DenseI64ArrayAttr", "nullptr">:$broadcast)>];
+  let assemblyFormat = [{
+      attr-dict `ins` `(` $src `:` type($src) `)`
+      `outs` `(` $dst  `:` type($dst) `)`
+      (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+      (`broadcast` `=` $broadcast^)?
+      (`transpose` `=` $transpose^)?
+      (`->` type($result)^)?
+    }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VMulExtOp : HIVM_ElementwiseBinaryOp<"vmulext",
+    [SameOperandsElementType,
+     NotVectorizableTrait,
+     OperElemTypeConstraints<[0, 1], [I32]>,
+     VectorOnlyTrait<0>,
+    DeclareOpInterfaceMethods<ImplByScalarOpInterface>
+    ]> {
+  let summary = [{
+    Elementwise Binary Vector Multiplication that Calculates
+    the Most Significant 32-bits.
+  }];
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+      2. Support Vector-Vector operation.
+  }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VMulExtUiOp : HIVM_ElementwiseBinaryOp<"vmulextui",
+    [SameOperandsElementType,
+     NotVectorizableTrait,
+     OperElemTypeConstraints<[0, 1], [I32]>,
+     VectorOnlyTrait<0>,
+    DeclareOpInterfaceMethods<ImplByScalarOpInterface>
+    ]> {
+  let summary = [{
+    Elementwise Binary Vector Unsigned Integer Multiplication that Calculates
+    the Most Significant 32-bits.
+  }];
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+      2. Support Vector-Vector operation.
+  }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VSubOp
+    : HIVM_ElementwiseBinaryOp<
+          "vsub", [SameOperandsElementType,
+                   VectorizableTrait,
+                   OperElemTypeConstraints<[0, 1], [I8, I16, I32, F16, F32, I64]>,
+                   DeclareOpInterfaceMethods<ExtraBufferOpInterface,
+                     ["getExtraBufferSize"]>,
+                   DeclareOpInterfaceMethods<BiShengIRAggregatedOpInterface,
+                     ["decomposeOperation","getDecomposePhase"]>,
+                   DeclareOpInterfaceMethods<ImplByScalarOpInterface>,
+                   BroadcastableOTF]> {
+  let summary = "Elementwise Binary Vector Subtraction Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+      2. Support both Vector-Vector and Vector-Scalar operation.
+  }];
+  let extraArguments = (ins Optional<AnyMemRef>:$temp_buffer);
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result,
+                   "ValueRange":$src,
+                   "ValueRange":$dst,
+                   CArg<"DenseI64ArrayAttr", "nullptr">:$transpose,
+                   CArg<"DenseI64ArrayAttr", "nullptr">:$broadcast)>
+  ];
+  let extraAssemblyFormat = [{
+      (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+    }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VDivOp : HIVM_ElementwiseBinaryOp<
+                 "vdiv", [SameOperandsElementType,
+                          VectorizableTrait,
+                          OperElemTypeConstraints<[0, 1], [F16, F32, I8, I16, I32, I64]>,
+                          DeclareOpInterfaceMethods<ExtraBufferOpInterface,
+                            ["getExtraBufferSize"]>,
+                          DeclareOpInterfaceMethods<BiShengIRAggregatedOpInterface,
+                            ["decomposeOperation","getDecomposePhase"]>,
+                          DeclareOpInterfaceMethods<ImplByScalarOpInterface>,
+                          BroadcastableOTF]> {
+  let summary = "Elementwise Binary Vector Division Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+      2. Support only Vector-Vector operation.
+      3. Provide the bool attribute to indicate whether the operand is signed or unsigned.
+  }];
+  let extraArguments = (ins Optional<AnyMemRef>:$temp_buffer,
+                            DefaultValuedAttr<BoolAttr, "true">:$isSigned,
+                            DefaultValuedAttr<BoolAttr, "false">:$isHP);
+
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result,
+                   "ValueRange":$src,
+                   "ValueRange":$dst,
+                   CArg<"bool", "true">:$isSigned,
+                   CArg<"bool", "false">:$isHP,
+                   CArg<"ArrayRef<int64_t>", "{}">:$transpose,
+                   CArg<"ArrayRef<int64_t>", "{}">:$broadcast)>
+  ];
+  let extraAssemblyFormat = [{
+      (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+      (`isSigned` `=` $isSigned^)?
+      (`isHP` `=` $isHP^)?
+    }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VMaxOp : HIVM_ElementwiseBinaryOp<"vmax",
+    [SameOperandsElementType,
+     VectorizableTrait,
+     OperElemTypeConstraints<[0, 1], [I8, UI8, I16, F16, UI16, I32,
+                                      F8E4M3FN, F8E5M2, F32,
+                                      UI32, BF16, I64, UI64, I1]>,
+     CommutativeOpTrait, VectorOnlyTrait<0>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface,
+       ["getExtraBufferSize"]>,
+     DeclareOpInterfaceMethods<BiShengIRAggregatedOpInterface,
+       ["decomposeOperation","getDecomposePhase"]>,
+     DeclareOpInterfaceMethods<ImplByScalarOpInterface>,
+     BroadcastableOTF
+    ]> {
+  let summary = "Elementwise Binary Vector Maximum Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+      2. Support both Vector-Vector and Vector-Scalar operation.
+  }];
+  let arguments = (ins Variadic<AnyType>:$src, Variadic<AnyShaped>:$dst,
+      Optional<AnyMemRef>:$temp_buffer,
+      DefaultValuedAttr<BoolAttr, "true">:$is_signed,
+      DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$transpose,
+      DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$broadcast);
+  let builders = [OpBuilder<(ins "TypeRange":$result, "ValueRange":$src,
+      "ValueRange":$dst, CArg<"bool", "true">:$is_signed,
+      CArg<"DenseI64ArrayAttr", "nullptr">:$transpose,
+      CArg<"DenseI64ArrayAttr", "nullptr">:$broadcast)>];
+  let assemblyFormat = [{
+      attr-dict `ins` `(` $src `:` type($src) `)`
+      `outs` `(` $dst  `:` type($dst) `)`
+      (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+      (`is_signed` `=` $is_signed^)?
+      (`broadcast` `=` $broadcast^)?
+      (`transpose` `=` $transpose^)?
+      (`->` type($result)^)?
+    }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VMinOp : HIVM_ElementwiseBinaryOp<"vmin",
+    [SameOperandsElementType,
+     VectorizableTrait,
+     OperElemTypeConstraints<[0, 1], [I8, UI8, I16, F16, UI16, I32,
+                                      F8E4M3FN, F8E5M2, F32,
+                                      UI32, BF16, I64, UI64, I1]>,
+     CommutativeOpTrait, VectorOnlyTrait<0>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface,
+       ["getExtraBufferSize"]>,
+     DeclareOpInterfaceMethods<BiShengIRAggregatedOpInterface,
+       ["decomposeOperation","getDecomposePhase"]>,
+     DeclareOpInterfaceMethods<ImplByScalarOpInterface>,
+     BroadcastableOTF
+    ]> {
+  let summary = "Elementwise Binary Vector Minimum Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+      2. Support both Vector-Vector and Vector-Scalar operation.
+  }];
+  let arguments = (ins Variadic<AnyType>:$src, Variadic<AnyShaped>:$dst,
+      Optional<AnyMemRef>:$temp_buffer,
+      DefaultValuedAttr<BoolAttr, "true">:$is_signed,
+      DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$transpose,
+      DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$broadcast);
+  let builders = [OpBuilder<(ins "TypeRange":$result, "ValueRange":$src,
+      "ValueRange":$dst, CArg<"bool", "true">:$is_signed,
+      CArg<"DenseI64ArrayAttr", "nullptr">:$transpose,
+      CArg<"DenseI64ArrayAttr", "nullptr">:$broadcast)>];
+  let assemblyFormat = [{
+      attr-dict `ins` `(` $src `:` type($src) `)`
+      `outs` `(` $dst  `:` type($dst) `)`
+      (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+      (`is_signed` `=` $is_signed^)?
+      (`broadcast` `=` $broadcast^)?
+      (`transpose` `=` $transpose^)?
+      (`->` type($result)^)?
+    }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VOrOp : HIVM_ElementwiseBinaryOp<"vor",
+    [SameOperandsElementType,
+     VectorizableTrait,
+     OperElemTypeConstraints<[0, 1],
+       [I1, I8, UI8, I16, UI16, I32, UI32, I64, UI64, F16, BF16, F32]>,
+     VectorOnlyTrait<0>, VectorOnlyTrait<1>, CommutativeOpTrait,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface,
+       ["getExtraBufferSize"]>,
+     DeclareOpInterfaceMethods<BiShengIRAggregatedOpInterface,
+       ["decomposeOperation","getDecomposePhase"]>,
+     BroadcastableOTF
+    ]> {
+  let summary = "Elementwise Binary Vector Or Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+      2. Support only Vector-Vector operation.
+  }];
+  let arguments = (ins Variadic<AnyType>:$src, Variadic<AnyShaped>:$dst,
+      Optional<AnyMemRef>:$temp_buffer,
+      DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$transpose,
+      DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$broadcast);
+  let builders = [OpBuilder<(ins "TypeRange":$result, "ValueRange":$src,
+      "ValueRange":$dst, CArg<"DenseI64ArrayAttr", "nullptr">:$transpose,
+      CArg<"DenseI64ArrayAttr", "nullptr">:$broadcast)>];
+  let assemblyFormat = [{
+      attr-dict `ins` `(` $src `:` type($src) `)`
+      `outs` `(` $dst  `:` type($dst) `)`
+      (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+      (`broadcast` `=` $broadcast^)?
+      (`transpose` `=` $transpose^)?
+      (`->` type($result)^)?
+    }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VAndOp : HIVM_ElementwiseBinaryOp<"vand",
+    [SameOperandsElementType,
+     VectorizableTrait,
+     OperElemTypeConstraints<[0, 1],
+       [I1, I8, UI8, I16, UI16, I32, UI32, I64, UI64, F16, BF16, F32]>,
+     VectorOnlyTrait<0>, VectorOnlyTrait<1>, CommutativeOpTrait,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface,
+       ["getExtraBufferSize"]>,
+     DeclareOpInterfaceMethods<BiShengIRAggregatedOpInterface,
+       ["decomposeOperation","getDecomposePhase"]>,
+     BroadcastableOTF
+    ]> {
+  let summary = "Elementwise Binary Vector And Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+      2. Support only Vector-Vector operation.
+  }];
+  let arguments = (ins Variadic<AnyType>:$src, Variadic<AnyShaped>:$dst,
+      Optional<AnyMemRef>:$temp_buffer,
+      DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$transpose,
+      DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$broadcast);
+  let builders = [OpBuilder<(ins "TypeRange":$result, "ValueRange":$src,
+      "ValueRange":$dst, CArg<"DenseI64ArrayAttr", "nullptr">:$transpose,
+      CArg<"DenseI64ArrayAttr", "nullptr">:$broadcast)>];
+  let assemblyFormat = [{
+      attr-dict `ins` `(` $src `:` type($src) `)`
+      `outs` `(` $dst  `:` type($dst) `)`
+      (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+      (`broadcast` `=` $broadcast^)?
+      (`transpose` `=` $transpose^)?
+      (`->` type($result)^)?
+    }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VXorOp : HIVM_ElementwiseBinaryOp<"vxor",
+    [SameOperandsElementType,
+     VectorizableTrait,
+     OperElemTypeConstraints<[0, 1],
+       [I1, I8, UI8, I16, UI16, I32, UI32, I64, UI64]>,
+     VectorOnlyTrait<0>, VectorOnlyTrait<1>,
+     DeclareOpInterfaceMethods<BiShengIRAggregatedOpInterface,
+       ["decomposeOperation","getDecomposePhase"]>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface, ["getExtraBufferSize"]>
+    ], AnyShaped> {
+  let summary = "Elementwise Binary Vector Xor Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+      2. Support only Vector-Vector operation.
+  }];
+  let extraArguments = (ins Optional<AnyMemRef>:$temp_buffer);
+  let extraAssemblyFormat = [{
+    (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+  }];
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result, "ValueRange":$src, "ValueRange":$dst,
+                   CArg<"DenseI64ArrayAttr", "nullptr">:$transpose,
+                   CArg<"DenseI64ArrayAttr", "nullptr">:$broadcast)>
+  ];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VModOp : HIVM_ElementwiseBinaryOp<"vmod",
+    [SameOperandsElementType,
+     NotVectorizableTrait,
+     VectorOnlyTrait<0>,
+     OperElemTypeConstraints<[0, 1],
+       [I1, I8, I16, I32, I64, F16, F32]>,
+     DeclareOpInterfaceMethods<ImplByScalarOpInterface>
+    ]> {
+  let summary = "Elementwise Vector Mod Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+      2. For I1 (bool), normalization produces fill(0) since x % y is always 0 for booleans.
+      3. For I8, normalization widens both operands to I16, computes the remainder,
+         then casts the result back to I8. This matches the old HFusion normalize rule.
+      4. For float types (F16, F32), normalization rewrites
+         `x % y` into `x - trunc(x / y) * y`.
+         Note: BF16 is NOT supported because the infinity-modulus path uses
+         VIsInfOp, and VIsInfOp only supports F16/F32.
+         FP8, F64, and other float types are NOT supported because the current
+         HIVM normalize path depends on VDivOp/VMulOp/VSubOp/VIsInfOp, and that
+         op set does not provide a complete legal route for those types.
+  }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VModUIOp : HIVM_ElementwiseBinaryOp<"vmodui",
+    [SameOperandsElementType, StaticMaxRankTrait<1>,
+     NotVectorizableTrait,
+     VectorOnlyTrait<0>,
+     OperElemTypeConstraints<[0, 1],
+       [I1, I8, I16, I32, I64]>
+    ]> {
+  let summary = "Elementwise Vector Modui Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+      2. For I1 (bool), normalization produces fill(0) since x % y is always 0 for booleans.
+      3. For I8, normalization widens both operands to I16, computes unsigned
+         remainder, then casts the result back to I8.
+  }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VShLOp : HIVM_ElementwiseBinaryOp<"vshl",
+   [SameOperandsElementType,
+    VectorizableTrait,
+    OperElemTypeConstraints<[0, 1], [I16, I32, I64]>,
+    VectorOnlyTrait<0>, ScalarOnlyHWTrait<1>,
+    DeclareOpInterfaceMethods<ExtraBufferOpInterface,
+      ["getExtraBufferSize"]>,
+    DeclareOpInterfaceMethods<ImplByScalarOpInterface>,
+    BroadcastableOTF
+   ]> {
+  let summary = "Elementwise Binary Vector Shift Left Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input vector and result have the same element type.
+      2. Support only Vector - Scalar operation.
+  }];
+  let arguments = (ins Variadic<AnyType>:$src, Variadic<AnyShaped>:$dst,
+      Optional<AnyMemRef>:$temp_buffer,
+      DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$transpose,
+      DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$broadcast);
+  let builders = [OpBuilder<(ins "TypeRange":$result, "ValueRange":$src,
+      "ValueRange":$dst, CArg<"DenseI64ArrayAttr", "nullptr">:$transpose,
+      CArg<"DenseI64ArrayAttr", "nullptr">:$broadcast)>];
+  let assemblyFormat = [{
+      attr-dict `ins` `(` $src `:` type($src) `)`
+      `outs` `(` $dst  `:` type($dst) `)`
+      (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+      (`broadcast` `=` $broadcast^)?
+      (`transpose` `=` $transpose^)?
+      (`->` type($result)^)?
+    }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VShROp : HIVM_ElementwiseBinaryOp<"vshr",
+    [SameOperandsElementType,
+     VectorizableTrait,
+     OperElemTypeConstraints<[0, 1], [I8, I16, I32, I64]>,
+     VectorOnlyTrait<0>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface,
+       ["getExtraBufferSize"]>,
+     DeclareOpInterfaceMethods<ImplByScalarOpInterface>,
+     BroadcastableOTF
+    ]> {
+  let summary = "Elementwise Binary Vector Shift Right Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input vector and result have the same element type.
+      2. Vector-scalar and vector/broadcast shift amounts are allowed.
+         Mem-based (A3) lowers shaped shift amounts to scalar loops because
+         `vshr_*` template symbols are unavailable; reg-based (A5) keeps the
+         HIVM op for the AVE / template path.
+      3. If `round` is set to true, rounding is applied during arithmetic
+         shift right.
+  }];
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result, "ValueRange":$src,
+                   "ValueRange":$dst, "BoolAttr":$round,
+                   CArg<"DenseI64ArrayAttr", "nullptr">:$transpose,
+                   CArg<"DenseI64ArrayAttr", "nullptr">:$broadcast)>,
+    OpBuilder<(ins "TypeRange":$result, "ValueRange":$src,
+                   "ValueRange":$dst, "BoolAttr":$is_signed, "BoolAttr":$round,
+                   CArg<"DenseI64ArrayAttr", "nullptr">:$transpose,
+                   CArg<"DenseI64ArrayAttr", "nullptr">:$broadcast)>
+  ];
+    let extraArguments = (ins Optional<AnyMemRef>:$temp_buffer,
+		                          DefaultValuedAttr<BoolAttr, "true">:$is_signed,
+                              DefaultValuedOptionalAttr<BoolAttr, "true">:$round
+  );
+  let extraAssemblyFormat = [{
+      (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+      (`round` `:` $round^ )?
+      (`is_signed` `:` $is_signed^ )?
+      }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VCmpOp : HIVM_ElementwiseBinaryOp<"vcmp",
+    [OperElemTypeConstraints<[0, 1],
+       [I1, F16, BF16, F32, I8, UI8, I16, UI16, I32, UI32,
+       I64, UI64, F8E4M3FN, F8E5M2]>,
+     VectorizableTrait,
+     OperElemTypeConstraints<[/*dstIdx=*/2], [I1, I8]>,
+     VectorOnlyTrait<0>,
+     DeclareOpInterfaceMethods<ImplByScalarOpInterface>
+    ]> {
+  let summary = "Elementwise Binary Vector Comparison Op";
+  let description = baseClassDescription # [{
+    Compare elements from two source vector. If the comparison result is true,
+    the corresponding bit of `dst` is 1 or 8.
+
+    Additional constraints:
+      1. The input vectors and output vector must have the same ranks
+      2. The element type of `dst` must be bool
+      3. The input is vector-only.
+      4. Supports the following data type:
+
+        |    compare mode   |       element type      |
+        |-------------------|-------------------------|
+        | GE/GT/LE/LT/NE/EQ | f16, bf16, f32, i8/ui8, i16/ui16, i32/ui32, i64/ui64, f8 |
+  }];
+  let extraArguments = (ins Optional<AnyMemRef>:$temp_buffer,
+                            DefaultValuedAttr<BoolAttr, "true">:$is_signed,
+                            DefaultValuedAttr<HIVM_CmpModeAttr, "CompareMode::EQ">:$compare_mode);
+
+  let extraAssemblyFormat = [{
+    (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+    (`compare_mode` `=` $compare_mode^ )?
+    (`is_signed` `:` $is_signed^ )?
+  }];
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result, "ValueRange":$src, "ValueRange":$dst,
+                   CArg<"hivm::CompareMode", "CompareMode::EQ">:$compare_mode)>,
+    OpBuilder<(ins "TypeRange":$result, "ValueRange":$src, "ValueRange":$dst,
+                   "hivm::CompareModeAttr":$compare_mode)>,
+    OpBuilder<(ins "TypeRange":$result, "ValueRange":$src, "ValueRange":$dst,
+                   "hivm::CompareModeAttr":$compare_mode,
+                   "DenseI64ArrayAttr":$transpose,
+                   "DenseI64ArrayAttr":$broadcast)>,
+    OpBuilder<(ins "TypeRange":$result, "ValueRange":$src, "ValueRange":$dst,
+                   "bool":$is_signed,
+                   CArg<"hivm::CompareMode", "CompareMode::EQ">:$compare_mode,
+                   CArg<"DenseI64ArrayAttr", "{}">:$transpose,
+                   CArg<"DenseI64ArrayAttr", "{}">:$broadcast)>
+  ];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VPowOp : HIVM_ElementwiseBinaryOp<"vpow",
+    [SameOperandsElementType,
+    VectorizableTrait,
+    // I8/I16/F16/F32 VPowOp depends on hivm-normalize-pass; only I32 is
+    // expected to remain valid without that normalization.
+    OperElemTypeConstraints<[0, 1], [I8, I16, I32, F16, F32]>,
+    VectorOnlyTrait<0>, VectorOnlyTrait<1>,
+    DeclareOpInterfaceMethods<ExtraBufferOpInterface>
+    ]> {
+  let summary = "Elementwise Binary Vector Power Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+      2. Support both Vector-Vector and Vector-Scalar operation.
+  }];
+  let extraArguments = (ins Optional<AnyMemRef>:$temp_buffer);
+  let extraAssemblyFormat = [{
+    (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+  }];
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result,"ValueRange":$src,"ValueRange":$dst)>
+  ];
+  let hasCanonicalizer = 1;
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+def VLdexpOp : HIVM_ElementwiseNaryOp<"vldexp",
+    [ElementwiseNaryOpTrait<2>, SameOperandsElementType,
+     NotVectorizableTrait,
+     OperElemTypeConstraints<[0, 1], [F16, F32]>,
+     VectorOnlyTrait<0>, VectorOnlyTrait<1>, NoLibraryFunctionTrait
+    ]> {
+  let summary = "Elementwise Binary Vector ldexp Op";
+  let description = baseClassDescription # [{
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+      2. This op is a normalize-only source form and should be lowered by
+         HIVM normalize before code generation.
+  }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Elementwise Ternary Vector Ops
+//===----------------------------------------------------------------------===//
+
+class HIVM_ElementwiseTernaryOp<string mnemonic, list<Trait> traits = []> :
+  HIVM_ElementwiseNaryOp<mnemonic,
+                         !listconcat([ElementwiseNaryOpTrait<3>], traits)>;
+
+def VSelOp : HIVM_ElementwiseTernaryOp<"vsel",
+    [OperElemTypeConstraints<[/*condition=*/0], [I1,I8]>,
+     VectorizableTrait,
+     OperElemTypeConstraints<[/*src0=*/1, /*src1=*/2],
+                             [I1, AnyI8, AnyI16, F16, BF16, F8E4M3FN,
+                              F8E5M2, AnyI32, F32, I64, UI64]>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface, ["getExtraBufferSize"]>,
+     BroadcastableOTF]> {
+    // add traits for type constraint
+  let summary = "Elementwise Vector Selection Op";
+  let description = baseClassDescription # [{
+    Select elements from two source vector according to the binary `condition` vector.
+    If the corresponding bit of the indicator is 1, select `src0`. Otherwise,
+    select `src1`.
+
+    Additional constraints:
+      1. The input vectors and output vector must have the same ranks.
+      2. The element type of indicator vector must be bool.
+  }];
+  let extraArguments = (ins Optional<AnyMemRef>:$temp_buffer);
+  let extraAssemblyFormat = [{
+    (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+  }];
+  let extraClassDeclaration = elemwiseOpBaseDecls ;
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Vector Broadcast Op
+//===----------------------------------------------------------------------===//
+
+def VBrcOp : HIVM_VectorOp<"vbrc",
+    [SameOperandsElementType,
+     OperElemTypeConstraints<
+         [0], [I8, UI8, I16, F16, UI16, I32, F8E4M3FN, F8E5M2, F32, UI32, BF16, I64, UI64, I1]>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface>,
+     DeclareOpInterfaceMethods<HIVMStructuredOpInterface,
+                               ["getIteratorTypesArray", "getIndexingMaps"]>,
+     DeclareOpInterfaceMethods<HIVMInferCoreTypeInterface, ["inferCoreType"]>,
+     // VBrcOp lowers through its own vectorize() override, for shaped and
+     // scalar sources alike, so the default isVectorizable() serves it.
+     VectorizableTrait,
+     // Will automatically use the default uniform reassociation impl
+     UniformReassociationFlattenTrait,
+     CollapsibleConsecutiveTargetDimsTrait,
+     DeclareOpInterfaceMethods<FlattenInterface,
+       ["getLimitedAxes", "adjustTargetDimensions"]>,
+     DeclareOpInterfaceMethods<BiShengIRAggregatedOpInterface,
+       ["decomposeOperation","getDecomposePhase"]>,
+    ], []> {
+  let summary = "Vector Broadcast Op";
+  let description = [{
+    Broadcast a vector or a scalar according to the broadcast axes array.
+
+    Constraints:
+      1. The input vector and output vector must have same rank
+         and the same element type.
+      2. For the input operand, the size of the broadcasted axis must be 1.
+      3. The broadcast indices array cannot be empty for vector input.
+      4. The broadcast indices array *must* be empty for scalar input.
+      5. The broadcast indices array can not be larger than the ranks of the input vector.
+      6. The broadcast indices must be in `[0, RankOfSrcVec)`.
+      7. For i1 type, need to ensure that the tail axis of dst is aligned with 16,
+         otherwise there will be a risk of memory stampede
+
+    Examples:
+    ```mlir
+    // Scalar broadcast
+    hivm.hir.vbrc ins(%src : i32) outs(%dst : memref<?xi32>)
+    // Vector broadcast
+    hivm.hir.vbrc ins(%src : memref<1xi32>) outs(%dst : memref<?xi32>) broadcast_dims = [0]
+    %result = hivm.hir.vbrc ins(%src : tensor<1xi32>) outs(%dst : tensor<?xi32>) broadcast_dims = [0] -> tensor<?xi32>
+    ```
+  }];
+  let arguments = (ins AnyType:$src,
+                       TensorOrMemref:$dst,
+                       Optional<AnyMemRef>:$temp_buffer,
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$broadcast_dims
+  );
+  let results = (outs Variadic<AnyRankedTensor>:$result);
+  let assemblyFormat = [{
+    attr-dict `ins` `(` $src `:` type($src) `)`
+    `outs` `(` $dst `:` type($dst) `)`
+    (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+    (`broadcast_dims` `=` $broadcast_dims^)?
+    (`->` type($result)^)?
+  }];
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result, "Value":$src, "Value":$dst,
+                   "DenseI64ArrayAttr":$broadcast_dims)>,
+    OpBuilder<(ins "TypeRange":$result, "Value":$src, "Value":$dst)>
+  ];
+  let hasCanonicalizer = 1;
+  let hasVerifier = 1;
+  let extraClassDeclaration = vectorOpBaseDecls#[{
+    static StringRef getOpName() { return "broadcast"; }
+    PIPE getPipe();
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Vector Reduce Op
+//===----------------------------------------------------------------------===//
+
+def VReduceOp : HIVM_VectorOp<"vreduce",
+    [AttrSizedOperandSegments,
+     OperElemTypeConstraints<[0, 1], [I1, I8, UI8, I16, UI16, I32, UI32, I64, UI64, F16, F32]>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface>,
+     DeclareOpInterfaceMethods<HIVMStructuredOpInterface,
+       ["getIteratorTypesArray", "getIndexingMaps"]>,
+     // Will automatically use the default uniform reassociation impl
+     UniformReassociationFlattenTrait,
+     CollapsibleConsecutiveTargetDimsTrait,
+     DeclareOpInterfaceMethods<FlattenInterface,
+       ["getLimitedAxes", "adjustTargetDimensions"]>,
+     DeclareOpInterfaceMethods<ImplByScalarOpInterface>,
+     VectorizableTrait,
+     DeclareOpInterfaceMethods<BiShengIRAggregatedOpInterface,
+       ["decomposeOperation", "getDecomposePhase"]>
+    ]> {
+  let summary = "Vector Reduction Op";
+  let description = [{
+    Recuce one or more axes of the source vector according to
+    the reduction axes array, starting from an init value.
+
+    Constraints:
+      1. The input vector and output vector must have the same rank
+         and the same element type.
+      2. For the output operand, the size of the reduced axis must be 1.
+      3. The reduction indices array can not be empty,
+         nor can be larger than the ranks of the input vector.
+      4. The reduced indices must be in `[0, RankOfDstVec)`.
+      5. reduce min/max operations propagate NaN values.
+
+    Examples:
+    ```mlir
+    hivm.hir.vreduce <add> ins(%src : memref<?xf32>) outs(%dst : memref<1xf32>) reduce_dims : [1]
+    %result = hivm.hir.vreduce <max> ins(%src : tensor<?xf32>) outs(%dst : tensor<1xf32>) reduce_dims : [0] -> tensor<1xf32>
+    ```
+  }];
+  let arguments = (ins TensorOrMemref:$src,
+                       Variadic<TensorOrMemref>:$dst,
+                       Optional<AnyMemRef>:$temp_buffer,
+                       HIVM_ReduceOpAttr:$arith,
+                       DefaultValuedAttr<BoolAttr, "false">:$unsigned_src,
+                       DefaultValuedAttr<BoolAttr, "true">:$tie_break_left,
+                       DenseI64ArrayAttr:$reduce_dims,
+                       Optional<TensorOrMemref>:$indices
+  );
+  let results = (outs Variadic<AnyRankedTensor>:$result);
+  let assemblyFormat = [{
+    attr-dict $arith `ins` `(` $src `:` type($src) `)`
+    (`indices` `(` $indices^ `:` type($indices) `)`)?
+    `outs` `(` $dst `:` type($dst) `)`
+    (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+    (`unsigned_src` `=` $unsigned_src^ )?
+    (`tie_break_left` `=` $tie_break_left^ )?
+    `reduce_dims` `=` $reduce_dims
+    (`->` type($result)^)?
+  }];
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result, "Value":$src,
+                   "ValueRange":$dst, "hivm::ReduceOpAttr":$arith,
+                   "DenseI64ArrayAttr":$reduce_dims)>,
+    OpBuilder<(ins "TypeRange":$result, "Value":$src,
+                   "ValueRange":$dst, "hivm::ReduceOpAttr":$arith,
+                   "DenseI64ArrayAttr":$reduce_dims, "Value":$indices)>,
+    OpBuilder<(ins "TypeRange":$result, "Value":$src,
+                   "ValueRange":$dst, "Value":$temp_buffer,
+                   "hivm::ReduceOpAttr":$arith,
+                   "DenseI64ArrayAttr":$reduce_dims)>,
+    OpBuilder<(ins "TypeRange":$result, "Value":$src,
+                   "ValueRange":$dst, "Value":$temp_buffer,
+                   "hivm::ReduceOpAttr":$arith,
+                   "DenseI64ArrayAttr":$reduce_dims, "Value":$indices)>,
+    OpBuilder<(ins "TypeRange":$result, "Value":$src,
+                   "ValueRange":$dst, "hivm::ReduceOpAttr":$arith,
+                   "BoolAttr":$unsigned_src,
+                   "DenseI64ArrayAttr":$reduce_dims)>,
+    OpBuilder<(ins "TypeRange":$result, "Value":$src,
+                   "ValueRange":$dst, "hivm::ReduceOpAttr":$arith,
+                   "BoolAttr":$unsigned_src,
+                   "BoolAttr":$tie_break_left,
+                   "DenseI64ArrayAttr":$reduce_dims)>
+  ];
+  let hasCanonicalizer = 1;
+  let hasVerifier = 1;
+  let extraClassDeclaration = vectorOpBaseDecls # [{
+    // Get reduction init value.
+    Attribute getInit();
+
+    static StringRef getOpName() { return "reduce"; }
+
+    // Get the reduced value init value.
+    Value getDstValue() {
+      return getDst()[0];
+    }
+
+    // Get the reduced index init value.
+    Value getDstIndex() {
+      assert(getDst().size() >= 2 && "there should be more than 2 operands");
+      return getDst()[1];
+    }
+
+    bool useVectorCrossIntr(bool lastAxis, int rank);
+
+    static bool isArgminOrArgmax(ReduceOperation op){
+      return op == ReduceOperation::min_with_index_left ||
+             op == ReduceOperation::max_with_index_left ||
+             op == ReduceOperation::min_with_index_right ||
+             op == ReduceOperation::max_with_index_right;
+    }
+
+    static bool isWithIndex(ReduceOperation op) {
+      return isArgminOrArgmax(op);
+    }
+
+    bool isWithIndex() {
+      return isWithIndex(getArithAttr().getReduceOp());
+    }
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Vector Transpose Op
+//===----------------------------------------------------------------------===//
+
+def VTransposeOp : HIVM_VectorOp<"vtranspose",
+    [OperElemTypeConstraints<[0], [I1, AnyI8, AnyI16, AnyI32, F16, BF16, F32, I64, UI64, F8E4M3FN, F8E5M2]>,
+     // VTransposeOp lowers through its own vectorize() override, so the
+     // default isVectorizable() serves it.
+     VectorizableTrait,
+     DeclareOpInterfaceMethods<HIVMStructuredOpInterface,
+       ["getIteratorTypesArray", "setIteratorTypesArray", "getIndexingMaps"]>,
+     DeclareOpInterfaceMethods<BiShengIRAggregatedOpInterface,
+       ["decomposeOperation","getDecomposePhase"]>,
+     // VTranspose is considered as uniform because it is swapping two dimensions
+     // and the number of min swap always exactly one.
+     UniformReassociationFlattenTrait,
+     DeclareOpInterfaceMethods<FlattenInterface,
+       ["getLimitedAxes", "adjustTargetDimensions"]>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface>,
+    ]> {
+  let summary = "Vector Transpose Op";
+  let description = [{
+    Permutes the dimensions of 'src' according to the given `permutation`. In
+    other words:
+      `dim(dst, i) = dim(src, permutation[i])`.
+
+    Constraints:
+      1. The input vector and output vector must have same rank, and the same element type.
+
+    Examples:
+    ```mlir
+     hivm.hir.vtranspose ins(%src : memref<32x8xf32>) outs(%dst : memref<8x32xf32>) permutation = [1, 0]
+     %result = hivm.hir.vtranspose ins(%src : tensor<32x8xf32>) outs(%dst: tensor<8x32xf32>) permutation = [1, 0] -> tensor<8x32xf32>
+    ```
+  }];
+  let arguments = (ins TensorOrMemref:$src,
+                       TensorOrMemref:$dst,
+                       Optional<AnyMemRef>:$temp_buffer,
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$permutation,
+                       DefaultValuedAttr<BoolAttr, "false">:$disable_align
+  );
+  let results = (outs Variadic<AnyRankedTensor>:$result);
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result, "Value":$src, "Value":$dst,
+                   CArg<"DenseI64ArrayAttr", "nullptr">:$permutation)>,
+    OpBuilder<(ins "TypeRange":$result, "Value":$src, "Value":$dst,
+                   CArg<"DenseI64ArrayAttr", "nullptr">:$permutation, CArg<"bool", "false">:$disable_align)>
+  ];
+  let assemblyFormat = [{
+      attr-dict `ins` `(` $src `:` type($src) `)`
+      `outs` `(` $dst `:` type($dst) `)`
+      (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+      (`permutation` `=` $permutation^)?
+      (`disable_align` `=` $disable_align^)?
+      (`->` type($result)^)?
+  }];
+  let hasVerifier = 1;
+  let hasCanonicalizer = 1;
+  let extraClassDeclaration = vectorOpBaseDecls # [{
+    static StringRef getOpName() { return "transpose"; }
+
+    bool isLastDimTranspose();
+
+    bool isLastTwoAxesTranspose();
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Vector Arange Op
+//===----------------------------------------------------------------------===//
+
+def VArangeOp
+    : HIVM_VectorOp<
+          "varange", [AttrSizedOperandSegments, NotVectorizableTrait,
+                      OperElemTypeConstraints<[0], [I16, I32, F16, F32, I64]>,
+                      DeclareOpInterfaceMethods<HIVMStructuredOpInterface,
+                                                ["getIteratorTypesArray",
+                                                 "getIndexingMaps"]>,
+                      // Will automatically use the default
+                      // uniform reassociation impl
+                      DeclareOpInterfaceMethods<FlattenInterface,
+                                                ["getLimitedAxes"]>]> {
+  let summary = "Vector Arange Op";
+  let description = [{
+    Fill a vector with range 0,1,2... based on strides and offset.
+    e.g. offset = 1, strides = [1, 2], tensor/memref shape = [2x4xi32],
+    the result is [[1, 3, 5, 7,
+                    2, 4, 6, 8]].
+
+    Constraints:
+      1. Must have at least one stride.
+      2. Default offset is 0.
+
+    Examples:
+    ```mlir
+    hivm.hir.varange offset[%o] strides[%s0, %s1] outs(%dst : memref<32xf32>)
+    %result = hivm.hir.varange offset[%o] strides[%s0, %s1] outs(%dst : tensor<32xf32>)
+                                -> tensor<32xf32>
+    ```
+  }];
+  let arguments = (ins TensorOrMemref:$dst,
+                       Optional<Index>:$offset,
+                       Variadic<Index>:$strides
+  );
+  let results = (outs Optional<AnyRankedTensor>:$result);
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result, "Value":$dst)>,
+    OpBuilder<(ins "TypeRange":$result, "Value":$dst, "Value":$offset)>
+  ];
+  let assemblyFormat = [{
+    attr-dict
+    (`offset` `[` $offset^ `]`)?
+    `strides` `[` $strides `]`
+    `outs` `(` $dst `:` type($dst) `)`
+    (`->` type($result)^)?
+  }];
+  let hasVerifier = 1;
+  let extraClassDeclaration = vectorOpBaseDecls # [{
+    static StringRef getOpName() { return "arange"; }
+    static void getStridesFromValue(OpBuilder &builder, Location loc,
+                                    Value val, SmallVectorImpl<Value> &strides);
+    static void getOffsetFromValue(OpBuilder &builder, Location loc,
+                                    Value &offset);
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Vector Interleave Op
+//===----------------------------------------------------------------------===//
+
+def VInterleaveOp : HIVM_VectorOp<"vinterleave",
+    [SameOperandsElementType, AttrSizedOperandSegments,
+     HIVMOpSameOperandsAndResultRank,
+     NotVectorizableTrait,
+     OperElemTypeConstraints<[0],
+       [I8, UI8, I16, F16, UI16, I32, F8E4M3FN, F8E5M2, F32, UI32, BF16, I64, UI64, I1]>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface>,
+     DeclareOpInterfaceMethods<HIVMStructuredOpInterface,
+       ["getIteratorTypesArray"]>,
+     DeclareOpInterfaceMethods<ImplByScalarOpInterface>,
+     // Will automatically use the default uniform reassociation impl
+     UniformReassociationFlattenTrait,
+     DeclareOpInterfaceMethods<FlattenInterface,
+       ["getLimitedAxes"]>,
+    ]> {
+  let summary = "Vetor Interleave Op";
+  let description = [{
+    Interleaves the values of `N` tensors along their last dimension.
+    All tensors must have the same shape.
+  }];
+  let arguments = (ins Variadic<AnyType>:$src,
+                       TensorOrMemref:$dst,
+                       Optional<AnyMemRef>:$temp_buffer,
+                       DefaultValuedAttr<I64Attr, "2">:$interleave_channel_nums
+  );
+  let results = (outs Variadic<AnyRankedTensor>:$result);
+  let assemblyFormat = [{
+    attr-dict `ins` `(` $src `:` type($src) `)`
+    `outs` `(` $dst `:` type($dst) `)`
+    `interleave_channel_nums` `=` $interleave_channel_nums
+    (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+    (`->` type($result)^)?
+  }];
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result, "ValueRange":$src, "Value":$dst)>,
+    OpBuilder<(ins "TypeRange":$result, "ValueRange":$src, "Value":$dst,
+                   "int64_t":$interleave_channel_nums)>
+  ];
+  let hasVerifier = 1;
+  let extraClassDeclaration = vectorOpBaseDecls # [{
+    static StringRef getOpName() { return "interleave"; }
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Vector Deinterleave Op
+//===----------------------------------------------------------------------===//
+
+def VDeinterleaveOp : HIVM_VectorOp<"vdeinterleave",
+    [SameOperandsElementType, HIVMOpSameOperandsAndResultRank,
+     NotVectorizableTrait,
+     OperElemTypeConstraints<[0],
+       [I8, UI8, I16, F16, UI16, I32, F8E4M3FN, F8E5M2, F32, UI32, BF16, I64, UI64]>,
+     DeclareOpInterfaceMethods<HIVMStructuredOpInterface,
+       ["getIteratorTypesArray"]>,
+     DeclareOpInterfaceMethods<BiShengIRAggregatedOpInterface,
+       ["decomposeOperation","getDecomposePhase"]>,
+     DeclareOpInterfaceMethods<ImplByScalarOpInterface>,
+     // Will automatically use the default uniform reassociation impl
+     UniformReassociationFlattenTrait,
+     DeclareOpInterfaceMethods<FlattenInterface,
+       ["getLimitedAxes"]>,
+    ]> {
+  let summary = "Vector Deinterleave Op";
+  let description = [{
+    Deinterleave one tensor along the last dimension.
+    The tensor's last dimension size must be multiple of `channel_num`.
+  }];
+  let arguments = (ins TensorOrMemref:$src,
+                       Variadic<TensorOrMemref>:$dst,
+                       DefaultValuedOptionalAttr<I64Attr, "2">:$channel_num,
+                       DefaultValuedOptionalAttr<HIVM_DeinterleaveModeAttr,
+                         "DeinterleaveMode::ALL_CHANNELS">:$index_mode
+  );
+  let results = (outs Variadic<AnyRankedTensor>:$result);
+  let assemblyFormat = [{
+    attr-dict `ins` `(` $src `:` type($src) `)`
+    `outs` `(` $dst `:` type($dst) `)`
+    (`channel_num` `=` $channel_num^)?
+    (`index_mode` `=` $index_mode^)?
+    (`->` type($result)^)?
+  }];
+  let hasVerifier = 1;
+  let extraClassDeclaration = vectorOpBaseDecls # [{
+    static StringRef getOpName() { return "deinterleave"; }
+    int64_t getDeInterLeaveChannelNum() { return this->getChannelNum(); }
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Flip Op
+//===----------------------------------------------------------------------===//
+
+def VFlipOp : HIVM_VectorOp<"vflip",
+    [SameOperandsElementType,
+     OperElemTypeConstraints<[0, 1], [I8, UI8, I16, I32, UI16, UI32, I64, UI64, F16, F32, BF16]>,
+     NotVectorizableTrait,
+     DeclareOpInterfaceMethods<HIVMStructuredOpInterface,
+       ["getIteratorTypesArray"]>,
+     // Will automatically use the default uniform reassociation impl
+     UniformReassociationFlattenTrait,
+     DeclareOpInterfaceMethods<FlattenInterface,
+                               ["getLimitedAxes", "adjustTargetDimensions"]>
+    ]> {
+  let summary = "Vector Flip Op";
+  let description = [{
+    Flips a tensor along the last dimension.
+  }];
+  let arguments = (ins TensorOrMemref:$src,
+                       TensorOrMemref:$dst,
+                       I64Attr:$flip_axis
+  );
+  let results = (outs Variadic<AnyRankedTensor>:$result);
+  let assemblyFormat = [{
+    attr-dict `ins` `(` $src `:` type($src) `)`
+    `outs` `(` $dst `:` type($dst) `)`
+    `flip_axis` `=` $flip_axis
+    (`->` type($result)^)?
+  }];
+  let extraClassDeclaration = vectorOpBaseDecls # [{
+    static StringRef getOpName() { return "flip"; }
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Vector MulExtended Op
+//===----------------------------------------------------------------------===//
+
+def VMulextendedOp : HIVM_VectorOp<"vmulextended",
+    [AttrSizedOperandSegments, HIVMOpSameOperandsAndResultRank,
+     NotVectorizableTrait,
+     OperElemTypeConstraints<[0], [I16]>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface>,
+     DeclareOpInterfaceMethods<HIVMStructuredOpInterface,
+       ["getIteratorTypesArray",
+       ]>,
+     // Will automatically use the default uniform reassociation impl
+     UniformReassociationFlattenTrait,
+     DeclareOpInterfaceMethods<FlattenInterface,
+                               ["getLimitedAxes"]>
+     ]> {
+  let summary = "Vector Mulextended Op";
+  let description = [{
+    Do vmul on two tensors. Get both high and low 16-bits.
+  }];
+  let arguments = (ins Variadic<TensorOrMemref>:$src,
+                       Variadic<TensorOrMemref>:$dst,
+                       Optional<AnyMemRef>:$temp_buffer
+  );
+  let results = (outs Variadic<AnyRankedTensor>:$result);
+  let assemblyFormat = [{
+    attr-dict `ins` `(` $src `:` type($src) `)`
+    `outs` `(` $dst `:` type($dst) `)`
+    (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+    (`->` type($result)^)?
+  }];
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result, "ValueRange":$src, "ValueRange":$dst)>
+  ];
+  let extraClassDeclaration = vectorOpBaseDecls # [{
+    static StringRef getOpName() { return "mul_extended"; }
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Vector Pad Op
+//===----------------------------------------------------------------------===//
+
+def VPadOp : HIVM_VectorOp<"vpad",
+    [HIVMOpSameOperandsAndResultRank,
+     AttrSizedOperandSegments, NoLibraryFunctionTrait,
+     NotVectorizableTrait,
+     DeclareOpInterfaceMethods<HIVMStructuredOpInterface,
+       ["getIteratorTypesArray"]>,
+     // Will automatically use the default uniform reassociation impl
+     UniformReassociationFlattenTrait,
+     DeclareOpInterfaceMethods<FlattenInterface,
+       ["adjustTargetDimensions", "getLimitedAxes"]>,
+     DeclareOpInterfaceMethods<BiShengIRAggregatedOpInterface,
+       ["decomposeOperation", "getDecomposePhase"]>]> {
+  let summary = "Vector Pad Op";
+  let description = [{
+    Pads the input operand. Operation semantic is similar to
+    `tensor.pad`.
+
+    Arguments:
+      * `src`: the tensor/memref on which to pad values
+      * `dst`: reserved for bufferization
+      * `pad_value`: the value to pad
+      * `low`: the padding lengths along the start of each dimension
+      * `high`: the padding lengths along the end of each dimension
+
+    Example:
+    ```mlir
+    hivm.hir.vpad ins(%src : tensor<2x16xf32>) outs(%dst: tensor<?x16xf32>)
+                  low[%first_dim_low, 0] high[%first_dim_high, 0]
+                  pad_value %pad_value : f32
+                    -> tensor<?x16xf32>
+    ```
+  }];
+  let arguments = (ins TensorOrMemref:$src,
+                       TensorOrMemref:$dst,
+                       AnyType:$pad_value,
+                       Variadic<Index>:$low,
+                       Variadic<Index>:$high,
+                       DenseI64ArrayAttr:$static_low,
+                       DenseI64ArrayAttr:$static_high
+  );
+  let results = (outs Variadic<AnyRankedTensor>:$result);
+  let assemblyFormat = [{
+    attr-dict
+    `ins` `(` $src `:` type($src) `)`
+    `outs` `(` $dst `:` type($dst) `)`
+    `low` `` custom<DynamicIndexList>($low, $static_low)
+    `high` `` custom<DynamicIndexList>($high, $static_high)
+    `pad_value` $pad_value `:` type($pad_value)
+    (`->` type($result)^)?
+  }];
+  let hasCanonicalizer = 1;
+  let extraClassDeclaration = vectorOpBaseDecls # [{
+    static StringRef getOpName() { return "pad"; }
+    SmallVector<OpFoldResult>
+    getMixedPadImpl(ArrayRef<int64_t> staticAttrs, ValueRange values);
+    SmallVector<OpFoldResult> getMixedLowPad();
+    SmallVector<OpFoldResult> getMixedHighPad();
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Vector Concat Op
+//===---------------------------------------------------------------------q-===//
+
+def VConcatOp : HIVM_VectorOp<"vconcat",
+    [SameOperandsElementType, NoLibraryFunctionTrait,
+     NotVectorizableTrait,
+     DeclareOpInterfaceMethods<HIVMStructuredOpInterface,
+       ["getIteratorTypesArray"]>,
+     DeclareOpInterfaceMethods<BiShengIRAggregatedOpInterface,
+       ["decomposeOperation","getDecomposePhase"]>,
+     // Will automatically use the default uniform reassociation impl
+     UniformReassociationFlattenTrait,
+     DeclareOpInterfaceMethods<FlattenInterface,
+       ["adjustTargetDimensions", "getLimitedAxes"]>
+    ]> {
+  let summary = "Vector Concatenation Op";
+  let description = [{
+    The concat operation constructs a tensor out of a variadic list of input
+    tensors, concatenated along a static dimension number. All inputs and the
+    result type must share the same rank.
+
+    `dim` specifies the dimension along which to concatenate. The size of the
+    concatenated dimension in the result must be equal to the sum of the sizes
+    of the inputs along that dimension. All other dimensions in both the inputs
+    and result must be the same size.
+
+    Example:
+    ```mlir
+    hivm.hir.vconcat dim(1) ins(%0, %1 : tensor<136x2048xf32>, tensor<136x2048xf32>)
+                            outs(%2 : tensor<136x4096xf32>) -> tensor<136x4096xf32>
+    ```
+  }];
+  let arguments = (ins I64Attr:$dim,
+                       Variadic<AnyType>:$src,
+                       TensorOrMemref:$dst
+  );
+  let results = (outs Variadic<AnyRankedTensor>:$result);
+  let assemblyFormat = [{
+    `dim` `(` $dim `)` attr-dict `ins` `(` $src `:` type($src) `)`
+    `outs` `(` $dst `:` type($dst) `)`
+    (`->` type($result)^)?
+  }];
+  let extraClassDeclaration = vectorOpBaseDecls;
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Gather Op
+//===----------------------------------------------------------------------===//
+
+def VGatherOp : HIVM_VectorOp<"vgather",
+    [HIVMOpSameOperandsAndResultRank,
+     OperElemTypeConstraints<[0], [I1, I8, I16, UI16, I32, UI32, F16, BF16, F32, F8E4M3FN, F8E5M2]>,
+     OperElemTypeConstraints<[1], [I16, I32]>,
+     NotVectorizableTrait,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface>,
+     DeclareOpInterfaceMethods<HIVMStructuredOpInterface,
+       ["getIteratorTypesArray"]>,
+     // Will automatically use the default uniform reassociation impl
+     UniformReassociationFlattenTrait,
+     DeclareOpInterfaceMethods<FlattenInterface,
+       ["getLimitedAxes"]>
+    ]> {
+  let summary = "Vector Gather Op";
+  let description = [{
+    Retrieve elements from a tensor/memref according to given indices,
+    and store these elements in another tensor/memref.
+
+    All gather operations are dispatched to the SIMT template regardless
+    of whether the gather axis is the last dimension or not.
+
+    Arguments:
+      * `src`: the tensor/memref from which to gather elements
+      * `indices`: the indices of elements to gather from src
+      * `dst`: the tensor/memref to store elements
+      * `temp_buffer`: extra memory required by gather op
+      * `gather_axis`: the axis along which to gather; -1 means last dim
+  }];
+  let arguments = (ins TensorOrMemref:$src,
+                       TensorOrMemref:$indices,
+                       TensorOrMemref:$dst,
+                       Optional<AnyMemRef>:$temp_buffer,
+                       OptionalAttr<I64Attr>:$gather_axis
+  );
+  let results = (outs Variadic<AnyRankedTensor>:$result);
+  let assemblyFormat = [{
+    attr-dict `ins` `(` $src `:` type($src) `)`
+    `indices` `(` $indices `:` type($indices) `)`
+    `outs` `(` $dst `:` type($dst) `)`
+    (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+    (`gather_axis` `=` $gather_axis^)?
+    (`->` type($result)^)?
+  }];
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result, "Value":$src, "Value":$indices, "Value":$dst)>,
+    OpBuilder<(ins "TypeRange":$result, "Value":$src, "Value":$indices, "Value":$dst, "int64_t":$axis)>
+  ];
+  let extraClassDeclaration = vectorOpBaseDecls # [{
+    static StringRef getOpName() { return "gather"; }
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM GatherMask Op
+//===----------------------------------------------------------------------===//
+
+def VGatherMaskOp : HIVM_VectorOp<"vgathermask",
+    [HIVMOpSameOperandsAndResultRank,
+     OperElemTypeConstraints<[0], [I16, UI16, I32, UI32, F16, BF16, F32]>,
+     OperElemTypeConstraints<[1], [I1]>,
+     NotVectorizableTrait,
+     DeclareOpInterfaceMethods<HIVMStructuredOpInterface,
+       ["getIteratorTypesArray"]>,
+     UniformReassociationFlattenTrait,
+     DeclareOpInterfaceMethods<FlattenInterface,
+       ["getLimitedAxes"]>
+    ]> {
+  let summary = "Vector Gather Mask Op";
+  let description = [{
+    Gathers elements from the `src` tensor where the corresponding element in the `mask` tensor is True.
+    Writes the result to the pre-allocated `dst` tensor/memref (InPlace semantics),
+    and returns the `dst` tensor as `result` for functional compatibility.
+    The `dst`/`result` tensor will have the same shape and element type as the `src` tensor.
+
+    Arguments:
+      * `src`: the tensor/memref from which to gather elements
+      * `mask`: the mask tensor/memref to filter elements (non-zero = select src element)
+      * `dst`: the pre-allocated tensor/memref to store the gathered elements (InPlace write)
+    Results:
+      * `result`: the same as `dst` (functional return for compatibility)
+      * `dst_size`: the actual number of elements gathered from src
+
+    Usage:
+      result_data, result_size = vgathermask ins (%src : tensor<16xf32>) mask (%mask : tensor<16xi1>) outs (%dst_data, %dst_size : tensor<16xf32>, tensor<1xi64>)
+  }];
+  let arguments = (ins TensorOrMemref:$src,
+                       TensorOrMemref:$mask,
+                       Variadic<TensorOrMemref>:$dst
+  );
+  let results = (outs Variadic<AnyRankedTensor>:$result);
+  let assemblyFormat = [{
+    attr-dict `ins` `(` $src `:` type($src) `)`
+    `mask` `(` $mask `:` type($mask) `)`
+    `outs` `(` $dst `:` type($dst) `)`
+    (`->` type($result)^)?
+  }];
+  let extraClassDeclaration = vectorOpBaseDecls # [{
+    static StringRef getOpName() { return "vgathermask"; }
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Vector Cumprod Op
+//===----------------------------------------------------------------------===//
+
+def VCumprodOp : HIVM_VectorOp<"vcumprod",
+    [SameOperandsElementType,
+     OperElemTypeConstraints<[0], [I1, I8, I16, I32, I64, F16, F32, BF16]>,
+     NotVectorizableTrait,
+     DeclareOpInterfaceMethods<HIVMStructuredOpInterface,
+       ["getIteratorTypesArray"]>,
+     UniformReassociationFlattenTrait,
+     DeclareOpInterfaceMethods<FlattenInterface,
+       ["getLimitedAxes", "adjustTargetDimensions"]>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface,
+       ["getExtraBufferSize"]>,
+     DeclareOpInterfaceMethods<ImplByScalarOpInterface>
+    ]> {
+  let summary = "Vector Cumprod Op";
+  let description = [{
+    Calculate the cumulative product of each element along the specified axis
+    of `src`. Each element along the specified axis in the output of cumprod
+    contains the product of all elements from the first element to the current
+    position in the original `src`.
+
+    Constraints:
+      1. The input vector and output vector must have the same rank
+         and the same element type.
+
+    Arguments:
+      * `src`: the tensor/memref from which to calculate the cumulative sum
+      * `dst`: the tensor/memref to store elements
+      * `cum_dims`: specifies the dimension along which to calculate the
+                    cumulative product.
+      * `reverse`: specifies the direction of the cumulative product.
+
+    Examples:
+    ```mlir
+    hivm.hir.vcumprod ins(%src : memref<?xf32>) outs(%dst : memref<?xf32>) cum_dims : [0] reverse = true
+    %result = hivm.hir.vcumprod ins(%src : tensor<?xf32>) outs(%dst : tensor<?xf32>) cum_dims : [0] reverse = true -> tensor<?xf32>
+    ```
+  }];
+  let arguments = (ins TensorOrMemref:$src,
+                       TensorOrMemref:$dst,
+                       Optional<AnyMemRef>:$temp_buffer,
+                       ConfinedAttr<DenseI64ArrayAttr,
+                       [DenseArrayStrictlySorted<DenseI64ArrayAttr>]>:$cum_dims,
+                       DefaultValuedOptionalAttr<BoolAttr, "false">:$reverse
+  );
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result, "Value":$src, "Value":$dst,
+                  "DenseI64ArrayAttr":$cum_dims,
+                  "bool":$reverse)>,
+    OpBuilder<(ins "TypeRange":$result, "Value":$src, "Value":$dst,
+                  "ArrayRef<int64_t>":$cum_dims,
+                  "bool":$reverse)>
+    ];
+  let results = (outs Variadic<AnyRankedTensor>:$result);
+  let assemblyFormat = [{
+    attr-dict `ins` `(` $src `:` type($src) `)`
+    `outs` `(` $dst `:` type($dst) `)`
+    (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+    `cum_dims` `=` $cum_dims
+    `reverse` `=` $reverse
+    (`->` type($result)^)?
+  }];
+  let hasCanonicalizer = 1;
+  let hasVerifier = 1;
+  let extraClassDeclaration = vectorOpBaseDecls # [{
+    static StringRef getOpName() { return "cumprod"; }
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Vector Cumsum Op
+//===----------------------------------------------------------------------===//
+
+def VCumsumOp : HIVM_VectorOp<"vcumsum",
+    [OperElemTypeConstraints<[0], [I1, I8, I16, I32, I64, F16, F32, BF16]>,
+     NotVectorizableTrait,
+     DeclareOpInterfaceMethods<HIVMStructuredOpInterface,
+       ["getIteratorTypesArray"]>,
+     UniformReassociationFlattenTrait,
+     DeclareOpInterfaceMethods<FlattenInterface,
+       ["getLimitedAxes", "adjustTargetDimensions"]>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface,
+       ["getExtraBufferSize"]>,
+     DeclareOpInterfaceMethods<ImplByScalarOpInterface>
+    ]> {
+  let summary = "Vector Cumsum Op";
+  let description = [{
+    Calculate the cumulative sum of each element along the specified axis of
+    `src`. Each element along the specified axis in the output of cumsum
+    contains the sum of all elements from the first element to the current
+    position in the original `src`.
+
+    Constraints:
+      1. The input vector and output vector must have the same rank
+         and the same element type.
+
+    Arguments:
+      * `src`: the tensor/memref from which to calculate the cumulative sum
+      * `dst`: the tensor/memref to store elements
+      * `cum_dims`: specifies the dimension along which to calculate the
+                    cumulative sum.
+      * `reverse`: specifies the direction of the cumulative sum.
+
+    Examples:
+    ```mlir
+    hivm.hir.vcumsum ins(%src : memref<?xf32>) outs(%dst : memref<?xf32>) cum_dims : [0] reverse = true
+    %result = hivm.hir.vcumsum ins(%src : tensor<?xf32>) outs(%dst : tensor<?xf32>) cum_dims : [0] reverse = true -> tensor<?xf32>
+    ```
+  }];
+  let arguments = (ins TensorOrMemref:$src,
+                       TensorOrMemref:$dst,
+                       Optional<AnyMemRef>:$temp_buffer,
+                       ConfinedAttr<DenseI64ArrayAttr,
+                       [DenseArrayStrictlySorted<DenseI64ArrayAttr>]>:$cum_dims,
+                       DefaultValuedOptionalAttr<BoolAttr, "false">:$reverse
+  );
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result, "Value":$src, "Value":$dst,
+                   "DenseI64ArrayAttr":$cum_dims,
+                   "bool":$reverse)>,
+    OpBuilder<(ins "TypeRange":$result, "Value":$src, "Value":$dst,
+                   "ArrayRef<int64_t>":$cum_dims,
+                   "bool":$reverse)>
+  ];
+  let results = (outs Variadic<AnyRankedTensor>:$result);
+  let assemblyFormat = [{
+    attr-dict `ins` `(` $src `:` type($src) `)`
+    `outs` `(` $dst `:` type($dst) `)`
+    (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+    `cum_dims` `=` $cum_dims
+    `reverse` `=` $reverse
+    (`->` type($result)^)?
+  }];
+  let hasCanonicalizer = 1;
+  let hasVerifier = 1;
+  let extraClassDeclaration = vectorOpBaseDecls # [{
+    static StringRef getOpName() { return "cumsum"; }
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Vector Cummax Op
+//===----------------------------------------------------------------------===//
+
+def VCummaxOp : HIVM_VectorOp<"vcummax",
+    [SameOperandsElementType,
+     StaticMaxRankTrait<2>,
+     OperElemTypeConstraints<[0], [I1, I8, I16, I32, I64, F16, F32, BF16]>,
+     NotVectorizableTrait,
+     DeclareOpInterfaceMethods<HIVMStructuredOpInterface,
+       ["getIteratorTypesArray"]>,
+     UniformReassociationFlattenTrait,
+     DeclareOpInterfaceMethods<FlattenInterface,
+       ["getLimitedAxes", "adjustTargetDimensions"]>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface,
+       ["getExtraBufferSize"]>,
+     DeclareOpInterfaceMethods<ImplByScalarOpInterface>
+    ]> {
+  let summary = "Vector Cummax Op";
+  let description = [{
+    Calculate the cumulative maximum of each element along the specified axis
+    of `src`. Each element along the specified axis in the output of cummax
+    contains the maximum of all elements from the first element to the current
+    position in the original `src`.
+
+    Constraints:
+      1. The input vector and output vector must have the same rank
+         and the same element type.
+
+    Arguments:
+      * `src`: the tensor/memref from which to calculate the cumulative maximum
+      * `dst`: the tensor/memref to store elements
+      * `cum_dims`: specifies the dimension along which to calculate the
+                    cumulative maximum.
+
+    Examples:
+    ```mlir
+    hivm.hir.vcummax ins(%src : memref<?xf32>) outs(%dst : memref<?xf32>) cum_dims : [0]
+    %result = hivm.hir.vcummax ins(%src : tensor<?xf32>) outs(%dst : tensor<?xf32>) cum_dims : [0] -> tensor<?xf32>
+    ```
+  }];
+  let arguments = (ins TensorOrMemref:$src,
+                       TensorOrMemref:$dst,
+                       Optional<AnyMemRef>:$temp_buffer,
+                       ConfinedAttr<DenseI64ArrayAttr,
+                       [DenseArrayStrictlySorted<DenseI64ArrayAttr>]>:$cum_dims,
+                       BoolAttr:$reverse,
+                       DefaultValuedAttr<BoolAttr, "true">:$propagate_nan
+  );
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result, "Value":$src, "Value":$dst,
+                   "DenseI64ArrayAttr":$cum_dims,
+                   "bool":$reverse)>,
+    OpBuilder<(ins "TypeRange":$result, "Value":$src, "Value":$dst,
+                   "ArrayRef<int64_t>":$cum_dims,
+                   "bool":$reverse)>
+  ];
+  let results = (outs Variadic<AnyRankedTensor>:$result);
+  let assemblyFormat = [{
+    attr-dict `ins` `(` $src `:` type($src) `)`
+    `outs` `(` $dst `:` type($dst) `)`
+    (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+    `cum_dims` `=` $cum_dims
+    `reverse` `=` $reverse
+    (`->` type($result)^)?
+  }];
+  let hasCanonicalizer = 1;
+  let hasVerifier = 1;
+  let extraClassDeclaration = vectorOpBaseDecls # [{
+    static StringRef getOpName() { return "cummax"; }
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Vector Cummin Op
+//===----------------------------------------------------------------------===//
+
+def VCumminOp : HIVM_VectorOp<"vcummin",
+    [SameOperandsElementType,
+     StaticMaxRankTrait<2>,
+     OperElemTypeConstraints<[0], [I1, I8, I16, I32, I64, F16, F32, BF16]>,
+     NotVectorizableTrait,
+     DeclareOpInterfaceMethods<HIVMStructuredOpInterface,
+       ["getIteratorTypesArray"]>,
+     UniformReassociationFlattenTrait,
+     DeclareOpInterfaceMethods<FlattenInterface,
+       ["getLimitedAxes", "adjustTargetDimensions"]>,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface,
+       ["getExtraBufferSize"]>,
+     DeclareOpInterfaceMethods<ImplByScalarOpInterface>
+    ]> {
+  let summary = "Vector Cummin Op";
+  let description = [{
+    Calculate the cumulative minimum of each element along the specified axis
+    of `src`. Each element along the specified axis in the output of cummin
+    contains the minimum of all elements from the first element to the current
+    position in the original `src`.
+
+    Constraints:
+      1. The input vector and output vector must have the same rank
+         and the same element type.
+
+    Arguments:
+      * `src`: the tensor/memref from which to calculate the cumulative minimum
+      * `dst`: the tensor/memref to store elements
+      * `cum_dims`: specifies the dimension along which to calculate the
+                    cumulative minimum.
+
+    Examples:
+    ```mlir
+    hivm.hir.vcummin ins(%src : memref<?xf32>) outs(%dst : memref<?xf32>) cum_dims : [0]
+    %result = hivm.hir.vcummin ins(%src : tensor<?xf32>) outs(%dst : tensor<?xf32>) cum_dims : [0] -> tensor<?xf32>
+    ```
+  }];
+  let arguments = (ins TensorOrMemref:$src,
+                       TensorOrMemref:$dst,
+                       Optional<AnyMemRef>:$temp_buffer,
+                       ConfinedAttr<DenseI64ArrayAttr,
+                       [DenseArrayStrictlySorted<DenseI64ArrayAttr>]>:$cum_dims,
+                       BoolAttr:$reverse,
+                       DefaultValuedAttr<BoolAttr, "true">:$propagate_nan
+  );
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result, "Value":$src, "Value":$dst,
+                   "DenseI64ArrayAttr":$cum_dims,
+                   "bool":$reverse)>,
+    OpBuilder<(ins "TypeRange":$result, "Value":$src, "Value":$dst,
+                   "ArrayRef<int64_t>":$cum_dims,
+                   "bool":$reverse)>
+  ];
+  let results = (outs Variadic<AnyRankedTensor>:$result);
+  let assemblyFormat = [{
+    attr-dict `ins` `(` $src `:` type($src) `)`
+    `outs` `(` $dst `:` type($dst) `)`
+    (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+    `cum_dims` `=` $cum_dims
+    `reverse` `=` $reverse
+    (`->` type($result)^)?
+  }];
+  let hasCanonicalizer = 1;
+  let hasVerifier = 1;
+  let extraClassDeclaration = vectorOpBaseDecls # [{
+    static StringRef getOpName() { return "cummin"; }
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Vector Sort Op
+//===----------------------------------------------------------------------===//
+
+def VSortOp : HIVM_VectorOp<"vsort",
+    [AttrSizedOperandSegments,
+     // Expanded element types via hivm sort normalize pattern
+     OperElemTypeConstraints<[0, 1], [F16, F32, I8, I16, I32, I64]>,
+     NotVectorizableTrait,
+     DeclareOpInterfaceMethods<ExtraBufferOpInterface,
+       ["getExtraBufferSize", "shouldAllocExtraBufferForScalarOrOTFBrc"]>,
+     // Will automatically use the default uniform reassociation impl
+     UniformReassociationFlattenTrait,
+     DeclareOpInterfaceMethods<FlattenInterface,
+                               ["getLimitedAxes", "adjustTargetDimensions"]>
+    ]> {
+  let summary = "Vector Sort Op";
+  let description = [{
+    Sort the sorting axis of `src` in ascending or descending order, and output
+    the sorted value and the index corresponding to the value.
+
+    Constraints:
+      1. The input vector and output vector must have the same rank.
+      2. Currently only tail axis sorting is supported.
+
+    Arguments:
+      * `src`: the tensor/memref from which to be sorted
+      * `dst_value`: the tensor/memref to store the sorted value
+      * `dst_index`: the tensor/memref to store the index corresponding to dst_value
+      * `descending`: determines whether to sort in ascending or descending
+                      order. The default is false, which means ascending order
+      * `sort_axis`: Axis to be sorted
+
+    Examples:
+    ```mlir
+    hivm.hir.vsort ins(%src : memref<?xf32>) outs(%dst : memref<?xf32>) descending = true sort_axis = 0
+    %result = hivm.hir.vsort ins(%src : tensor<?xf32>) outs(%dst : tensor<?xf32>) descending = true sort_axis = 0 -> tensor<?xf32>
+    ```
+  }];
+  let arguments = (ins TensorOrMemref:$src,
+                       Variadic<TensorOrMemref>:$dst,
+                       Optional<AnyMemRef>:$temp_buffer,
+                       DefaultValuedOptionalAttr<BoolAttr, "false">:$descending,
+                       DefaultValuedAttr<I64Attr, "-1">:$sort_axis
+  );
+  let results = (outs Variadic<AnyRankedTensor>:$result);
+  let assemblyFormat = [{
+    attr-dict `ins` `(` $src `:` type($src) `)`
+    `outs` `(` $dst `:` type($dst) `)`
+    `descending` `=` $descending
+    `sort_axis` `=` $sort_axis
+    (`temp_buffer` `(` $temp_buffer^ `:` type($temp_buffer) `)`)?
+    (`->` type($result)^)?
+  }];
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result, "Value":$src,
+                   "ValueRange":$dst, "bool":$descending, "int64_t":$sort_axis)>];
+  let hasCanonicalizer = 1;
+  let hasVerifier = 1;
+  let extraClassDeclaration = vectorOpBaseDecls # [{
+    static StringRef getOpName() { return "sort"; }
+
+    // Get the sort value.
+    Value getDstValue();
+
+    // Get the sort index.
+    Value getDstIndex();
+
+    // Get Signed Sort Axis
+    int64_t getSignedSortAxis();
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Vector IsInf Op
+//===----------------------------------------------------------------------===//
+
+// Note: BF16 is not supported because VAbsOp does not support BF16 element type.
+// The normalization uses VAbsOp after bitcast, which requires F16 or F32.
+def VIsInfOp : HIVM_ElementwiseUnaryOp<"visinf",
+    [VectorOnlyTrait<0>,
+     NotVectorizableTrait,
+     NoLibraryFunctionTrait,
+     OperElemTypeConstraints<[0], [F16, F32]>,
+     BroadcastableOTF
+    ]> {
+  let summary = "Elementwise Vector IsInfinity Op";
+  let description = baseClassDescription # [{
+    Returns 1 if the input element is positive or negative infinity, 0 otherwise.
+
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+      2. The element type of `dst` must be bool (i1).
+  }];
+  let arguments = (ins Variadic<AnyShaped>:$src,
+                       Variadic<AnyShaped>:$dst,
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$transpose,
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$broadcast
+  );
+  let assemblyFormat = [{
+      attr-dict `ins` `(` $src `:` type($src) `)`
+      `outs` `(` $dst  `:` type($dst) `)`
+      (`->` type($result)^)?
+    }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Vector IsNan Op
+//===----------------------------------------------------------------------===//
+
+// Note: BF16 is not supported because VAbsOp does not support BF16 element type.
+// The normalization uses VAbsOp after bitcast, which requires F16 or F32.
+def VIsNanOp : HIVM_ElementwiseUnaryOp<"visnan",
+    [VectorOnlyTrait<0>,
+     NotVectorizableTrait,
+     NoLibraryFunctionTrait,
+     OperElemTypeConstraints<[0], [F16, F32]>,
+     BroadcastableOTF
+    ]> {
+  let summary = "Elementwise Vector IsNaN Op";
+  let description = baseClassDescription # [{
+    Returns 1 if the input element is NaN (Not a Number), 0 otherwise.
+
+    Additional constraints:
+      1. The input/init operands and result have the same element type.
+      2. The element type of `dst` must be bool (i1).
+  }];
+  let arguments = (ins Variadic<AnyShaped>:$src,
+                       Variadic<AnyShaped>:$dst,
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$transpose,
+                       DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$broadcast
+  );
+  let assemblyFormat = [{
+      attr-dict `ins` `(` $src `:` type($src) `)`
+      `outs` `(` $dst  `:` type($dst) `)`
+      (`->` type($result)^)?
+    }];
+  let extraClassDeclaration = elemwiseOpBaseDecls;
+}
+
+#endif // BISHENGIR_DIALECT_HIVM_IR_HIVMVECTOROPS_TD

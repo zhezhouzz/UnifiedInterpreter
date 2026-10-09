@@ -1,0 +1,1140 @@
+//===- HIVMMacroOps.td - HIVM dialect macro operations -----*- tablegen -*-===//
+//
+// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//===----------------------------------------------------------------------===//
+//
+// This is the definition file for HIVM dialect macro operations.
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef BISHENGIR_DIALECT_HIVM_IR_HIVMMACROOPS_TD
+#define BISHENGIR_DIALECT_HIVM_IR_HIVMMACROOPS_TD
+
+include "bishengir/Dialect/HIVM/IR/HIVMBase.td"
+include "bishengir/Dialect/HIVM/IR/HIVMAttrs.td"
+include "bishengir/Dialect/HIVM/IR/HIVMInterfaces.td"
+include "bishengir/Dialect/HIVM/Interfaces/OpLayoutInterface.td"
+include "bishengir/Dialect/HIVM/IR/HIVMTraits.td"
+
+include "mlir/Interfaces/InferTypeOpInterface.td"
+include "mlir/Interfaces/SideEffectInterfaces.td"
+include "mlir/Interfaces/ViewLikeInterface.td"
+
+//===----------------------------------------------------------------------===//
+// HIVM Macro Operations.
+//===----------------------------------------------------------------------===//
+
+class HIVM_MacroOp<string mnemonic, list<Trait> traits = []> :
+  HIVM_StructuredOp<mnemonic, !listconcat(
+    [MacroOpTrait,
+     DeclareOpInterfaceMethods<HIVMStructuredOpInterface,
+       ["getIteratorTypesArray"]>
+    ],
+    traits)
+  > {
+  code MacroOpBaseDecl = [{
+    ArrayAttr getIndexingMaps() {
+      return mlir::hivm::detail::getIndexingMapsImpl(*this);
+    }
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM MMAD-like op definitions.
+//===----------------------------------------------------------------------===//
+
+class HIVM_LocalMmadLikeOperandDags {
+  dag mmadCommonAB = (ins
+    Arg<TensorOrMemref, "Matrix A">:$a,
+    Arg<TensorOrMemref, "Matrix B">:$b
+  );
+
+  dag mmadCommonInit = (ins
+    Arg<I1, [{
+      The condition under which
+      data in L0C is cleared before use
+    }]>:$init_condition
+  );
+
+  dag mmadCommonMKN = (ins
+    Index:$real_m,
+    Index:$real_k,
+    Index:$real_n
+  );
+
+  dag mmadCommonC = (ins
+    Arg<TensorOrMemref, "Matrix C">:$c
+  );
+
+  // MmadL1 contract: C must be shaped F32/I32 (kept out of mmadCommonC,
+  // which is shared with MmadL0Op and must stay unconstrained).
+  dag mmadCommonCL1 = (ins
+    Arg<ShapedTypeOf<[F32, I32]>, "Matrix C">:$c
+  );
+
+  dag mmadCommonUnitFlagCond = (ins
+    Arg<Variadic<I1>, [{
+      An optional condition to enable unit-flag mode,
+      useful if there is a dependency on a for loop to run at least once.
+    }]>:$unit_flag_cond
+  );
+
+  dag mmadCommonUnitFlagAttrs = (ins
+    OptionalAttr<UnitFlagArrayAttr>:$unit_flag_mode,
+    OptionalAttr<I64Attr>:$unit_flag_group_id
+  );
+
+  dag mmadCommonEnableAttrs = (ins
+    Arg<OptionalAttr<UnitAttr>, [{
+      MMAD HF32 mode control.If true, FP32 data will be rounded
+      to HF32 by CUBE before matrix multiplication, which achieves
+      double performance of MMAD.F32 but losing precision.
+    }]>:$enable_HF32,
+    Arg<OptionalAttr<UnitAttr>, [{
+      Was i4 -> i8 conversion
+    }]>:$enable_I4
+  );
+
+  dag localMmadLikeArgs = (ins
+    Arg<I1, [{
+      The condition under which
+      data in L0C is cleared before use
+    }]>:$init_condition,
+    Index:$real_m,
+    Index:$real_k,
+    Index:$real_n
+  );
+
+  dag localMmadLikeSyncArgs = (ins
+    Arg<Variadic<I64>, [{
+      Arguments required by mma_tile to insert
+      synchronization instructions, they are
+      managed by Graph Sync Solver or InjectSync.
+      MmadL1Op: 4 Wait/Set pairs (A, B) + kLoopDBCond + 2 bwd events.
+      MmadMxL1Op: 8 independent Wait/Set event IDs —
+        Wait(MTE2→MTE1):  A[0], ScaleA[1], B[2], ScaleB[3]
+        Set (MTE1→MTE2):  A[4], ScaleA[5], B[6], ScaleB[7]
+    }]>:$sync_related_args
+  );
+
+  dag localMmadLikeTransposeArgs = (ins
+    Arg<OptionalAttr<UnitAttr>, [{
+      Matrix A is transposed before load
+    }]>:$a_transpose,
+    Arg<OptionalAttr<UnitAttr>, [{
+      Matrix B is transposed before load
+    }]>:$b_transpose
+  );
+}
+
+def HIVM_LocalMmadLikeOperands : HIVM_LocalMmadLikeOperandDags;
+
+//===----------------------------------------------------------------------===//
+// HIVM L1 MMAD op definitions.
+//===----------------------------------------------------------------------===//
+
+class HIVM_L1MmadOp<string mnemonic, list<Trait> traits = []> :
+  HIVM_MacroOp<mnemonic, !listconcat(
+    [HIVMLocalMatmulLikeOpTraits,
+     HIVMUnitFlagEnabledInterface,
+     AllElementTypesMatch<["a", "b"]>,
+    ], traits)> {
+  let arguments = !con(
+    HIVM_LocalMmadLikeOperands.mmadCommonAB,
+    HIVM_LocalMmadLikeOperands.localMmadLikeArgs,
+    HIVM_LocalMmadLikeOperands.mmadCommonCL1,
+    HIVM_LocalMmadLikeOperands.localMmadLikeSyncArgs,
+    HIVM_LocalMmadLikeOperands.mmadCommonUnitFlagCond,
+    (ins Optional<TensorOrMemref>:$per_channel_bias),
+    HIVM_LocalMmadLikeOperands.localMmadLikeTransposeArgs,
+    HIVM_LocalMmadLikeOperands.mmadCommonEnableAttrs,
+    HIVM_LocalMmadLikeOperands.mmadCommonUnitFlagAttrs
+  );
+  let results = (outs Variadic<RankedTensorOf<[F32, I32]>>:$result_tensors);
+  code localMmadBaseDecls = [{
+    // Implement functions necessary for DestinationStyleOpInterface.
+    ::mlir::MutableOperandRange getDpsInitsMutable() {
+      return getCMutable();
+    }
+    bool isInitConstant(std::optional<bool> cst = std::nullopt);
+    bool isInitFirstLoopIter();
+    void setInitCondition(Value init);
+    MatmulBiasMode getMatmulBiasMode();
+    bool shouldDecomposeBiasByElementAdd();
+    bool shouldDecomposeBiasByCrossLoopElementAdd();
+    bool supportsScaleOperands() { return false; }
+    bool usesBoolAttrForTargetLayout() { return false; }
+    llvm::SmallVector<int64_t> getMatmulBlockSizesTile(
+        Value oper, bool isTranspose, bool isA);
+    int getNumSyncRelatedArgs();
+    // Needed for lower-hivm-to-std, should be updated if input operands got changed.
+    SmallVector<Value> getInputOperands(bool includeSyncRelatedArgs = true);
+  }];
+  string localMmadBaseDes = [{
+    The computation logic is:
+
+    ```
+    C = C + A x B + (optional) channel_bias
+    ```
+  }];
+  let assemblyFormat = [{
+    attr-dict `ins` `(`
+    $a
+    `,` $b
+    `,` $init_condition
+    `,` $real_m
+    `,` $real_k
+    `,` $real_n
+    (`,` $per_channel_bias^)?
+    `:`
+    type($a)
+    `,` type($b)
+    `,` type($init_condition)
+    `,` type($real_m)
+    `,` type($real_k)
+    `,` type($real_n)
+    (`,` type($per_channel_bias)^)? `)`
+    `outs` `(` $c `:` type($c) `)`
+    (`sync_related_args` `(` $sync_related_args^ `:` type($sync_related_args) `)`)?
+    (`unit_flag_mode` `(` $unit_flag_mode^ `)` )?
+    (`unit_flag_cond` `(` $unit_flag_cond^ `)` )?
+    (`->` type($result_tensors)^)?
+  }];
+
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result_tensors,
+                   "Value":$a,
+                   "Value":$b,
+                   "Value":$init_condition,
+                   "Value":$real_m,
+                   "Value":$real_k,
+                   "Value":$real_n,
+                   "Value":$c,
+                   CArg<"Value", "{}">:$per_channel_bias,
+                   CArg<"UnitAttr", "{}">:$a_transpose,
+                   CArg<"UnitAttr", "{}">:$b_transpose,
+                   CArg<"UnitAttr", "{}">:$enable_HF32,
+                   CArg<"UnitAttr", "{}">:$enable_I4)>
+  ];
+
+  let hasVerifier = 1;
+}
+
+def MmadL1Op : HIVM_L1MmadOp<"mmadL1", [
+  NoMaxRankTrait,
+  DeclareOpInterfaceMethods<HIVMStructuredOpInterface, ["getIndexingMaps"]>,
+  DeclareOpInterfaceMethods<OpLayoutInterface, ["getOperandsTargetFractalLayout"]>,
+]> {
+  let summary = [{
+    Matrix Multiply and Add Op with inputs from L1 memory hierarchy.
+  }];
+  let description = localMmadBaseDes # [{
+    Note: the rank of A, B, and C Matrix must be two.
+  }];
+  let extraClassDeclaration = localMmadBaseDecls # [{
+    static StringRef getOpName() { return "mma_tile"; }
+
+    // Declare functions necessary for OpLayoutInterface.
+    FailureOr<DataLayoutAttr> getOperandALayout();
+    FailureOr<DataLayoutAttr> getOperandBLayout();
+    FailureOr<DataLayoutAttr> getOperandCLayout();
+    FailureOr<DataLayoutAttr> getOperandBiasLayout();
+    llvm::SmallVector<int64_t> getBlockSizesTile(
+        Value oper, bool isTranspose, bool isA);
+  }];
+}
+
+def BatchMmadL1Op : HIVM_L1MmadOp<"batchMmadL1", [
+  NoMaxRankTrait,
+  DeclareOpInterfaceMethods<OpLayoutInterface, ["getOperandsTargetFractalLayout"]>,
+]> {
+  let summary = [{
+    Batch Matrix Multiply and Add Op with inputs from L1 memory hierarchy.
+  }];
+  let description = localMmadBaseDes # [{
+    Note: the rank of A, B, and C Matrix must be three, where the 0-th dimension
+    being the batch dimension.
+  }];
+  let extraClassDeclaration = localMmadBaseDecls # [{
+    static StringRef getOpName() { return "batch_mma_tile"; }
+
+    FailureOr<DataLayoutAttr> getOperandALayout();
+    FailureOr<DataLayoutAttr> getOperandBLayout();
+    FailureOr<DataLayoutAttr> getOperandCLayout();
+    FailureOr<DataLayoutAttr> getOperandBiasLayout();
+    llvm::SmallVector<int64_t> getBlockSizesTile(
+        Value oper, bool isTranspose, bool isA);
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM L0 MMAD op definitions.
+//===----------------------------------------------------------------------===//
+
+def MmadL0Op : HIVM_StructuredOp<"mmadL0", [
+  CubeCoreTypeTrait,
+  SinglePipeOpTrait,
+  HIVMLocalMatmulL0OpInterface,
+  HIVMUnitFlagEnabledInterface,
+  OpPipeTrait<"PIPE::PIPE_M">,
+  DeclareOpInterfaceMethods<HIVMStructuredOpInterface,
+    ["getIteratorTypesArray"]>,
+]> {
+  let arguments = !con(
+    HIVM_LocalMmadLikeOperands.mmadCommonAB,
+    HIVM_LocalMmadLikeOperands.mmadCommonMKN,
+    HIVM_LocalMmadLikeOperands.mmadCommonC,
+    (ins
+      Arg<I1, [{}]>:$k_direction_align,
+      Arg<I1, [{
+        If true, data in L0C is initialized from the bias source.
+      }]>:$is_with_bias
+    ),
+    HIVM_LocalMmadLikeOperands.mmadCommonInit,
+    HIVM_LocalMmadLikeOperands.mmadCommonUnitFlagCond,
+    HIVM_LocalMmadLikeOperands.mmadCommonEnableAttrs,
+    HIVM_LocalMmadLikeOperands.mmadCommonUnitFlagAttrs
+  );
+  let results = (outs Variadic<AnyRankedTensor>:$result_tensors);
+
+  let summary = [{
+    Matrix Multiply and Add Op with inputs from L0 memory hierarchy.
+  }];
+  let description = [{
+    The computation logic is:
+
+    ```
+    C = C + A x B + (optional) bias
+    ```
+  }];
+  let assemblyFormat = [{
+    attr-dict `ins` `(`
+    $a
+    `,` $b
+    `,` $real_m
+    `,` $real_k
+    `,` $real_n
+    `,` $k_direction_align
+    `,` $is_with_bias
+    `,` $init_condition
+    `:`
+    type($a)
+    `,` type($b)
+    `,` type($real_m)
+    `,` type($real_k)
+    `,` type($real_n)
+    `,` type($k_direction_align)
+    `,` type($is_with_bias)
+    `,` type($init_condition) `)`
+    `outs` `(` $c `:` type($c) `)`
+    (`unit_flag_mode` `(` $unit_flag_mode^ `)` )?
+    (`unit_flag_cond` `(` $unit_flag_cond^ `)` )?
+    (`->` type($result_tensors)^)?
+  }];
+
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result_tensors,
+                   "Value":$a,
+                   "Value":$b,
+                   "Value":$real_m,
+                   "Value":$real_k,
+                   "Value":$real_n,
+                   "Value":$c,
+                   "Value":$k_direction_align,
+                   "Value":$is_with_bias,
+                   "Value":$init_condition,
+                   CArg<"UnitAttr", "{}">:$enable_HF32,
+                   CArg<"UnitAttr", "{}">:$enable_I4)>
+  ];
+
+  let extraClassDeclaration = [{
+    // Required by DestinationStyleOpInterface
+    ::mlir::MutableOperandRange getDpsInitsMutable() {
+      return getCMutable();
+    }
+
+    ArrayAttr getIndexingMaps() {
+      return ::mlir::hivm::detail::getIndexingMapsImpl(*this);
+    }
+
+    // LocalMatmulBaseOpInterface methods
+    ::mlir::hivm::MatmulBiasMode getMatmulBiasMode() {
+      return ::mlir::hivm::MatmulBiasMode::NoBias;
+    }
+
+    bool supportsScaleOperands() {
+      return false;
+    }
+
+  }];
+
+  let hasVerifier = 1;
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Local MMADMx op definitions.
+//===----------------------------------------------------------------------===//
+
+class HIVM_LocalMmadMxOp<string mnemonic, list<Trait> traits = []> :
+  HIVM_MacroOp<mnemonic, !listconcat([HIVMLocalMatmulLikeOpTraits], traits)> {
+  let arguments = !con((ins
+      Arg<ShapedTypeOf<[F8E4M3FN, F8E5M2, UI8, I8]>, "Matrix A">:$a,
+      Arg<ShapedTypeOf<[F8E4M3FN, F8E5M2, UI8, I8]>, "Matrix B">:$b,
+      Arg<ShapedTypeOf<[UI8, I8]>, "Matrix ScaleA">:$scaleA,
+      Arg<ShapedTypeOf<[UI8, I8]>, "Matrix ScaleB">:$scaleB),
+    HIVM_LocalMmadLikeOperands.localMmadLikeArgs,
+    (ins Arg<ShapedTypeOf<[AnyFloat]>, "Matrix C">:$c),
+    HIVM_LocalMmadLikeOperands.localMmadLikeSyncArgs,
+    (ins Optional<TensorOrMemref>:$per_channel_bias,
+         OptionalAttr<HIVM_LocalMatmulMx_DataFormat>:$lhsFormat,
+         OptionalAttr<HIVM_LocalMatmulMx_DataFormat>:$rhsFormat),
+    HIVM_LocalMmadLikeOperands.localMmadLikeTransposeArgs);
+  let results = (outs Variadic<ShapedTypeOf<[AnyFloat]>>:$result_tensors);
+  code localMmadMxBaseDecls = [{
+    // Implement functions necessary for DestinationStyleOpInterface.
+    ::mlir::MutableOperandRange getDpsInitsMutable() {
+      return getCMutable();
+    }
+    bool isInitConstant(std::optional<bool> cst = std::nullopt);
+    void setInitCondition(Value init);
+    int getNumSyncRelatedArgs() { return 8; }
+    MatmulBiasMode getMatmulBiasMode();
+    bool shouldDecomposeBiasByElementAdd();
+    bool supportsScaleOperands() { return true; }
+    bool usesBoolAttrForTargetLayout() { return true; }
+    bool isHF32Enabled() { return false; }
+    bool isI4Enabled() { return false; }
+    llvm::SmallVector<int64_t> getMatmulBlockSizesTile(
+        Value oper, bool isTranspose, bool isA) const;
+    // Needed for lower-hivm-to-std, should be updated if input operands got changed.
+    SmallVector<Value> getInputOperands(bool includeSyncRelatedArgs = true);
+  }];
+  string localMmadBaseDes = [{
+    The computation logic is:
+    ```
+    C = C + MX(A, ScaleA) x MX(B, ScaleB) + (optional) channel_bias
+    ```
+  }];
+  let assemblyFormat = [{
+    attr-dict
+    (`a_transpose` $a_transpose^)?
+    (`b_transpose` $b_transpose^)?
+    `ins` `(`
+    $a
+    `,` $b
+    `,` $scaleA
+    `,` $scaleB
+    `,` $init_condition
+    `,` $real_m
+    `,` $real_k
+    `,` $real_n
+    (`,` $per_channel_bias^)?
+    `:`
+    type($a)
+    `,` type($b)
+    `,` type($scaleA)
+    `,` type($scaleB)
+    `,` type($init_condition)
+    `,` type($real_m)
+    `,` type($real_k)
+    `,` type($real_n)
+    (`,` type($per_channel_bias)^)?
+    `)`
+    `outs` `(` $c `:` type($c) `)`
+    (`sync_related_args` `(` $sync_related_args^ `:` type($sync_related_args) `)`)?
+    (`->` type($result_tensors)^)?
+  }];
+
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result_tensors,
+                   "Value":$a,
+                   "Value":$b,
+                   "Value":$scaleA,
+                   "Value":$scaleB,
+                   "Value":$init_condition,
+                   "Value":$real_m,
+                   "Value":$real_k,
+                   "Value":$real_n,
+                   "Value":$c,
+                   CArg<"IntegerAttr", "{}">:$lhsFormat,
+                   CArg<"IntegerAttr", "{}">:$rhsFormat,
+                   CArg<"UnitAttr", "{}">:$a_transpose,
+                   CArg<"UnitAttr", "{}">:$b_transpose,
+                   CArg<"Value", "{}">:$per_channel_bias)>
+  ];
+
+  let hasVerifier = 0;
+}
+
+def MmadMxL1Op
+    : HIVM_LocalMmadMxOp<"mmadmxL1", [NoMaxRankTrait,
+        DeclareOpInterfaceMethods<OpLayoutInterface,
+                                  ["getOperandsTargetFractalLayout"]>]> {
+  let summary = [{
+    Matrix Multiply and Add Op with inputs from L1 memory hierarchy.
+  }];
+  let description = localMmadBaseDes#[{
+    Note: the rank of A, B, and C Matrix must be two.
+  }];
+
+  let extraClassDeclaration = localMmadMxBaseDecls#[{
+    static StringRef getOpName() { return "mmadmxL1"; }
+
+    // Declare functions necessary for OpLayoutInterface.
+    FailureOr<DataLayoutAttr> getOperandALayout() const;
+    FailureOr<DataLayoutAttr> getOperandBLayout() const;
+    FailureOr<DataLayoutAttr> getOperandScaleALayout();
+    FailureOr<DataLayoutAttr> getOperandScaleBLayout();
+    FailureOr<DataLayoutAttr> getOperandCLayout() const;
+    FailureOr<DataLayoutAttr> getOperandBiasLayout();
+    llvm::SmallVector<int64_t> getBlockSizesTile(
+        Value oper, bool isTranspose, bool isA) const;
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Global MMAD op definitions.
+//===----------------------------------------------------------------------===//
+
+class HIVM_GlobalMmadOp<string mnemonic, list<Trait> traits = []> :
+  HIVM_MacroOp<mnemonic,
+    !listconcat([MacroOpPipeTrait<"PIPE::PIPE_MTE2, PIPE::PIPE_MTE3">,
+                 DeclareOpInterfaceMethods<HIVMInferCoreTypeInterface,
+                   ["inferCoreType"]>,
+                 NoMaxRankTrait,
+                 AttrSizedOperandSegments
+                ], traits)> {
+  let results = (outs Variadic<AnyRankedTensor>:$result);
+  string mmadOpBaseDescription = [{
+    This operation takes three tiled matrices from the global memory as arguments:
+      - `A` (ranked type): an `m x k` matrix
+      - `B` (ranked type): an `k x n` matrix
+      - `C` (ranked type): an `m x n` matrix
+
+    Other arguments include:
+      - `block_sizes`: data size of m, n, and k dimension processed on the L1 memory hierarchy
+      - `process_sizes`: data size of m, n, and k dimension processed on the L0 memory hierarchy
+      - (optional) `swizzle_offset`: continuous block number which swizzle schedule
+      - (optional) `swizzle_direction`: block direction which swizzle schedule
+      - (optional) `epilogue_p_tiles`: block number which compute attached op once handle
+
+    The operation performed is represented as `C = A * B`.
+    If `a_transpose` or `b_transpose` is present, the respective operand is
+    loaded in a transposed manner.
+
+    Optionally, this operation takes the following arguments:
+      - `bias` (ranked type): bias value, which is a vector of shape `n`
+      - `descale`: antiquantionzation value. Support 3 types:
+      - `DescaleNull` : no descale.
+      - `DescalePerChannel`: the shape of `descale` is equal to `n`.
+      - `DescalePerTensor`: the shape of `descale` is equal to `1`.
+
+    The operation performed is represented as `C = descale * (A * B + bias)`.
+  }];
+
+  code mmadOpBaseDecls = [{
+    // Implement functions necessary for DestinationStyleOpInterface.
+    ::mlir::MutableOperandRange getDpsInitsMutable() {
+      return getCMutable();
+    }
+  }];
+
+  let hasVerifier = 1;
+}
+
+def MatmulOp : HIVM_GlobalMmadOp<"matmul"> {
+  let summary = "HIVM Matrix Multiply Op with inputs from global memory";
+  let description =  mmadOpBaseDescription;
+  let arguments = (ins AnyShaped:$a,
+                       AnyShaped:$b,
+                       Optional<AnyShaped>:$tilingParams,
+                       Optional<AnyShaped>:$bias,
+                       Optional<AnyShaped>:$descale,
+                       OptionalAttr<UnitAttr>:$aTranspose,
+                       OptionalAttr<UnitAttr>:$bTranspose,
+                       OptionalAttr<HIVM_DescaleModeAttr>:$descaleMode,
+                       Variadic<I64>:$blockSizes,
+                       Variadic<I64>:$processSizes,
+                       Optional<I64>:$swizzleOffset,
+                       Optional<I64>:$swizzleDirection,
+                       Optional<I64>:$epiloguePTiles,
+                       AnyShaped:$c);
+
+  let extraClassDeclaration = mmadOpBaseDecls # [{
+    static StringRef getOpName() { return "matmul"; }
+  }];
+
+  let assemblyFormat = [{
+      attr-dict `ins` `(` $a `,` $b `:` type($a) `,` type($b) `)`
+      `outs` `(` $c `:` type($c) `)`
+      (`tiling_params` `=` $tilingParams^ `:` type($tilingParams) ) ?
+      (`bias` `=` $bias^ `:` type($bias) )?
+      (`descale` `=` $descale^ `:` type($descale))?
+      (`a_transpose` $aTranspose^)?
+      (`b_transpose` $bTranspose^)?
+      (`descale_mode` `=` $descaleMode^)?
+      (`block_sizes` `(` $blockSizes^ `:` type($blockSizes) `)`)?
+      (`process_sizes` `(` $processSizes^ `:` type($processSizes) `)`)?
+      (`swizzle_offset` `=` $swizzleOffset^ `:` type($swizzleOffset) )?
+      (`swizzle_direction` `=` $swizzleDirection^ `:` type($swizzleDirection))?
+      (`epilogue_p_tiles` `=` $epiloguePTiles^ `:` type($epiloguePTiles))?
+      (`->` type($result)^)?
+    }];
+
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result,
+                   "Value":$a,
+                   "Value":$b,
+                   "Value":$c,
+                   "::mlir::UnitAttr":$aTranspose,
+                   "::mlir::UnitAttr":$bTranspose), [{
+      build($_builder, $_state, result, a, b, /*tilingParams=*/nullptr,
+            /*bias=*/nullptr, /*descale=*/nullptr,
+            aTranspose, bTranspose, /*descaleMode=*/nullptr, /*blockSizes=*/ValueRange{},
+            /*processSizes=*/ValueRange{}, /*swizzleOffset=*/nullptr,
+            /*swizzleDirection=*/nullptr, /*epiloguePTiles=*/nullptr, c);
+    }]>,
+    OpBuilder<(ins "TypeRange":$result,
+                   "Value":$a,
+                   "Value":$b,
+                   "Value":$c,
+                   CArg<"Value", "Value()">:$bias,
+                   CArg<"Value", "Value()">:$descale,
+                   CArg<"::mlir::UnitAttr", "{}">:$aTranspose,
+                   CArg<"::mlir::UnitAttr", "{}">:$bTranspose,
+                   CArg<"::mlir::hivm::DescaleModeAttr", "{}">:$descaleMode), [{
+      build($_builder, $_state, result, a, b, /*tilingParams=*/nullptr, bias, descale,
+            aTranspose, bTranspose, descaleMode, /*blockSizes=*/ValueRange{},
+            /*processSizes=*/ValueRange{}, /*swizzleOffset=*/nullptr,
+            /*swizzleDirection=*/nullptr, /*epiloguePTiles=*/nullptr, c);
+    }]>,
+    OpBuilder<(ins "TypeRange":$result,
+                   "Value":$a,
+                   "Value":$b,
+                   "Value":$c,
+                   CArg<"Value", "Value()">:$tilingParams,
+                   CArg<"Value", "Value()">:$bias,
+                   CArg<"Value", "Value()">:$descale,
+                   CArg<"::mlir::UnitAttr", "{}">:$aTranspose,
+                   CArg<"::mlir::UnitAttr", "{}">:$bTranspose,
+                   CArg<"::mlir::hivm::DescaleModeAttr", "{}">:$descaleMode), [{
+      build($_builder, $_state, result, a, b, tilingParams, bias, descale,
+            aTranspose, bTranspose, descaleMode, /*blockSizes=*/ValueRange{},
+          /*processSizes=*/ValueRange{}, /*swizzleOffset=*/nullptr,
+          /*swizzleDirection=*/nullptr, /*epiloguePTiles=*/nullptr, c);
+    }]>
+  ];
+}
+
+def MixMatmulOp : HIVM_GlobalMmadOp<"mix_matmul"> {
+  let summary = "HIVM (Mix) Matrix Multiply Op with inputs from global memory";
+  let description = mmadOpBaseDescription # [{
+    This operation also supports tile-level fusion with a post-vector
+    function (hence it's a Mix op).
+    `post_vector_func_ins` is used to specify the arguments.
+    `comm_params` is used to specify communication related arguments (eg.
+      topology, communicator, group, etc al) when fusing communication
+      operators.
+  }];
+  let arguments = (ins AnyShaped:$a,
+                       AnyShaped:$b,
+                       Variadic<AnyShaped>:$postVecFuncIns,
+                       Variadic<AnyShaped>:$workspaceIns,
+                       Optional<AnyShaped>:$tilingParams,
+                       Optional<AnyShaped>:$commParams,
+                       Optional<AnyShaped>:$bias,
+                       Optional<AnyShaped>:$descale,
+                       OptionalAttr<UnitAttr>:$aTranspose,
+                       OptionalAttr<UnitAttr>:$bTranspose,
+                       OptionalAttr<HIVM_DescaleModeAttr>:$descaleMode,
+                       Variadic<I64>:$blockSizes,
+                       Variadic<I64>:$processSizes,
+                       Optional<I64>:$swizzleOffset,
+                       Optional<I64>:$swizzleDirection,
+                       Optional<I64>:$epiloguePTiles,
+                       AnyShaped:$c);
+
+  let extraClassDeclaration = mmadOpBaseDecls # [{
+    static StringRef getOpName() { return "mix_matmul"; }
+  }];
+
+  let assemblyFormat = [{
+      attr-dict `ins` `(` $a `,` $b `:` type($a) `,` type($b) `)`
+      (`post_vector_func_ins` `(` $postVecFuncIns^ `:` type($postVecFuncIns) `)`) ?
+      (`workspace_ins` `(` $workspaceIns^ `:` type($workspaceIns) `)`) ?
+      `outs` `(` $c `:` type($c) `)`
+      (`tiling_params` `=` $tilingParams^ `:` type($tilingParams) ) ?
+      (`comm_params` `=` $commParams^ `:` type($commParams) ) ?
+      (`bias` `=` $bias^ `:` type($bias) )?
+      (`descale` `=` $descale^ `:` type($descale))?
+      (`a_transpose` $aTranspose^)?
+      (`b_transpose` $bTranspose^)?
+      (`descale_mode` `=` $descaleMode^)?
+      (`block_sizes` `(` $blockSizes^ `:` type($blockSizes) `)`)?
+      (`process_sizes` `(` $processSizes^ `:` type($processSizes) `)`)?
+      (`swizzle_offset` `=` $swizzleOffset^ `:` type($swizzleOffset) )?
+      (`swizzle_direction` `=` $swizzleDirection^ `:` type($swizzleDirection))?
+      (`epilogue_p_tiles` `=` $epiloguePTiles^ `:` type($epiloguePTiles))?
+      (`->` type($result)^)?
+    }];
+
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result,
+                   "Value":$a,
+                   "Value":$b,
+                   "Value":$c,
+                   "::mlir::UnitAttr":$aTranspose,
+                   "::mlir::UnitAttr":$bTranspose), [{
+      build($_builder, $_state, result, a, b, /*postVecFuncIns=*/ValueRange{},
+            /*workspaceIns=*/ValueRange{}, /*tilingParams=*/nullptr, /*commParams*/nullptr,
+            /*bias=*/nullptr, /*descale=*/nullptr,
+            aTranspose, bTranspose, /*descaleMode=*/nullptr,
+            /*blockSizes=*/ValueRange{}, /*processSizes=*/ValueRange{},
+            /*swizzleOffset=*/nullptr, /*swizzleDirection=*/nullptr, /*epiloguePTiles=*/nullptr, c);
+    }]>,
+    OpBuilder<(ins "TypeRange":$result,
+                   "Value":$a,
+                   "Value":$b,
+                   "Value":$c,
+                   CArg<"Value", "Value()">:$bias,
+                   CArg<"Value", "Value()">:$descale,
+                   CArg<"::mlir::UnitAttr", "{}">:$aTranspose,
+                   CArg<"::mlir::UnitAttr", "{}">:$bTranspose,
+                   CArg<"::mlir::hivm::DescaleModeAttr", "{}">:$descaleMode), [{
+      build($_builder, $_state, result, a, b, /*postVecFuncIns=*/ValueRange{},
+            /*workspaceIns=*/ValueRange{}, /*tilingParams=*/nullptr, /*commParams*/nullptr, bias, descale,
+            aTranspose, bTranspose, descaleMode,
+            /*blockSizes=*/ValueRange{}, /*processSizes=*/ValueRange{},
+            /*swizzleOffset=*/nullptr, /*swizzleDirection=*/nullptr,
+            /*epiloguePTiles=*/nullptr, c);
+    }]>,
+    OpBuilder<(ins "TypeRange":$result,
+                   "Value":$a,
+                   "Value":$b,
+                   "Value":$c,
+                   CArg<"ValueRange", "{}">:$postVecFuncIns,
+                   CArg<"ValueRange", "{}">:$workspaceIns,
+                   CArg<"Value", "Value()">:$tilingParams,
+                   CArg<"Value", "Value()">:$commParams,
+                   CArg<"Value", "Value()">:$bias,
+                   CArg<"Value", "Value()">:$descale,
+                   CArg<"::mlir::UnitAttr", "{}">:$aTranspose,
+                   CArg<"::mlir::UnitAttr", "{}">:$bTranspose,
+                   CArg<"::mlir::hivm::DescaleModeAttr", "{}">:$descaleMode), [{
+      build($_builder, $_state, result, a, b, postVecFuncIns, workspaceIns, tilingParams, commParams, bias, descale,
+            aTranspose, bTranspose, descaleMode,
+            /*blockSizes=*/ValueRange{}, /*processSizes=*/ValueRange{},
+            /*swizzleOffset=*/nullptr, /*swizzleDirection=*/nullptr,
+            /*epiloguePTiles=*/nullptr, c);
+    }]>
+  ];
+}
+
+def MixGroupMatmulOp : HIVM_GlobalMmadOp<"mix_group_matmul"> {
+  let summary = "HIVM (Mix) Matrix Group Multiply Op with inputs from global memory";
+  let description = mmadOpBaseDescription # [{
+    This operation also supports tile-level fusion with a post-vector
+    function (hence it's a Mix op)
+    `tokens_per_expert` specify how matmuls are distrubuted to different experts
+    `post_vector_func_ins` is used to specify the arguments.
+    `post_vector_func_outs` is used to specify the outputs.
+    `comm_params` is used to specify communication related arguments (eg.
+      topology, communicator, group, etc al) when fusing communication
+      operators.
+  }];
+  let arguments = (ins AnyShaped:$a, // weight, 3D
+                       AnyShaped:$b, // tokens, 2D
+                       AnyShaped:$tokens_per_expert, // tokens_per_expert, 1D
+                       Variadic<AnyShaped>:$postVecFuncIns,
+                       Variadic<AnyShaped>:$postVecFuncOuts,
+                       Variadic<AnyShaped>:$workspaceIns,
+                       Optional<AnyShaped>:$tilingParams,
+                       Optional<AnyShaped>:$commParams,
+                       Optional<AnyShaped>:$bias,
+                       Optional<AnyShaped>:$descale,
+                       OptionalAttr<UnitAttr>:$aTranspose,
+                       OptionalAttr<UnitAttr>:$bTranspose,
+                       OptionalAttr<HIVM_DescaleModeAttr>:$descaleMode,
+                       Variadic<I64>:$blockSizes,
+                       Variadic<I64>:$processSizes,
+                       Optional<I64>:$swizzleOffset,
+                       Optional<I64>:$swizzleDirection,
+                       Optional<I64>:$epiloguePTiles,
+                       AnyShaped:$c);
+
+  let extraClassDeclaration = mmadOpBaseDecls # [{
+    static StringRef getOpName() { return "mix_group_matmul"; }
+  }];
+
+  let assemblyFormat = [{
+      attr-dict `ins` `(` $a `,` $b `,` $tokens_per_expert `:` type($a) `,` type($b) `,` type($tokens_per_expert) `)`
+      (`post_vector_func_ins` `(` $postVecFuncIns^ `:` type($postVecFuncIns) `)`) ?
+      (`post_vector_func_outs` `(` $postVecFuncOuts^ `:` type($postVecFuncOuts) `)`) ?
+      (`workspace_ins` `(` $workspaceIns^ `:` type($workspaceIns) `)`) ?
+      `outs` `(` $c `:` type($c) `)`
+      (`tiling_params` `=` $tilingParams^ `:` type($tilingParams) ) ?
+      (`comm_params` `=` $commParams^ `:` type($commParams) ) ?
+      (`bias` `=` $bias^ `:` type($bias) )?
+      (`descale` `=` $descale^ `:` type($descale))?
+      (`a_transpose` $aTranspose^)?
+      (`b_transpose` $bTranspose^)?
+      (`descale_mode` `=` $descaleMode^)?
+      (`block_sizes` `(` $blockSizes^ `:` type($blockSizes) `)`)?
+      (`process_sizes` `(` $processSizes^ `:` type($processSizes) `)`)?
+      (`swizzle_offset` `=` $swizzleOffset^ `:` type($swizzleOffset) )?
+      (`swizzle_direction` `=` $swizzleDirection^ `:` type($swizzleDirection))?
+      (`epilogue_p_tiles` `=` $epiloguePTiles^ `:` type($epiloguePTiles))?
+      (`->` type($result)^)?
+    }];
+
+  let builders = [
+    OpBuilder<(ins "TypeRange":$result,
+                   "Value":$a,
+                   "Value":$b,
+                   "Value":$tokens_per_expert,
+                   "Value":$c,
+                   "::mlir::UnitAttr":$aTranspose,
+                   "::mlir::UnitAttr":$bTranspose), [{
+      build($_builder, $_state, result, a, b, tokens_per_expert, /*postVecFuncIns=*/ValueRange{}, /*postVecFuncOuts=*/ValueRange{},
+            /*workspaceIns=*/ValueRange{}, /*tilingParams=*/nullptr, /*commParams*/nullptr,
+            /*bias=*/nullptr, /*descale=*/nullptr,
+            aTranspose, bTranspose, /*descaleMode=*/nullptr,
+            /*blockSizes=*/ValueRange{}, /*processSizes=*/ValueRange{},
+            /*swizzleOffset=*/nullptr, /*swizzleDirection=*/nullptr, /*epiloguePTiles=*/nullptr, c);
+    }]>,
+    OpBuilder<(ins "TypeRange":$result,
+                   "Value":$a,
+                   "Value":$b,
+                   "Value":$tokens_per_expert,
+                   "Value":$c,
+                   CArg<"Value", "Value()">:$bias,
+                   CArg<"Value", "Value()">:$descale,
+                   CArg<"::mlir::UnitAttr", "{}">:$aTranspose,
+                   CArg<"::mlir::UnitAttr", "{}">:$bTranspose,
+                   CArg<"::mlir::hivm::DescaleModeAttr", "{}">:$descaleMode), [{
+      build($_builder, $_state, result, a, b, tokens_per_expert, /*postVecFuncIns=*/ValueRange{}, /*postVecFuncOuts=*/ValueRange{},
+            /*workspaceIns=*/ValueRange{}, /*tilingParams=*/nullptr, /*commParams*/nullptr, bias, descale,
+            aTranspose, bTranspose, descaleMode,
+            /*blockSizes=*/ValueRange{}, /*processSizes=*/ValueRange{},
+            /*swizzleOffset=*/nullptr, /*swizzleDirection=*/nullptr,
+            /*epiloguePTiles=*/nullptr, c);
+    }]>,
+    OpBuilder<(ins "TypeRange":$result,
+                   "Value":$a,
+                   "Value":$b,
+                   "Value":$tokens_per_expert,
+                   "Value":$c,
+                   CArg<"ValueRange", "{}">:$postVecFuncIns,
+                   CArg<"ValueRange", "{}">:$postVecFuncOuts,
+                   CArg<"ValueRange", "{}">:$workspaceIns,
+                   CArg<"Value", "Value()">:$tilingParams,
+                   CArg<"Value", "Value()">:$commParams,
+                   CArg<"Value", "Value()">:$bias,
+                   CArg<"Value", "Value()">:$descale,
+                   CArg<"::mlir::UnitAttr", "{}">:$aTranspose,
+                   CArg<"::mlir::UnitAttr", "{}">:$bTranspose,
+                   CArg<"::mlir::hivm::DescaleModeAttr", "{}">:$descaleMode), [{
+      build($_builder, $_state, result, a, b, tokens_per_expert, postVecFuncIns, postVecFuncOuts, workspaceIns, tilingParams, commParams, bias, descale,
+            aTranspose, bTranspose, descaleMode,
+            /*blockSizes=*/ValueRange{}, /*processSizes=*/ValueRange{},
+            /*swizzleOffset=*/nullptr, /*swizzleDirection=*/nullptr,
+            /*epiloguePTiles=*/nullptr, c);
+    }]>
+  ];
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Conv1DL1Op definitions.
+//===----------------------------------------------------------------------===//
+
+def Conv1DL1Op : HIVM_MacroOp<"Conv1dL1",[
+  CubeCoreTypeTrait,
+  MacroOpPipeTrait<"PIPE::PIPE_MTE1, PIPE::PIPE_M">,
+  DeclareOpInterfaceMethods<HIVMStructuredOpInterface, ["getIndexingMaps"]>,
+  OpLayoutInterface,
+  AttrSizedOperandSegments,
+]>{
+  let arguments = (ins Arg<TensorOrMemref, "Conv1d input">:$input,
+                      Arg<TensorOrMemref, "Conv1d weight">:$weight,
+                      Arg<Optional<TensorOrMemref>, "Conv1d bias">:$bias,
+                      Arg<TensorOrMemref, "Conv1d init">:$init,
+                      Arg<I1, [{
+                        The condition under which
+                        data in L0C is cleared before use
+                      }]>:$init_condition,
+                      Arg<Variadic<I64>, [{
+                        Arguments required by grouped convolution to insert
+                        synchronization instructions, they are
+                        managed by inject-sync passes.
+                      }]>:$sync_related_args,
+                      I32Attr:$stride,
+                      Arg<AnyAttr, [{
+                        Zero-padding for Conv1d. Accepts an integer scalar or
+                        a 2-element integer array [paddingL, paddingR]. A
+                        scalar applies to both sides.
+                      }]>:$padding,
+                      Arg<I32Attr, [{
+                        Convolution dilation for Conv1d. Accepts an integer
+                        scalar in [1, 255].
+                      }]>:$dilation,
+                      I32Attr:$groups
+                      );
+  let results = (outs Variadic<AnyRankedTensor>:$result_tensors);
+  let summary = [{
+    1D convolution operator with inputs from L1 memory hierarchy.
+  }];
+  let assemblyFormat = [{
+    attr-dict `ins` `(`
+      $input `,` $weight
+      `,` $init_condition
+      (`,` $bias^)?
+      `:` type($input) `,` type($weight)
+      `,` type($init_condition)
+      (`,` type($bias)^)?
+    `)`
+    `outs` `(` $init `:` type($init) `)`
+    (`sync_related_args`
+      `(` $sync_related_args^ `:` type($sync_related_args) `)`
+    )?
+    (`->` type($result_tensors)^)?
+  }];
+
+  let extraClassDeclaration = [{
+    // Implement functions necessary for DestinationStyleOpInterface.
+    ::mlir::MutableOperandRange getDpsInitsMutable() {
+      return getInitMutable();
+    }
+    bool isInitConstant(std::optional<bool> cst = std::nullopt);
+    void setInitCondition(Value init);
+
+    static StringRef getOpName() { return "Conv1dL1"; }
+
+    int64_t getStrideW();
+    FailureOr<int64_t> getPaddingL();
+    FailureOr<int64_t> getPaddingR();
+    int64_t getDilationW();
+
+    FailureOr<DataLayoutAttr> getInputLayout();
+    FailureOr<DataLayoutAttr> getWeightLayout();
+    FailureOr<DataLayoutAttr> getBiasLayout();
+    FailureOr<DataLayoutAttr> getInitLayout();
+
+    llvm::SmallDenseMap<Value, DataLayoutAttr> getOperandsTargetLayout();
+    llvm::SmallDenseMap<Value, DataLayoutAttr> getOperandsCurrentLayout();
+
+    int getNumSyncRelatedArgs();
+    // Needed for lower-hivm-to-std, should be updated if input operands got changed.
+    SmallVector<Value> getInputOperands(bool includeSyncRelatedArgs = true);
+    SmallVector<Value> getLibraryCallOperands(PatternRewriter &rewriter);
+  }];
+  let hasVerifier = 1;
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Conv2DL1Op definitions.
+//===----------------------------------------------------------------------===//
+
+def Conv2DL1Op : HIVM_MacroOp<"Conv2dL1",[
+  CubeCoreTypeTrait,
+  MacroOpPipeTrait<"PIPE::PIPE_MTE1, PIPE::PIPE_M">,
+  DeclareOpInterfaceMethods<HIVMStructuredOpInterface, ["getIndexingMaps"]>,
+  OpLayoutInterface,
+  AttrSizedOperandSegments,
+]>{
+  let arguments = (ins Arg<TensorOrMemref, "Conv2d input">:$input,
+                      Arg<TensorOrMemref, "Conv2d weight">:$weight,
+                      Arg<Optional<TensorOrMemref>, "Conv2d bias">:$bias,
+                      Arg<TensorOrMemref, "Conv2d init">:$init,
+                      Arg<I1, [{
+                        The condition under which
+                        data in L0C is cleared before use
+                      }]>:$init_condition,
+                      Arg<Variadic<I64>, [{
+                        Arguments required by grouped convolution to insert
+                        synchronization instructions, they are
+                        managed by inject-sync passes.
+                      }]>:$sync_related_args,
+                      Arg<AnyAttr, [{
+                        Convolution stride for Conv2d. Accepts an integer
+                        scalar or a 2-element integer array
+                        [strideH, strideW]. A scalar applies to both H and W
+                        directions.
+                      }]>:$stride,
+                      Arg<AnyAttr, [{
+                        Zero-padding for Conv2d. Accepts an integer scalar, a
+                        2-element integer array [paddingH, paddingW], or a
+                        4-element integer array
+                        [paddingT, paddingB, paddingL, paddingR]. A scalar and
+                        the 2-element form apply symmetric padding in each
+                        dimension.
+                      }]>:$padding,
+                      Arg<AnyAttr, [{
+                        Convolution dilation for Conv2d. Accepts an integer
+                        scalar or a 2-element integer array
+                        [dilationH, dilationW]. A scalar applies to both H and
+                        W directions. Each value must be in [1, 255].
+                      }]>:$dilation,
+                      I32Attr:$groups
+                      );
+  let results = (outs Variadic<AnyRankedTensor>:$result_tensors);
+  let summary = [{
+    2D convolution operator with inputs from L1 memory hierarchy.
+  }];
+  let assemblyFormat = [{
+    attr-dict `ins` `(`
+      $input `,` $weight
+      `,` $init_condition
+      (`,` $bias^)?
+      `:` type($input) `,` type($weight)
+      `,` type($init_condition)
+      (`,` type($bias)^)?
+    `)`
+    `outs` `(` $init `:` type($init) `)`
+    (`sync_related_args`
+      `(` $sync_related_args^ `:` type($sync_related_args) `)`
+    )?
+    (`->` type($result_tensors)^)?
+  }];
+
+  let extraClassDeclaration = [{
+    // Implement functions necessary for DestinationStyleOpInterface.
+    ::mlir::MutableOperandRange getDpsInitsMutable() {
+      return getInitMutable();
+    }
+    bool isInitConstant(std::optional<bool> cst = std::nullopt);
+    void setInitCondition(Value init);
+
+    static StringRef getOpName() { return "Conv2dL1"; }
+
+    FailureOr<int64_t> getStrideH();
+    FailureOr<int64_t> getStrideW();
+    FailureOr<int64_t> getPaddingT();
+    FailureOr<int64_t> getPaddingB();
+    FailureOr<int64_t> getPaddingL();
+    FailureOr<int64_t> getPaddingR();
+    FailureOr<int64_t> getDilationH();
+    FailureOr<int64_t> getDilationW();
+
+    FailureOr<DataLayoutAttr> getInputLayout();
+    FailureOr<DataLayoutAttr> getWeightLayout();
+    FailureOr<DataLayoutAttr> getBiasLayout();
+    FailureOr<DataLayoutAttr> getInitLayout();
+
+    llvm::SmallDenseMap<Value, DataLayoutAttr> getOperandsTargetLayout();
+    llvm::SmallDenseMap<Value, DataLayoutAttr> getOperandsCurrentLayout();
+
+    int getNumSyncRelatedArgs();
+    // Needed for lower-hivm-to-std, should be updated if input operands got changed.
+    SmallVector<Value> getInputOperands(bool includeSyncRelatedArgs = true);
+    SmallVector<Value> getLibraryCallOperands(PatternRewriter &rewriter);
+  }];
+  let hasVerifier = 1;
+}
+
+//===----------------------------------------------------------------------===//
+// HIVM Conv3DL1Op definitions.
+//===----------------------------------------------------------------------===//
+
+def Conv3DL1Op : HIVM_MacroOp<"Conv3dL1",[
+  CubeCoreTypeTrait,
+  MacroOpPipeTrait<"PIPE::PIPE_MTE1, PIPE::PIPE_M">,
+  DeclareOpInterfaceMethods<HIVMStructuredOpInterface, ["getIndexingMaps"]>,
+  AttrSizedOperandSegments,
+]>{
+  let arguments = (ins Arg<TensorOrMemref, "Conv3d input">:$input,
+                      Arg<TensorOrMemref, "Conv3d weight">:$weight,
+                      Arg<Optional<TensorOrMemref>, "Conv3d bias">:$bias,
+                      Arg<TensorOrMemref, "Conv3d init">:$init,
+                      Arg<I1, [{
+                        The condition under which
+                        data in L0C is cleared before use
+                      }]>:$init_condition,
+                      Arg<Variadic<I64>, [{
+                        Arguments required by grouped convolution to insert
+                        synchronization instructions, they are
+                        managed by inject-sync passes.
+                      }]>:$sync_related_args,
+                      Arg<AnyAttr, [{
+                        Convolution stride for Conv3d. Accepts an integer
+                        scalar or a 3-element integer array
+                        [strideD, strideH, strideW]. A scalar applies to all
+                        D/H/W directions.
+                      }]>:$stride,
+                      Arg<AnyAttr, [{
+                        Zero-padding for Conv3d. Accepts an integer scalar, a
+                        3-element integer array [paddingD, paddingH, paddingW],
+                        or a 6-element integer array
+                        [paddingFront, paddingBack, paddingT, paddingB,
+                        paddingL, paddingR]. A scalar and the 3-element form
+                        apply symmetric padding in each dimension. Normalize
+                        materializes Front/Back padding and decompose forwards
+                        T/B/L/R padding to Conv2dL1.
+                      }]>:$padding,
+                      Arg<AnyAttr, [{
+                        Convolution dilation for Conv3d. Accepts an integer
+                        scalar or a 3-element integer array
+                        [dilationD, dilationH, dilationW]. A scalar applies to
+                        all D/H/W directions. Currently dilationD must be 1;
+                        dilationH and dilationW must be in [1, 255].
+                      }]>:$dilation,
+                      I32Attr:$groups
+                      );
+  let results = (outs Variadic<AnyRankedTensor>:$result_tensors);
+  let summary = [{
+    3D convolution operator with inputs from L1 memory hierarchy.
+  }];
+  let assemblyFormat = [{
+    attr-dict `ins` `(`
+      $input `,` $weight
+      `,` $init_condition
+      (`,` $bias^)?
+      `:` type($input) `,` type($weight)
+      `,` type($init_condition)
+      (`,` type($bias)^)?
+    `)`
+    `outs` `(` $init `:` type($init) `)`
+    (`sync_related_args`
+      `(` $sync_related_args^ `:` type($sync_related_args) `)`
+    )?
+    (`->` type($result_tensors)^)?
+  }];
+
+  let extraClassDeclaration = [{
+    // Implement functions necessary for DestinationStyleOpInterface.
+    ::mlir::MutableOperandRange getDpsInitsMutable() {
+      return getInitMutable();
+    }
+    bool isInitConstant(std::optional<bool> cst = std::nullopt);
+    void setInitCondition(Value init);
+
+    static StringRef getOpName() { return "Conv3dL1"; }
+
+    FailureOr<int64_t> getStrideD();
+    FailureOr<int64_t> getStrideH();
+    FailureOr<int64_t> getStrideW();
+    FailureOr<int64_t> getPaddingFront();
+    FailureOr<int64_t> getPaddingBack();
+    FailureOr<int64_t> getPaddingT();
+    FailureOr<int64_t> getPaddingB();
+    FailureOr<int64_t> getPaddingL();
+    FailureOr<int64_t> getPaddingR();
+    FailureOr<int64_t> getDilationD();
+    FailureOr<int64_t> getDilationH();
+    FailureOr<int64_t> getDilationW();
+  }];
+  let hasVerifier = 1;
+}
+
+#endif // BISHENGIR_DIALECT_HIVM_IR_HIVMMACROOPS_TD

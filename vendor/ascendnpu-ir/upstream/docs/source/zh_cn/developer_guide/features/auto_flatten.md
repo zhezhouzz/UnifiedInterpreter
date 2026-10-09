@@ -1,0 +1,444 @@
+# 自动展平
+
+**适用产品**：
+
+- Ascend 950PR&950DT系列产品
+- Atlas A3系列产品
+- Atlas A2系列产品
+
+Auto Flatten Pass（HIVMFlattenOps）自动将多维张量操作折叠为低维等价形式，在保持语义正确性的同时降低秩。该优化简化了内存访问模式，提升了目标加速器上的硬件利用率。
+
+## 硬件背景
+
+现代硬件加速器通常存在有利于低秩张量操作的约束和性能特性：
+
+| 方面 | 高秩的影响 | 展平的收益 |
+| ----------------------- | ------------------------------------------------------------ | -------------------------------------------------------- |
+| 地址计算 | 多维索引需要多次乘加运算 | 简化的线性寻址降低了开销 |
+| 内存合并 | 复杂的步长模式可能阻碍高效内存访问 | 连续的展平维度实现更好的合并 |
+| 硬件循环 | 硬件循环计数器数量有限 | 维度更少 = 所需循环嵌套更少 |
+| DMA效率 | 多步长传输可能需要多个DMA描述符 | 折叠维度实现批量传输 |
+| 寄存器压力 | 更多的索引变量占用寄存器 | 减少簿记开销 |
+
+**示例场景**：
+
+考虑一个形状为`[1, 64, 1, 128, 256]`的5D逐元素操作：
+
+- 展平前：5层嵌套循环，复杂的步长计算。
+- 展平后：形状变为`[64, 128, 256]`甚至`[64, 32768]`，实现更高效的硬件利用率。
+
+## 算法原理
+
+展平算法作为多阶段流水线运行，在遵守操作特定约束的同时逐步折叠维度。
+
+### 核心概念
+
+1. **重关联映射（Reassociation Maps）**
+
+   重关联映射定义了原始维度如何映射到折叠后的维度：
+
+   ```text
+   原始形状: [A, B, C, D, E]（秩 5）
+   重关联:   [[0, 1], [2], [3, 4]]
+   结果形状: [A*B, C, D*E]（秩 3）
+   ```
+
+2. **维度分类**
+
+   每个维度由单元掩码标记是否为单元维度（大小为 1）；此外，受限轴（如归约、广播维度）作为屏障，阻止相邻维度折叠：
+
+   | 类别     | 条件                      | 折叠行为                   |
+   | -------- | ------------------------- | -------------------------- |
+   | 单元维度 | 大小为1，且不是受限轴     | 被吸收到相邻组中           |
+   | 受限轴   | 广播/归约等语义受限的维度 | 独立成组，阻止单元维度吸收 |
+   | 其他维度 | 非单元、非受限            | 相邻且连续时并入同一组     |
+
+3. **屏障维度**
+
+   某些维度由于语义要求不能一起折叠：
+
+   - 归约维度：必须保持独立以保留归约语义
+   - 广播维度：形状不匹配阻止折叠
+   - 转置维度：置换要求约束分组
+
+### 流水线阶段
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                            输入操作                             │
+│            形状: [1, 64, 1, 128, 1, 256]                        │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  阶段 1：单元维度折叠                                           │
+│  ─────────────────────────────────────────────                  │
+│  • 识别单元维度（大小为 1）                                     │
+│  • 构建二值单元掩码（不含屏障）                                 │
+│  • 将单元维度折叠进相邻的非屏障组                               │
+│                                                                 │
+│  单元掩码: [1, 0, 1, 0, 1, 0]   （1 = 单元维度）                │
+│  结果:  [[0, 1, 2], [3, 4], [5]]  →  形状: [64, 128, 256]       │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  阶段 2：均匀重关联折叠                                         │
+│  ─────────────────────────────────────────────                  │
+│  • 检查内存连续性（步长模式）                                   │
+│  • 遵守目标维度边界                                             │
+│  • 应用输入一致性检查（用于广播）                               │
+│                                                                 │
+│  连续的维度可进一步折叠                                         │
+│  结果:  [[0], [1, 2]]  →  形状: [64, 32768]                     │
+│  （例如：输入一致性边界使维度 0 保持独立）                      │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  阶段 3：组合结果                                               │
+│  ─────────────────────────────────────────────                  │
+│  • 合并各阶段的重关联映射                                       │
+│  • 调整目标维度索引                                             │
+│  • 更新屏障维度追踪                                             │
+│                                                                 │
+│  最终: [[0, 1, 2], [3, 4, 5]]  →  形状: [64, 32768]             │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                            输出操作                             │
+│  • 为每个操作数插入 memref.collapse_shape                       │
+│  • 克隆操作并替换为折叠后的操作数                               │
+│  • 调整操作属性（reduce_dims、broadcast_dims）                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 特殊情况：可转置的OTF（On-The-Fly）
+
+对于具有内联转置语义的操作，算法分别处理输入和输出重关联映射：
+
+```text
+输入形状:   [A, B, C, D, E, F]
+置换:       [2, 3, 0, 4, 1, 5]
+输出形状:   [C, D, A, E, B, F]
+
+步骤 1：对输入做单元维度折叠（若 B、D 为单元维度）
+步骤 2：由逆置换推导置换块
+步骤 3：分别生成输入/init 重关联映射
+步骤 4：在保持置换语义的前提下组合结果
+```
+
+### 掩码构建逻辑
+
+单元掩码标记大小为1的维度；受限轴（由`getLimitedAxes()`获取，如广播、归约维度）随后从掩码中剔除，使其独立成组：
+
+```cpp
+// 1. 二值单元掩码：某轴在所有操作数中大小均为 1 时为真
+unitMask[i] = allOperandsDimSizeIs1(i);
+
+// 2. 受限轴作为屏障：从单元掩码中剔除（取反后按位与）
+limitationMask = arrayToMask(getLimitedAxes()); // 受限轴为真
+unitMask &= limitationMask.flip();              // 受限轴不再是单元维度
+```
+
+### 从掩码生成重关联
+
+```text
+输入的单元掩码: [1, 1, 0, 0, 1, 0, 1]
+
+处理过程:
+  前导单元维度  [0, 1]    → 与第一个非单元维度合并
+  非单元维度    [2, 3, 5] → 各自开启一个新组
+  末尾单元维度  [4, 6]    → 吸收进前一个组
+
+结果: [[0, 1, 2], [3, 4], [5, 6]]
+```
+
+## API
+
+### Pass注册
+
+```cpp
+// 创建展平 Pass
+std::unique_ptr<Pass> mlir::hivm::createFlattenOpsPass();
+
+// 在 Pass 流水线中使用
+pm.addPass(mlir::hivm::createFlattenOpsPass());
+```
+
+### FlattenInterface
+
+实现自动展平的操作必须实现`FlattenInterface`：
+
+```cpp
+class FlattenInterface {
+public:
+  /// 计算该操作的展平结果
+  virtual FailureOr<FlattenResult> getFlattened(FlattenOptions options) = 0;
+
+  /// 展平后调整操作属性
+  virtual void adjustTargetDimensions(OpBuilder &builder,
+                                       const FlattenResult &result) = 0;
+};
+```
+
+### FlattenOptions
+
+```cpp
+struct FlattenOptions {
+  /// 检查步长注释的对齐要求
+  bool checkMarkStride = false;
+
+  /// 折叠前验证输入形状一致性（用于广播）
+  bool checkInputConsistency = false;
+};
+```
+
+### FlattenResult
+
+```cpp
+struct FlattenResult {
+  // 核心数据
+  Operation *op;                               // 源操作
+  SmallVector<ReassociationMap> reassociation; // 折叠映射
+  SmallVector<KindTypePair> operandTypes;      // 折叠后的类型
+  SmallVector<Value> operandOriginalVal;       // 原始操作数值
+
+  // 维度追踪
+  SmallVector<int64_t> originalTargetDims;     // 原始目标维度索引
+  SmallVector<int64_t> adjustedTargetDims;     // 折叠后调整的索引
+  SmallVector<int64_t> barrierDims;            // 不可折叠的边界维度
+
+  // 查询方法
+  bool isIdentityCollapse() const;
+  int getRankAfterFlatten() const;
+  SmallVector<Type> getOperandTypes(DpsKind kind) const;
+  ReassociationMap getInputReassociation() const;
+  ReassociationMap getInitReassociation() const;
+  bool uniformReassociation() const;  // 所有输入和 init 的重关联是否相同
+};
+```
+
+### 操作特性（Operation Traits）
+
+```cpp
+// 表示操作对所有操作数使用相同的重关联
+OpTrait::UniformReassociationFlattenTrait
+
+// 表示连续的目标维度可以被折叠
+OpTrait::CollapsibleConsecutiveTargetDimsTrait
+```
+
+### 支持的操作调整
+
+每种操作类型均实现了`adjustTargetDimensions`：
+
+| 操作 | 调整的属性 |
+| -------------------------- | --------------------------------------------- |
+| `VBrcOp` | `broadcast_dims` |
+| `VReduceOp` | `reduce_dims` |
+| `VTransposeOp` | `permutation` |
+| `VCumsumOp` / `VCumprodOp` / `VCummaxOp` / `VCumminOp` | `cum_dims` |
+| `VPadOp` | `static_low`、`static_high` |
+| `VConcatOp` | `dim` |
+| `VFlipOp` | `flip_axis` |
+| `VSortOp` | `sort_axis` |
+| 逐元素操作 | `iterator_types`（broadcast、transpose 数组） |
+
+## 能力与限制
+
+**支持能力**：
+
+| 特性 | 描述 |
+| ------------------------------- | ------------------------------------------------------------ |
+| 单元维度折叠 | 自动移除大小为1的维度 |
+| 连续性感知 | 遵守内存布局；非连续维度保持独立 |
+| 操作特定处理 | 针对归约、广播、转置、填充等的自定义逻辑 |
+| 流水线组合 | 多个折叠阶段可正确组合 |
+| 均匀重关联 | 所有操作数折叠方式相同时的高效处理 |
+| 非均匀重关联 | 支持不同的输入/init重关联（转置OTF） |
+| 屏障保护 | 语义关键维度保持独立 |
+| 跳过Host函数 | 自动跳过Host侧函数 |
+
+**限制约束**：
+
+| 限制 | 描述 | 规避方案 |
+| ---------------------------- | --------------------------------------------------------- | ------------------------------------------------------- |
+| 仅支持MemRef类型 | 只折叠`MemRefType`操作数 | 张量必须先进行缓冲化（bufferize） |
+| 需要静态形状 | 动态维度可能无法正确折叠 | 优先运行符号方言或形状推断Pass |
+| 严格屏障模式 | 屏障维度（受限轴）始终保持独立 | 通过`getLimitedAxes()`自动处理 |
+| 转置后向维度 | 某些操作的最后一个维度不能进行OTF转置 | 算法保留最后一个维度不折叠 |
+| 非HIVMStructuredOp | 未实现接口的操作返回恒等映射 | 实现`FlattenInterface` |
+
+**边界情况**：
+
+```cpp
+// 恒等折叠（无变化）—— Pass 报告匹配失败
+if (res->isIdentityCollapse())
+  return rewriter.notifyMatchFailure(op, "Identity reassociation");
+
+// 操作无法处理
+if (failed(res))
+  return rewriter.notifyMatchFailure(op, "Operation cannot be handled");
+```
+
+**调试**：
+
+使用`LDBG`宏启用调试日志，可追踪：
+
+- 每个阶段的重关联映射
+- 单元掩码与受限轴
+- 调整后的目标维度
+- 组合结果
+
+## 变换示例
+
+**变换前**：
+
+```mlir
+%0 = hivm.vbrc %input broadcast_dims = [2]
+     : memref<1x64x1x128x256xf32> -> memref<1x64x16x128x256xf32>
+```
+
+**经过Flatten Pass后**：
+
+```mlir
+// 折叠输入：[[0, 1], [2], [3, 4]] → 秩 3
+// （广播维 dim 2 是受限轴，需独立保留；单元维 dim 0 被吸收进第一组）
+%collapsed_input = memref.collapse_shape %input [[0, 1], [2], [3, 4]]
+     : memref<1x64x1x128x256xf32> into memref<64x1x32768xf32>
+
+// 广播维重映射：[2] → [1]
+%0 = hivm.vbrc %collapsed_input broadcast_dims = [1]
+     : memref<64x1x32768xf32> -> memref<64x16x32768xf32>
+
+// 注：输出展开由单独的 Pass 处理
+```
+
+## 带步长的广播操作示例
+
+**关于带步长的MemRef类型**：
+
+类型为`memref<N₀×N₁×…×Nₙ×f32, strides={S[0], S[1], …, S[n]}, offset=O>`的memref将坐标$[i_0, i_1, \dots, i_n]$ 映射到线性内存地址：
+
+$$\text{address} = \sum_{k=0}^{n} i_k \cdot S[k] \;+\; O$$
+
+例如，`memref<5x6xf32>`具有步长为`[6, 1]`、偏移为0的默认（恒等）布局。访问元素`[2, 4]`得到：
+
+$$\text{address} = 2 \times 6 + 4 \times 1 + 0 = 16$$
+
+当未指定显式布局时，MLIR使用行主序。步长从最内维到最外维计算：
+
+$S[n] = 1$
+
+$S[i] = S[i+1] \times N_{i+1}$
+
+这意味着最后一个维度上的元素在内存中相邻，下一个外层维度的每一“行”紧跟在前一行之后——没有间隙。
+
+当一个维度大小为1时，其索引始终为0。该维度的步长对地址的贡献为$0 \times S[k] = 0$，使得步长值无关紧要。这就是为什么展平Pass可以自由地将单元维度吸收到相邻组中，而无需考虑其步长值。
+
+在不失一般性且假设使用行主序的情况下，相邻的两个维度$d_i$ 和$d_{i+1}$ 连续当且仅当：
+
+$$S[i] = S[i{+}1] \times N_{i+1}$$
+
+这意味着遍历维度$i{+}1$ 的所有元素后，维度$i$ 增加1时恰好落在下一个元素上——没有间隙，没有重叠。基础情况是最外层维度（轴0）按惯例始终被认为是连续的。
+
+只有连续的相邻维度才能被折叠。 折叠非连续维度会改变实际访问的内存位置。
+
+以下场景演示了展平Pass如何与带步长的内存布局交互，这是处理非连续内存视图时的常见情况。这些示例使用`hivm.hir.vbrc`——一种将memref填充为标量值的标量广播操作。
+
+1. **场景1：非连续步长阻止所有折叠**
+
+   对应函数为`@strided_brc`
+
+   ```mlir
+   // memref<16x16xf32, strided<[16, 2]>>
+   //   dim 0: size=16, stride=16
+   //   dim 1: size=16, stride=2   ← 非连续（连续要求 stride=1）
+   ```
+
+   分析说明：无法合并维度0和1，为满足连续性，维度1的步长必须等于1（元素步长）。这里步长为2，表示“每隔一个元素”的非连续访问模式。将维度$[0, 1]$ 折叠为单个维度会产生平坦索引为$i \cdot 16 + j$，但实际内存访问模式为$i \cdot 16 + j \cdot 2$。两者并不等价——展平会悄悄改变实际访问的内存位置。
+
+   输出（未变化）：
+
+   ```mlir
+   func.func @strided_brc(%arg0: f32, %arg1: memref<16x16xf32, strided<[16, 2]>>) {
+     hivm.hir.vbrc ins(%arg0 : f32) outs(%arg1 : memref<16x16xf32, strided<[16, 2]>>)
+     return
+   }
+   ```
+
+2. **场景2：部分连续步长允许部分折叠**
+
+   对应函数为`@strided_brc_collapse_continuous`
+
+   ```mlir
+   // memref<8x?x4x2xf32, strided<[?, ?, 2, 1]>>
+   //   dim 0: size=8,  stride=?   ← 动态，无法验证与 dim 1 的连续性
+   //   dim 1: size=?,  stride=?   ← 动态，无法验证与 dim 2 的连续性
+   //   dim 2: size=4,  stride=2   ← stride = dim3.size(2) × dim3.stride(1) = 2 ✓
+   //   dim 3: size=2,  stride=1   ← 最内层，连续
+   ```
+
+   相邻维度对的连续性检验公式：
+
+   $$\text{contiguous}(d_i, d_{i+1}) \iff \text{stride}(d_i) = \text{size}(d_{i+1}) \times \text{stride}(d_{i+1})$$
+
+   | 维度对  | 计算                 | 是否连续     |
+   | ------- | -------------------- | ------------ |
+   | 维度0–1 | $? = ? \times ?$     | 未知（动态） |
+   | 维度1–2 | $? = 4 \times 2 = 8$ | 未知（动态） |
+   | 维度2–3 | $2 = 2 \times 1 = 2$ | 是           |
+
+   输出（维度2和3已折叠）：
+
+   ```mlir
+   func.func @strided_brc_collapse_continuous(
+       %arg0: f32, %arg1: memref<8x?x4x2xf32, strided<[?, ?, 2, 1]>>) {
+     %collapse_shape = memref.collapse_shape %arg1 [[0], [1], [2, 3]]
+         : memref<8x?x4x2xf32, strided<[?, ?, 2, 1]>>
+           into memref<8x?x8xf32, strided<[?, ?, 1]>>
+     hivm.hir.vbrc ins(%arg0 : f32)
+         outs(%collapse_shape : memref<8x?x8xf32, strided<[?, ?, 1]>>)
+     return
+   }
+   ```
+
+   折叠后的结果：
+
+   - 维度2和3合并：大小$4 \times 2 = 8$，步长$= 1$（连续）
+   - 秩从4降为3
+
+3. **场景3：动态内层维度阻止连续性验证**
+
+   对应函数为`@scalar_brc_cannot_collapse_continuous`
+
+   ```mlir
+   // memref<8x?x4x?xf32, strided<[?, ?, 2, 1]>>
+   //   dim 0: size=8,  stride=?
+   //   dim 1: size=?,  stride=?
+   //   dim 2: size=4,  stride=2
+   //   dim 3: size=?,  stride=1   ← 动态大小
+   ```
+
+   维度2–3的连续性检验说明：
+
+   编译器无法静态证明$2 = ?$。若维度3的运行时大小为2，则它们连续；若大小为3，则不连续。Pass保守地拒绝折叠。
+
+   | 维度对  | 计算                 | 是否连续                |
+   | ------- | -------------------- | ----------------------- |
+   | 维度0–1 | $? = ? \times ?$     | 未知                    |
+   | 维度1–2 | $? = 4 \times 2 = 8$ | 未知                    |
+   | 维度2–3 | $2 = ? \times 1 = ?$ | 未知（维度3大小为动态） |
+
+   输出（未变化）：
+
+   ```mlir
+   func.func @scalar_brc_cannot_collapse_continuous(
+       %arg0: f32, %arg1: memref<8x?x4x?xf32, strided<[?, ?, 2, 1]>>) {
+     hivm.hir.vbrc ins(%arg0 : f32)
+         outs(%arg1 : memref<8x?x4x?xf32, strided<[?, ?, 2, 1]>>)
+     return
+   }
+   ```

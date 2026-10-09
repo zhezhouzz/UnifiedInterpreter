@@ -146,3 +146,16 @@ Optional external Python tools can be installed into an isolated local venv:
 ```sh
 ./scripts/bootstrap_external_tools.sh
 ```
+
+## Research Archive
+
+- [`references/README.md`](references/README.md): papers discussed during the
+  semantic-design investigation, with checksums.
+- [`artifacts/flash_attention/README.md`](artifacts/flash_attention/README.md):
+  the archived Triton-Ascend FlashAttention source and HFusion IR snapshot.
+- [`docs/research-notes.md`](docs/research-notes.md): design decisions and
+  lessons from the related formal-semantics work.
+- [`docs/hfusion-instruction-scope.md`](docs/hfusion-instruction-scope.md): the
+  concrete instruction and semantic scope for the HFusion milestone.
+- `vendor/ascendnpu-ir`: a revision-pinned snapshot of the official AscendNPU
+  IR documentation and relevant dialect definitions.

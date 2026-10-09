@@ -1,0 +1,325 @@
+//===- HFusionEnums.td - HFusion dialect base support ------*- tablegen -*-===//
+//
+// Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//===----------------------------------------------------------------------===//
+//
+// This is the definition file for enums used in hfusion operations.
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef BISHENGIR_DIALECT_HFUSION_IR_HFUSIONENUMS_TD
+#define BISHENGIR_DIALECT_HFUSION_IR_HFUSIONENUMS_TD
+
+include "bishengir/Dialect/HFusion/IR/HFusionBase.td"
+include "mlir/IR/EnumAttr.td"
+
+// Define the function attribute enums matching the OpDSL functions.
+def UnaryFn : I32EnumAttr<"UnaryFn", "", [
+  I32EnumAttrCase<"relu", 0>,
+  I32EnumAttrCase<"sqrt", 1>,
+  I32EnumAttrCase<"rsqrt", 2>,
+  I32EnumAttrCase<"rec", 3>,
+  I32EnumAttrCase<"vnot", 4>,
+  I32EnumAttrCase<"tanh", 5>,
+  I32EnumAttrCase<"sin", 6>,
+  I32EnumAttrCase<"cos", 7>,
+  I32EnumAttrCase<"atan", 8>,
+  I32EnumAttrCase<"tan", 9>,
+  I32EnumAttrCase<"absi", 10>,
+  I32EnumAttrCase<"erf", 11>,
+  I32EnumAttrCase<"log2", 12>,
+  I32EnumAttrCase<"log10", 13>,
+  I32EnumAttrCase<"log1p", 14>,
+  I32EnumAttrCase<"exp2", 15>,
+  I32EnumAttrCase<"expm1", 16>,
+  I32EnumAttrCase<"ilogb", 17>,
+  I32EnumAttrCase<"asin", 18>,
+  I32EnumAttrCase<"acos", 19>,
+  I32EnumAttrCase<"asinh", 20>,
+  I32EnumAttrCase<"acosh", 21>,
+  I32EnumAttrCase<"atanh", 22>,
+  I32EnumAttrCase<"sinh", 23>,
+  I32EnumAttrCase<"lgamma", 24>,
+  I32EnumAttrCase<"cosh", 25>,
+  I32EnumAttrCase<"nearbyint", 26>
+]> {
+  let genSpecializedAttr = 0;
+  let cppNamespace = "::mlir::hfusion";
+}
+
+def BinaryFn : I32EnumAttr<"BinaryFn", "", [
+  I32EnumAttrCase<"vor", 0>,
+  I32EnumAttrCase<"vand", 1>,
+  I32EnumAttrCase<"vxor", 2>,
+  I32EnumAttrCase<"minf", 3>,
+  I32EnumAttrCase<"maxf", 4>,
+  I32EnumAttrCase<"powf", 5>,
+  I32EnumAttrCase<"mod",  6>,
+  I32EnumAttrCase<"modui", 7>,
+  I32EnumAttrCase<"shli",  8>,
+  I32EnumAttrCase<"shrsi", 9>,
+  I32EnumAttrCase<"shrui", 10>,
+  I32EnumAttrCase<"ldexp", 11>,
+  I32EnumAttrCase<"ceildivsi", 12>,
+  I32EnumAttrCase<"ceildivui", 13>,
+  I32EnumAttrCase<"floordivsi", 14>,
+  I32EnumAttrCase<"powi", 15>,
+  I32EnumAttrCase<"minnumf", 16>,
+  I32EnumAttrCase<"maxnumf", 17>,
+  I32EnumAttrCase<"atan2", 18>,
+  I32EnumAttrCase<"divfhp", 19>,
+  I32EnumAttrCase<"copysign", 20>
+]> {
+  let genSpecializedAttr = 0;
+  let cppNamespace = "::mlir::hfusion";
+}
+
+def CompareFn : I32EnumAttr<"CompareFn", "", [
+  I32EnumAttrCase<"veq", 0>,
+  I32EnumAttrCase<"vne", 1>,
+  I32EnumAttrCase<"vle", 2>,
+  I32EnumAttrCase<"vlt", 3>,
+  I32EnumAttrCase<"vge", 4>,
+  I32EnumAttrCase<"vgt", 5>,
+  I32EnumAttrCase<"vule", 6>,
+  I32EnumAttrCase<"vult", 7>,
+  I32EnumAttrCase<"vuge", 8>,
+  I32EnumAttrCase<"vugt", 9>
+]> {
+  let genSpecializedAttr = 0;
+  let cppNamespace = "::mlir::hfusion";
+}
+
+def TernaryFn : I32EnumAttr<"TernaryFn", "", [
+  I32EnumAttrCase<"select", 0>,
+  I32EnumAttrCase<"fma", 1>
+]> {
+  let genSpecializedAttr = 0;
+  let cppNamespace = "::mlir::hfusion";
+}
+
+def TypeFn : I32EnumAttr<"TypeFn", "", [
+  I32EnumAttrCase<"cast_signed", 0>,
+  I32EnumAttrCase<"cast_unsigned", 1>,
+  I32EnumAttrCase<"bitcast", 2>
+]> {
+  let genSpecializedAttr = 0;
+  let cppNamespace = "::mlir::hfusion";
+}
+
+def RoundMode : I32EnumAttr<"RoundMode", "", [
+  I32EnumAttrCase<"RINT", 0, "rint">,
+  I32EnumAttrCase<"ROUND", 1, "round">,
+  I32EnumAttrCase<"FLOOR", 2, "floor">,
+  I32EnumAttrCase<"CEIL", 3, "ceil">,
+  I32EnumAttrCase<"TRUNC", 4, "trunc">,
+  I32EnumAttrCase<"ODD", 5, "odd">,
+  I32EnumAttrCase<"TRUNCWITHOVERFLOW", 6, "truncwithoverflow">
+]> {
+  let genSpecializedAttr = 0;
+  let cppNamespace = "::mlir::hfusion";
+  let description = [{
+    - RINT: round to nearest, tie to even (c language rint)
+    - ROUND: round to nearest, tie away from zero (c language round)
+    - FLOOR: round to minus infinity (c language floor)
+    - CEIL: round to positive infinity (c language ceil)
+    - TRUNC: round to zero (c language trunc)
+    - ODD: round to odd (Von Neumann rounding)
+  }];
+}
+
+def UnsignedMode : I32EnumAttr<"UnsignedMode", "", [
+  I32EnumAttrCase<"SI2SI", 0, "si2si">,
+  I32EnumAttrCase<"SI2UI", 1, "si2ui">,
+  I32EnumAttrCase<"UI2SI", 2, "ui2si">,
+  I32EnumAttrCase<"UI2UI", 3, "ui2ui">
+]> {
+  let genSpecializedAttr = 0;
+  let cppNamespace = "::mlir::hfusion";
+  let description = [{
+    represent info for casting (u)int -> (u)int
+  }];
+}
+
+def CastMode : I32EnumAttr<"CastMode", "", [
+  I32EnumAttrCase<"F32TOI8", 0, "F32TOI8">,
+  I32EnumAttrCase<"F32TOI16", 1, "F32TOI16">,
+  I32EnumAttrCase<"F16TOI8", 2, "F16TOI8">,
+  I32EnumAttrCase<"I64TOI32", 3, "I64TOI32">,
+  I32EnumAttrCase<"I64TOI16", 4, "I64TOI16">,
+  I32EnumAttrCase<"I64TOI8", 5, "I64TOI8">,
+  I32EnumAttrCase<"I32TOI16", 6, "I32TOI16">,
+  I32EnumAttrCase<"I32TOI8", 7, "I32TOI8">,
+  I32EnumAttrCase<"I16TOI8", 8, "I16TOI8">,
+]> {
+  let genSpecializedAttr = 0;
+  let cppNamespace = "::mlir::hfusion";
+  let description = [{
+    cast mode, cast from src dtype to dst dtype
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// OpFusion Related Enums.
+//===----------------------------------------------------------------------===//
+
+def TaylerMode : I32EnumAttr<"TaylerMode", "", [
+  I32EnumAttrCase<"SIN", 0, "sin">,
+  I32EnumAttrCase<"ATAN", 1, "atan">,
+]> {
+  let genSpecializedAttr = 0;
+  let cppNamespace = "::mlir::hfusion";
+}
+
+def AtomicKind : I32EnumAttr<"AtomicKind", "", [
+  I32EnumAttrCase<"NONE", 0, "none">,
+  I32EnumAttrCase<"ADD", 1, "add">,
+  I32EnumAttrCase<"MAX", 2, "max">,
+  I32EnumAttrCase<"MIN", 3, "min">,
+  I32EnumAttrCase<"AND", 4, "and">,
+  I32EnumAttrCase<"OR", 5, "or">,
+  I32EnumAttrCase<"XOR", 6, "xor">,
+  I32EnumAttrCase<"CAS", 7, "cas">,
+  I32EnumAttrCase<"XCHG", 8, "xchg">,
+  I32EnumAttrCase<"UMAX", 9, "umax">,
+  I32EnumAttrCase<"UMIN", 10, "umin">,
+]> {
+  let genSpecializedAttr = 0;
+  let cppNamespace = "::mlir::hfusion";
+}
+
+class HFusion_I32Enum<string name, string description,
+                      list<I32EnumAttrCase> cases>
+    : I32EnumAttr<name, description, cases> {
+  let genSpecializedAttr = 0;
+  let cppNamespace = "::mlir::hfusion";
+}
+
+def HFUSION_FUSION_KIND_PURE_ELEMWISE : I32EnumAttrCase<"PureElemwise", 1, "PURE_ELEMWISE">;
+def HFUSION_FUSION_KIND_ANY_PB : I32EnumAttrCase<"AnyPB", 2, "ANY_PB">;
+def HFUSION_FUSION_KIND_LAST_AXIS_PBR : I32EnumAttrCase<"LastAxisPBR", 3, "LAST_AXIS_PBR">;
+def HFUSION_FUSION_KIND_ANY_PBR : I32EnumAttrCase<"AnyPBR", 4, "ANY_PBR">;
+def HFUSION_FUSION_KIND_SINGLE_CUBE : I32EnumAttrCase<"SingleCube", 5, "SINGLE_CUBE">;
+def HFUSION_FUSION_KIND_SHALLOW_CV : I32EnumAttrCase<"ShallowCV", 6, "SHALLOW_CV">;
+def HFUSION_FUSION_KIND_SHALLOW_VV : I32EnumAttrCase<"ShallowVV", 7, "SHALLOW_VV">;
+def HFUSION_FUSION_KIND_MIX_CV : I32EnumAttrCase<"MixCV", 8, "MIX_CV">;
+def HFUSION_FUSION_KIND_MIX_C2 : I32EnumAttrCase<"MixC2", 9, "MIX_C2">;
+def HFUSION_FUSION_KIND_UNKNOWN : I32EnumAttrCase<"Unknown", 10, "UNKNOWN">;
+
+def HFusion_FusionKindEnum :
+  HFusion_I32Enum<"FusionKind", "HFusion fused kernel kind", [
+  HFUSION_FUSION_KIND_PURE_ELEMWISE,
+  HFUSION_FUSION_KIND_ANY_PB,
+  HFUSION_FUSION_KIND_LAST_AXIS_PBR,
+  HFUSION_FUSION_KIND_ANY_PBR,
+  HFUSION_FUSION_KIND_SINGLE_CUBE,
+  HFUSION_FUSION_KIND_SHALLOW_CV,
+  HFUSION_FUSION_KIND_SHALLOW_VV,
+  HFUSION_FUSION_KIND_MIX_CV,
+  HFUSION_FUSION_KIND_MIX_C2,
+  HFUSION_FUSION_KIND_UNKNOWN,
+]> {}
+
+def HFUSION_FLATTEN_MODE_GREEDY : I32EnumAttrCase<"Greedy", 1>;
+def HFUSION_FLATTEN_MODE_TIDY : I32EnumAttrCase<"Tidy", 2>;
+
+def HFusion_FlattenModeEnum :
+  HFusion_I32Enum<"FlattenMode", "HFusion flatten mode", [
+  HFUSION_FLATTEN_MODE_GREEDY,
+  HFUSION_FLATTEN_MODE_TIDY,
+]> {}
+
+def MmMapMode : I32EnumAttr<"MmMapMode", "", [
+  I32EnumAttrCase<"CoreOp", 0, "core_op">,
+  I32EnumAttrCase<"MacroInstr", 1, "macro_instr">,
+]> {
+  let genSpecializedAttr = 0;
+  let cppNamespace = "::mlir::hfusion";
+}
+
+def HFUSION_OUTPUT_MODE_MULTIPLE : I32EnumAttrCase<"Multiple", 1>;
+def HFUSION_OUTPUT_MODE_SINGLE : I32EnumAttrCase<"Single", 2>;
+def HFUSION_OUTPUT_MODE_SINGLE_AGGR : I32EnumAttrCase<"SingleAggressive", 3>;
+
+def HFusion_OutputModeEnum :
+  HFusion_I32Enum<"OutputMode", "HFusion Output mode", [
+  HFUSION_OUTPUT_MODE_MULTIPLE,
+  HFUSION_OUTPUT_MODE_SINGLE,
+  HFUSION_OUTPUT_MODE_SINGLE_AGGR,
+]> {}
+
+def HFUSION_PADDING_OPTION_PAD_ZERO : I32EnumAttrCase<"PAD_ZERO", 1, "zero">;
+// We can not set the string value to "NAN" because it is a keyword in C++
+def HFUSION_PADDING_OPTION_PAD_NAN : I32EnumAttrCase<"PAD_NAN", 2, "nan">;
+
+def HFusion_PaddingOptionEnum :
+  HFusion_I32Enum<"PaddingOption", "Padding option", [
+  HFUSION_PADDING_OPTION_PAD_ZERO,
+  HFUSION_PADDING_OPTION_PAD_NAN,
+]> {}
+
+def HFUSION_CACHE_MODIFIER_NONE : I32EnumAttrCase<"NONE", 1, "none">;
+def HFUSION_CACHE_MODIFIER_CA : I32EnumAttrCase<"CA", 2, "ca">;
+def HFUSION_CACHE_MODIFIER_CG : I32EnumAttrCase<"CG", 3, "cg">;
+def HFUSION_CACHE_MODIFIER_WB : I32EnumAttrCase<"WB", 4, "wb">;
+def HFUSION_CACHE_MODIFIER_CS : I32EnumAttrCase<"CS", 5, "cs">;
+def HFUSION_CACHE_MODIFIER_WT : I32EnumAttrCase<"WT", 6, "wt">;
+def HFUSION_CACHE_MODIFIER_CV : I32EnumAttrCase<"CV", 7, "cv">;
+
+def HFusion_CacheModifierEnum :
+  HFusion_I32Enum<"CacheModifier", "Cache modification policy", [
+  HFUSION_CACHE_MODIFIER_NONE,
+  HFUSION_CACHE_MODIFIER_CA,
+  HFUSION_CACHE_MODIFIER_CG,
+  HFUSION_CACHE_MODIFIER_WB,
+  HFUSION_CACHE_MODIFIER_CS,
+  HFUSION_CACHE_MODIFIER_WT,
+  HFUSION_CACHE_MODIFIER_CV,
+]> {}
+
+def HFUSION_EVICTION_POLICY_NORMAL : I32EnumAttrCase<"NORMAL", 1, "EvictNormal">;
+def HFUSION_EVICTION_POLICY_EVICT_FIRST : I32EnumAttrCase<"EVICT_FIRST", 2, "EvictFirst">;
+def HFUSION_EVICTION_POLICY_EVICT_LAST : I32EnumAttrCase<"EVICT_LAST", 3, "EvictLast">;
+
+def HFusion_EvictionPolicyEnum :
+  HFusion_I32Enum<"EvictionPolicy", "Eviction policy", [
+  HFUSION_EVICTION_POLICY_NORMAL,
+  HFUSION_EVICTION_POLICY_EVICT_FIRST,
+  HFUSION_EVICTION_POLICY_EVICT_LAST,
+]> {}
+
+def ReduceWithIndexKind : I32EnumAttr<"ReduceWithIndexKind", "", [
+  I32EnumAttrCase<"MIN", 0, "min">,
+  I32EnumAttrCase<"MAX", 1, "max">,
+  I32EnumAttrCase<"MINUI", 2, "minui">,
+  I32EnumAttrCase<"MAXUI", 3, "maxui">
+]> {
+  let genSpecializedAttr = 0;
+  let cppNamespace = "::mlir::hfusion";
+}
+
+def Hfusion_CumOpTypeEnum :
+  HFusion_I32Enum<"CumOpType", "HFusion cumulative operation type", [
+  I32EnumAttrCase<"UNDEFINED", 0, "undefined">,
+  I32EnumAttrCase<"CUMSUM", 1, "cumsum">,
+  I32EnumAttrCase<"CUMPROD", 2, "cumprod">,
+  I32EnumAttrCase<"CUMMAX", 3, "cummax">,
+  I32EnumAttrCase<"CUMMIN", 4, "cummin">,
+]> {
+  let genSpecializedAttr = 0;
+  let cppNamespace = "::mlir::hfusion";
+}
+
+#endif // BISHENGIR_DIALECT_HFUSION_IR_HFUSIONENUMS_TD
