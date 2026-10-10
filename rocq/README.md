@@ -33,7 +33,9 @@ still future work.
   `instr` type with constructors such as `ArithInstr` and `ScfInstr`.
   `Syntax` supplies common MLIR types, SSA references, and recursive regions;
   `Program` defines programs over `instr`; `Semantics` is the separate home of
-  executable meanings for those instructions.
+  executable meanings for those instructions. It exposes one handler field per
+  concrete operation and a total dispatcher, with source comments identifying
+  the corresponding AscendNPU-IR or upstream MLIR documentation contract.
 - `Examples`: executable examples and basic proofs.
 - `Extraction`: OCaml extraction boundary.
 

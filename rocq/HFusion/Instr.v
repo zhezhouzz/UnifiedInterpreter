@@ -93,11 +93,33 @@ Inductive func_operation :=
     (results : list mlir_type) (attributes : function_attributes)
 | FuncReturn (values : list typed_value).
 
-Inductive hfusion_cast_kind := HFusionCastSigned.
-Inductive hfusion_round_mode := HFusionRint.
+(* AscendNPU-IR HFusionEnums.td: TypeFn. *)
+Inductive hfusion_cast_kind :=
+| HFusionCastSigned
+| HFusionCastUnsigned
+| HFusionBitcast.
+
+(* AscendNPU-IR HFusionEnums.td: RoundMode. *)
+Inductive hfusion_round_mode :=
+| HFusionRint
+| HFusionRound
+| HFusionFloor
+| HFusionCeil
+| HFusionTrunc
+| HFusionOdd
+| HFusionTruncWithOverflow.
+
+(* AscendNPU-IR HFusionEnums.td: UnsignedMode. *)
+Inductive hfusion_unsigned_mode :=
+| HFusionSI2SI
+| HFusionSI2UI
+| HFusionUI2SI
+| HFusionUI2UI.
 
 Inductive hfusion_dialect_operation :=
 | HFusionCast (cast : hfusion_cast_kind) (rounding : hfusion_round_mode)
+    (enable_overflow enable_saturate : bool)
+    (unsigned_mode : hfusion_unsigned_mode)
     (input output : typed_value) (result_type : mlir_type).
 
 (* The closed instruction type for the captured HFusion-stage artifact. *)
