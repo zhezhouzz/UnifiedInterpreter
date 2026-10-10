@@ -7,11 +7,13 @@ interpreter. Its definitions are organized around three constraints:
 2. An instruction depends only on the state components it reads or writes.
 3. Proof-only laws live in `Prop`, so extraction erases them.
 
-The current milestone is deliberately small. It establishes the abstraction
-boundaries and includes one executable allocation instruction, lifting through
-a top-level capability lens, finite-map locality lemmas, a smoke test, and an
-OCaml extraction entry point. It does not yet attempt to parse or execute the complete FlashAttention
-artifact.
+The current milestone establishes the abstraction boundaries and formalizes
+the complete operation inventory appearing in the captured FlashAttention
+HFusion MLIR artifact. It includes one executable allocation foundation,
+lifting through a top-level capability lens, finite-map locality lemmas, smoke
+tests, and an OCaml extraction entry point. The operation syntax is complete
+for that artifact; executable semantics for most operations and a parser are
+still future work.
 
 ## Layout
 
@@ -26,7 +28,13 @@ artifact.
   specialized buffers); `ASDefault` represents placement not yet decided.
 - `Unified`: errors, optional observation events, and state-component
   capabilities. There is no one-field unified-state wrapper.
-- `HFusion`: instruction functions assembled from the smaller capabilities.
+- `HFusion`: the mixed-dialect syntax captured at the HFusion compilation
+  stage, split into `ArithInstr`, `TensorInstr`, `MemRefInstr`,
+  `BufferizationInstr`, `LinalgInstr`, `ScfInstr`, `FuncInstr`, and
+  `HFusionInstr`. `Syntax` supplies common MLIR types, SSA references, and
+  recursive regions; `Program` closes the operation sum for the captured
+  FlashAttention artifact. `Semantics` currently contains only executable
+  foundations used by smoke tests, not a second instruction syntax.
 - `Examples`: executable examples and basic proofs.
 - `Extraction`: OCaml extraction boundary.
 

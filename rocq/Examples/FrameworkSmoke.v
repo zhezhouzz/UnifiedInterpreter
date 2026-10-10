@@ -3,7 +3,7 @@ From UnifiedInterpreter.Base Require Import Result StateM.
 From UnifiedInterpreter.Memory Require Import Model.
 From UnifiedInterpreter.Tensor Require Import Model.
 From UnifiedInterpreter.Unified Require Import Errors State.
-From UnifiedInterpreter.HFusion Require Import Instructions.
+From UnifiedInterpreter.HFusion Require Import Semantics.
 From UnifiedInterpreter.Value Require Import DType Scalar.
 
 Import ListNotations.

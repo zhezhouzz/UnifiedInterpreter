@@ -10,6 +10,16 @@ Memory/Model.v
 Unified/Events.v
 Unified/Errors.v
 Unified/State.v
-HFusion/Instructions.v
+HFusion/Syntax.v
+HFusion/ArithInstr.v
+HFusion/TensorInstr.v
+HFusion/MemRefInstr.v
+HFusion/BufferizationInstr.v
+HFusion/LinalgInstr.v
+HFusion/ScfInstr.v
+HFusion/FuncInstr.v
+HFusion/HFusionInstr.v
+HFusion/Program.v
+HFusion/Semantics.v
 Examples/FrameworkSmoke.v
 Extraction/Extract.v

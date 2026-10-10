@@ -1,6 +1,6 @@
 From Stdlib Require Import Extraction ExtrOcamlBasic ExtrOcamlNatInt.
 From UnifiedInterpreter.Examples Require Import FrameworkSmoke.
-From UnifiedInterpreter.HFusion Require Import Instructions.
+From UnifiedInterpreter.HFusion Require Import Semantics.
 From UnifiedInterpreter.Memory Require Import Model.
 From UnifiedInterpreter.Value Require Import Scalar.
 

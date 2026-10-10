@@ -7,6 +7,9 @@ From UnifiedInterpreter.Value Require Import DType Scalar.
 Import ListNotations.
 Set Implicit Arguments.
 
+(* Temporary executable foundations used by the smoke tests.  Dialect
+   operation semantics will call these helpers; these definitions are not
+   themselves HFusion-stage operation syntax. *)
 Definition local_alloc {Scalar} (space : address_space)
     (element_type : dtype) (contents : list Scalar)
     : M runtime_error (memory_state Scalar) allocation_id :=
