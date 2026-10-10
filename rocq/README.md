@@ -43,6 +43,25 @@ input to this computation and cannot be inspected by instructions;
 `Unified/Events.v` currently defines only a vocabulary for a future external
 observer.
 
+The unified state contains only data that can affect a later semantic step.
+In particular, a global step counter is meta-level execution bookkeeping, so
+it is not a state component.  Likewise, an observation trace should be
+accumulated by the program runner as an output, rather than stored in the
+machine state.  If a future instruction must inspect some fact, that fact must
+have an explicit semantic representation: for example, an asynchronous copy
+updates a DMA queue and emits an observation event, while a wait consults the
+DMA queue rather than searching the trace.
+
+The current HFusion fragment needs only memory as persistent machine state.
+SSA environments and structured control are threaded by the interpreter, and
+immutable target and numeric policies are semantic parameters.  Lower HIVM
+layers will extend the state with the components demanded by their operations,
+such as per-core control/register state, address-space capacities, DMA and
+pipeline queues, barriers, and scheduling state.  These components should be
+introduced as separately accessible capabilities, not as speculative empty
+fields in the initial record.  This permits the same HFusion instruction
+semantics to run over either the small HFusion state or a larger HIVM state.
+
 `Lens` is used only to embed fixed components such as memory into a larger
 machine state. It is not claimed to provide separation semantics. Dynamic
 allocation locality comes from stdpp finite-map facts such as
