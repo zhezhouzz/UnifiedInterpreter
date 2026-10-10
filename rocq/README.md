@@ -28,13 +28,12 @@ still future work.
   specialized buffers); `ASDefault` represents placement not yet decided.
 - `Unified`: errors, optional observation events, and state-component
   capabilities. There is no one-field unified-state wrapper.
-- `HFusion`: the mixed-dialect syntax captured at the HFusion compilation
-  stage, split into `ArithInstr`, `TensorInstr`, `MemRefInstr`,
-  `BufferizationInstr`, `LinalgInstr`, `ScfInstr`, `FuncInstr`, and
-  `HFusionInstr`. `Syntax` supplies common MLIR types, SSA references, and
-  recursive regions; `Program` closes the operation sum for the captured
-  FlashAttention artifact. `Semantics` currently contains only executable
-  foundations used by smoke tests, not a second instruction syntax.
+- `HFusion`: the mixed-dialect IR captured at the HFusion compilation stage.
+  `Instr` defines each operation family and closes them under the single
+  `instr` type with constructors such as `ArithInstr` and `ScfInstr`.
+  `Syntax` supplies common MLIR types, SSA references, and recursive regions;
+  `Program` defines programs over `instr`; `Semantics` is the separate home of
+  executable meanings for those instructions.
 - `Examples`: executable examples and basic proofs.
 - `Extraction`: OCaml extraction boundary.
 

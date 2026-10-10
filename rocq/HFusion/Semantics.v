@@ -1,5 +1,6 @@
 From Stdlib Require Import List.
 From UnifiedInterpreter.Base Require Import Result StateM.
+From UnifiedInterpreter.HFusion Require Import Instr.
 From UnifiedInterpreter.Memory Require Import Model.
 From UnifiedInterpreter.Unified Require Import Errors State.
 From UnifiedInterpreter.Value Require Import DType Scalar.
