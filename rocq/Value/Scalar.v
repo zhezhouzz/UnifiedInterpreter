@@ -26,6 +26,28 @@ Class ScalarOps (Scalar : Type) := {
   scalar_cast : cast_spec -> Scalar -> result scalar_error Scalar
 }.
 
+(* The binary scalar operations that an IR instruction may request.  Keeping
+   this set explicit prevents the interpreter from accepting arbitrary Rocq
+   functions as source-language operations.  Unary operations and casts have
+   different arities and will use their own operation types. *)
+Inductive scalar_operation :=
+| ScalarAdd
+| ScalarSub
+| ScalarMul
+| ScalarDiv
+| ScalarMax.
+
+Definition eval_scalar_operation {Scalar} `{ScalarOps Scalar}
+    (operation : scalar_operation) (left right : Scalar)
+    : result scalar_error Scalar :=
+  match operation with
+  | ScalarAdd => Ok (scalar_add left right)
+  | ScalarSub => Ok (scalar_sub left right)
+  | ScalarMul => Ok (scalar_mul left right)
+  | ScalarDiv => scalar_div left right
+  | ScalarMax => Ok (scalar_max left right)
+  end.
+
 Class ScalarLaws (Scalar : Type) `{ScalarOps Scalar} : Prop := {
   scalar_add_zero_l : forall x, scalar_add scalar_zero x = x;
   scalar_add_zero_r : forall x, scalar_add x scalar_zero = x;

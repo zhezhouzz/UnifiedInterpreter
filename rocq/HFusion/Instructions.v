@@ -17,9 +17,14 @@ Definition exec_alloc {Scalar State} `{HasMemory Scalar State}
     : M runtime_error State allocation_id :=
   zoom memory_lens (local_alloc space element_type contents).
 
-Definition exec_scalar_add {Scalar State} `{ScalarOps Scalar}
-    (left right : Scalar) : M runtime_error State Scalar :=
-  pure (scalar_add left right).
+Definition exec_scalar_operation {Scalar State} `{ScalarOps Scalar}
+    (operation : scalar_operation) (left right : Scalar)
+    : M runtime_error State Scalar :=
+  fun state =>
+    match eval_scalar_operation operation left right with
+    | Ok value => Ok (value, state)
+    | Error _ => Error NumericFailure
+    end.
 
 Definition exec_fail {State}
     : M runtime_error State unit :=

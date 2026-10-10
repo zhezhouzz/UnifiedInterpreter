@@ -4,7 +4,7 @@ From UnifiedInterpreter.Memory Require Import Model.
 From UnifiedInterpreter.Tensor Require Import Model.
 From UnifiedInterpreter.Unified Require Import Errors State.
 From UnifiedInterpreter.HFusion Require Import Instructions.
-From UnifiedInterpreter.Value Require Import DType.
+From UnifiedInterpreter.Value Require Import DType Scalar.
 
 Import ListNotations.
 
@@ -52,6 +52,18 @@ Definition allocate_then_fail :
 
 Example failed_sequence_exposes_no_intermediate_state :
   allocate_then_fail smoke_initial = Error InvalidMemoryAccess.
+Proof. reflexivity. Qed.
+
+Example scalar_add_is_selected {Scalar} `{ScalarOps Scalar}
+    (left right : Scalar) :
+  eval_scalar_operation ScalarAdd left right =
+    Ok (scalar_add left right).
+Proof. reflexivity. Qed.
+
+Example scalar_operation_preserves_state {Scalar State} `{ScalarOps Scalar}
+    (left right : Scalar) (state : State) :
+  exec_scalar_operation ScalarAdd left right state =
+    Ok (scalar_add left right, state).
 Proof. reflexivity. Qed.
 
 Definition view_example : result memory_error (tensor Z) :=
