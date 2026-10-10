@@ -7,3 +7,8 @@ reports/
 *.vok
 *.glob
 .*.aux
+rocq/Makefile.conf
+rocq/Extraction/unified_semantics.ml
+rocq/Extraction/unified_semantics.mli
+rocq/Extraction/unified_semantics.cmi
+rocq/Extraction/unified_semantics.cmo

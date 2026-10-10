@@ -3,7 +3,7 @@ From UnifiedInterpreter.Examples Require Import FrameworkSmoke.
 From UnifiedInterpreter.HFusion Require Import Instructions.
 
 Extraction Language OCaml.
-Set Extraction Output Directory "_build/rocq".
+Set Extraction Output Directory "Extraction".
 
 Extraction "unified_semantics.ml"
   smoke_result

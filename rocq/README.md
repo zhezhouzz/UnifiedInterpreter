@@ -23,25 +23,38 @@ artifact.
 - `Examples`: executable examples and basic proofs.
 - `Extraction`: OCaml extraction boundary.
 
-## Build and extraction
+## Native Rocq build and extraction
 
-The repository currently uses the `with-rocq-1` opam switch for Rocq 9.1:
+The project uses Rocq's native `_CoqProject + rocq makefile + make` workflow.
+Compiled `.vo`, `.vos`, `.vok`, and `.glob` files are written beside their
+corresponding `.v` sources so Rocq IDEs can resolve imported modules.
+
+Select the Rocq 9.1 environment and invoke the generated Makefile:
 
 ```sh
-./scripts/check_rocq.sh
+opam switch with-rocq-1
+eval $(opam env)
+cd rocq
+make
 ```
 
-When the current directory is `rocq/`, run the same entry point as:
+`opam` selects the compiler environment only; `make` performs the build using
+Rocq's native dependency graph. The checked-in `Makefile` is generated from
+`_CoqProject` using:
+
+```sh
+rocq makefile -f _CoqProject -o Makefile
+```
+
+For CI or a one-command check from either the repository root or `rocq/`, use:
 
 ```sh
 ../scripts/check_rocq.sh
 ```
 
-The script compiles the modules in dependency order and then compiles
-`Extraction/Extract.v`. A direct command such as
-`rocq compile Extraction/Extract.v` does not recursively build imported `.v`
-files, so it fails on a clean checkout when `FrameworkSmoke.vos` has not yet
-been produced.
+The wrapper runs native `make` inside the selected opam environment and then
+checks the extracted OCaml with `ocamlc`. A direct command such as
+`rocq compile Extraction/Extract.v` does not recursively build imports and
+therefore fails on a clean checkout.
 
-The generated extraction output belongs under `_build` and is not edited by
-hand.
+The generated OCaml belongs under `Extraction/` and is not edited by hand.
