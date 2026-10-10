@@ -126,6 +126,8 @@ not by `H4`.
 - `lib/examples.ml`: the sourced Triton-like programs and user-scoped variant.
 - `lib/report.ml`: comparison harness for handler scopes.
 - `test/test_unified_interpreter.ml`: acceptance tests for all programs.
+- `rocq/`: executable semantic foundation with parameterized values and
+  composable state capabilities; see `rocq/README.md`.
 
 ## Run
 
@@ -139,6 +141,13 @@ Run tests:
 
 ```sh
 opam exec --switch=5.2.0 -- dune test
+```
+
+Check the Rocq executable-semantics framework and regenerate its OCaml
+extraction artifact:
+
+```sh
+./scripts/check_rocq.sh
 ```
 
 Optional external Python tools can be installed into an isolated local venv:
