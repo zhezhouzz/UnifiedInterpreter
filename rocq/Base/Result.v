@@ -22,3 +22,7 @@ Definition result_bind {E A B} (r : result E A)
   | Ok x => k x
   | Error e => Error e
   end.
+
+Notation "x <-? computation ;; next" :=
+  (result_bind computation (fun x => next))
+  (at level 100, computation at next level, right associativity).

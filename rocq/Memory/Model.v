@@ -1,5 +1,8 @@
 From Stdlib Require Import List ZArith.
 From stdpp Require Import gmap.
+From UnifiedInterpreter.Base Require Import Result.
+From UnifiedInterpreter.Tensor Require Import Model.
+From UnifiedInterpreter.Value Require Import DType.
 
 Import ListNotations.
 Open Scope Z_scope.
@@ -8,95 +11,170 @@ Set Implicit Arguments.
 Definition allocation_id := nat.
 Definition descriptor_id := nat.
 
-Record memory_block (Scalar : Type) := {
-  block_elements : list Scalar
+(* A buffer is mutable linear storage with allocation identity. Unlike a
+   tensor, it has no intrinsic n-dimensional shape. *)
+Record buffer (Value : Type) := {
+  buffer_element_type : dtype;
+  buffer_cells : list Value
 }.
 
-(* A descriptor is a view. Creating one never creates another memory block. *)
+(* A descriptor gives an n-dimensional interpretation of a buffer. Creating a
+   descriptor changes metadata only and never creates another allocation. *)
 Record memref_descriptor := {
   descriptor_allocation : allocation_id;
   descriptor_offset : Z;
-  descriptor_sizes : list Z;
+  descriptor_sizes : list nat;
   descriptor_strides : list Z
 }.
 
-Record memory_state (Scalar : Type) := {
-  memory_blocks : gmap nat (memory_block Scalar);
+Record memory_state (Value : Type) := {
+  memory_buffers : gmap nat (buffer Value);
   memory_descriptors : gmap nat memref_descriptor;
   memory_next_allocation : allocation_id;
   memory_next_descriptor : descriptor_id
 }.
 
-Definition empty_memory {Scalar} : memory_state Scalar :=
-  {| memory_blocks := ∅;
+Inductive memory_error :=
+| UnknownAllocation
+| UnknownDescriptor
+| InvalidViewRank
+| ViewAddressOutOfBounds.
+
+Definition empty_memory {Value} : memory_state Value :=
+  {| memory_buffers := ∅;
      memory_descriptors := ∅;
      memory_next_allocation := O;
      memory_next_descriptor := O |}.
 
-Definition lookup_block {Scalar} (id : allocation_id)
-    (memory : memory_state Scalar) : option (memory_block Scalar) :=
-  memory_blocks memory !! id.
+Definition lookup_buffer {Value} (id : allocation_id)
+    (memory : memory_state Value) : option (buffer Value) :=
+  memory_buffers memory !! id.
 
-Definition lookup_descriptor {Scalar} (id : descriptor_id)
-    (memory : memory_state Scalar) : option memref_descriptor :=
+Definition lookup_descriptor {Value} (id : descriptor_id)
+    (memory : memory_state Value) : option memref_descriptor :=
   memory_descriptors memory !! id.
 
-Definition allocate_block {Scalar} (contents : list Scalar)
-    (memory : memory_state Scalar) : allocation_id * memory_state Scalar :=
+Definition allocate_buffer {Value} (element_type : dtype)
+    (contents : list Value) (memory : memory_state Value)
+    : allocation_id * memory_state Value :=
   let id := memory_next_allocation memory in
   (id,
-   {| memory_blocks :=
-        <[id := {| block_elements := contents |}]>
-          (memory_blocks memory);
+   {| memory_buffers :=
+        <[id := {| buffer_element_type := element_type;
+                   buffer_cells := contents |}]>
+          (memory_buffers memory);
       memory_descriptors := memory_descriptors memory;
       memory_next_allocation := S id;
       memory_next_descriptor := memory_next_descriptor memory |}).
 
-Definition insert_descriptor {Scalar} (descriptor : memref_descriptor)
-    (memory : memory_state Scalar) : descriptor_id * memory_state Scalar :=
+Definition insert_descriptor {Value} (descriptor : memref_descriptor)
+    (memory : memory_state Value) : descriptor_id * memory_state Value :=
   let id := memory_next_descriptor memory in
   (id,
-   {| memory_blocks := memory_blocks memory;
+   {| memory_buffers := memory_buffers memory;
       memory_descriptors :=
         <[id := descriptor]> (memory_descriptors memory);
       memory_next_allocation := memory_next_allocation memory;
       memory_next_descriptor := S id |}).
 
-Lemma allocate_block_lookup_new {Scalar} (contents : list Scalar)
-    (memory memory' : memory_state Scalar) (id : allocation_id) :
-  allocate_block contents memory = (id, memory') ->
-  lookup_block id memory' = Some {| block_elements := contents |}.
+Fixpoint linear_address (offset : Z) (strides : list Z)
+    (indices : list nat) : result memory_error Z :=
+  match strides, indices with
+  | [], [] => Ok offset
+  | stride :: strides', index :: indices' =>
+      linear_address (offset + Z.of_nat index * stride) strides' indices'
+  | _, _ => Error InvalidViewRank
+  end.
+
+Definition read_buffer_cell {Value} (storage : buffer Value) (address : Z)
+    : result memory_error Value :=
+  match address with
+  | Zneg _ => Error ViewAddressOutOfBounds
+  | Z0 =>
+      match List.nth_error (buffer_cells storage) 0 with
+      | Some value => Ok value
+      | None => Error ViewAddressOutOfBounds
+      end
+  | Zpos positive =>
+      match List.nth_error (buffer_cells storage) (Pos.to_nat positive) with
+      | Some value => Ok value
+      | None => Error ViewAddressOutOfBounds
+      end
+  end.
+
+Fixpoint read_coordinates {Value} (storage : buffer Value)
+    (offset : Z) (strides : list Z) (coordinates : list (list nat))
+    : result memory_error (list Value) :=
+  match coordinates with
+  | [] => Ok []
+  | coordinate :: rest =>
+      address <-? linear_address offset strides coordinate ;;
+      value <-? read_buffer_cell storage address ;;
+      values <-? read_coordinates storage offset strides rest ;;
+      Ok (value :: values)
+  end.
+
+(* Materialize the current contents observed through a memref descriptor as an
+   independent tensor value. Later writes to the buffer do not mutate the
+   returned tensor. *)
+Definition read_view {Value} (memory : memory_state Value)
+    (descriptor_id : descriptor_id) : result memory_error (tensor Value) :=
+  match lookup_descriptor descriptor_id memory with
+  | None => Error UnknownDescriptor
+  | Some descriptor =>
+      match lookup_buffer (descriptor_allocation descriptor) memory with
+      | None => Error UnknownAllocation
+      | Some storage =>
+          values <-?
+            read_coordinates storage
+              (descriptor_offset descriptor)
+              (descriptor_strides descriptor)
+              (tensor_indices (descriptor_sizes descriptor)) ;;
+          Ok {| tensor_shape := descriptor_sizes descriptor;
+                tensor_element_type := buffer_element_type storage;
+                tensor_elements := values |}
+      end
+  end.
+
+Lemma allocate_buffer_lookup_new {Value} (element_type : dtype)
+    (contents : list Value) (memory memory' : memory_state Value)
+    (id : allocation_id) :
+  allocate_buffer element_type contents memory = (id, memory') ->
+  lookup_buffer id memory' =
+    Some {| buffer_element_type := element_type;
+            buffer_cells := contents |}.
 Proof.
-  unfold allocate_block. intro allocated.
-  inversion allocated; subst. unfold lookup_block. cbn.
+  unfold allocate_buffer. intro allocated.
+  inversion allocated; subst. unfold lookup_buffer. cbn.
   apply lookup_insert_eq.
 Qed.
 
-Lemma allocate_block_preserves_descriptors {Scalar} (contents : list Scalar)
-    (memory memory' : memory_state Scalar) (id : allocation_id) :
-  allocate_block contents memory = (id, memory') ->
+Lemma allocate_buffer_preserves_descriptors {Value} (element_type : dtype)
+    (contents : list Value) (memory memory' : memory_state Value)
+    (id : allocation_id) :
+  allocate_buffer element_type contents memory = (id, memory') ->
   memory_descriptors memory' = memory_descriptors memory.
 Proof.
-  unfold allocate_block. intro allocated. inversion allocated. reflexivity.
+  unfold allocate_buffer. intro allocated. inversion allocated. reflexivity.
 Qed.
 
-Lemma allocate_block_preserves_other {Scalar} (contents : list Scalar)
-    (memory memory' : memory_state Scalar)
+Lemma allocate_buffer_preserves_other {Value} (element_type : dtype)
+    (contents : list Value) (memory memory' : memory_state Value)
     (fresh other : allocation_id) :
-  allocate_block contents memory = (fresh, memory') ->
+  allocate_buffer element_type contents memory = (fresh, memory') ->
   fresh <> other ->
-  lookup_block other memory' = lookup_block other memory.
+  lookup_buffer other memory' = lookup_buffer other memory.
 Proof.
-  unfold allocate_block. intros allocated not_equal.
-  inversion allocated; subst. unfold lookup_block. cbn.
+  unfold allocate_buffer. intros allocated not_equal.
+  inversion allocated; subst. unfold lookup_buffer. cbn.
   apply lookup_insert_ne. congruence.
 Qed.
 
-Lemma insert_descriptor_preserves_blocks {Scalar}
-    (descriptor : memref_descriptor) (memory memory' : memory_state Scalar)
+Lemma insert_descriptor_preserves_buffers {Value}
+    (descriptor : memref_descriptor) (memory memory' : memory_state Value)
     (id : descriptor_id) :
   insert_descriptor descriptor memory = (id, memory') ->
-  memory_blocks memory' = memory_blocks memory.
+  memory_buffers memory' = memory_buffers memory.
 Proof.
   unfold insert_descriptor. intro inserted. inversion inserted. reflexivity.
 Qed.

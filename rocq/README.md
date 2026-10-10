@@ -9,16 +9,19 @@ interpreter. Its definitions are organized around three constraints:
 
 The current milestone is deliberately small. It establishes the abstraction
 boundaries and includes one executable allocation instruction, lifting through
-a top-level capability lens, finite-map locality lemmas, a smoke test, and an OCaml extraction entry
-point. It does not yet attempt to parse or execute the complete FlashAttention
+a top-level capability lens, finite-map locality lemmas, a smoke test, and an
+OCaml extraction entry point. It does not yet attempt to parse or execute the complete FlashAttention
 artifact.
 
 ## Layout
 
 - `Base`: result, atomic state computation, and lawful top-level lenses.
 - `Value`: data types and a parameterized scalar interface.
-- `Memory`: stdpp `gmap` allocations and descriptors, independent of unified
-  state. Descriptors are views into blocks and do not allocate storage.
+- `Tensor`: pure n-dimensional values with shape, element type, and row-major
+  logical elements. Tensors have no allocation identity or mutable aliasing.
+- `Memory`: stdpp `gmap` buffers and descriptors, independent of unified state.
+  A buffer is typed linear storage with allocation identity. A descriptor maps
+  n-dimensional coordinates to storage using offset, sizes, and strides.
 - `Unified`: errors, optional observation events, capabilities, and the first
   unified state.
 - `HFusion`: instruction functions assembled from the smaller capabilities.
@@ -42,6 +45,11 @@ observer.
 machine state. It is not claimed to provide separation semantics. Dynamic
 allocation locality comes from stdpp finite-map facts such as
 `lookup_insert_eq` and `lookup_insert_ne`.
+
+`Memory.read_view` is the explicit boundary from memory to tensor: it resolves
+a descriptor, reads the corresponding buffer cells, and returns an independent
+tensor value. Creating the descriptor itself is metadata-only and does not copy
+or allocate storage.
 
 ## Native Rocq build and extraction
 

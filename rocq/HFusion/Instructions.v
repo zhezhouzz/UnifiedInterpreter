@@ -2,18 +2,19 @@ From Stdlib Require Import List.
 From UnifiedInterpreter.Base Require Import Result StateM.
 From UnifiedInterpreter.Memory Require Import Model.
 From UnifiedInterpreter.Unified Require Import Errors State.
-From UnifiedInterpreter.Value Require Import Scalar.
+From UnifiedInterpreter.Value Require Import DType Scalar.
 
 Import ListNotations.
 Set Implicit Arguments.
 
-Definition local_alloc {Scalar} (contents : list Scalar)
+Definition local_alloc {Scalar} (element_type : dtype) (contents : list Scalar)
     : M runtime_error (memory_state Scalar) allocation_id :=
-  fun memory => Ok (allocate_block contents memory).
+  fun memory => Ok (allocate_buffer element_type contents memory).
 
 Definition exec_alloc {Scalar State} `{HasMemory Scalar State}
-    (contents : list Scalar) : M runtime_error State allocation_id :=
-  zoom memory_lens (local_alloc contents).
+    (element_type : dtype) (contents : list Scalar)
+    : M runtime_error State allocation_id :=
+  zoom memory_lens (local_alloc element_type contents).
 
 Definition exec_scalar_add {Scalar State} `{ScalarOps Scalar}
     (left right : Scalar) : M runtime_error State Scalar :=
