@@ -16,17 +16,19 @@ dynamic compiler and leaves H5 as the final machine interpreter.
 
 ## Semantic Shape
 
-The base design is state-based small-step execution with observable events:
+The base design is state-based small-step execution. During the current
+HFusion milestone, instructions cannot inspect an event history:
 
 ```text
-(instruction, local state) -> (result, updated local state, events)
+(instruction, local state) -> success(result, updated local state) | fault
 ```
 
-At HFusion, most computation is deterministic tensor and buffer state
-transformation. Events are still useful for provenance, numerical divergence,
-allocation, reads, and writes, but a history-sensitive trace semantics is not
-required for every operation. At HIVM, events become semantically important for
-asynchronous copies, queues, waits, barriers, and before/after constraints.
+An atomic fault exposes no partially updated state. At HFusion, most computation
+is deterministic tensor and buffer state transformation. A future observer may
+record provenance, allocation, reads, and writes, but that observation is not
+part of instruction input. At HIVM, asynchronous copies, queues, waits, and
+barriers will first be represented as explicit machine state; an emitted trace
+can then record their externally observable order.
 
 ## Composable State in Rocq
 
@@ -44,9 +46,12 @@ The engineering obligations are as important as the getters:
 - preservation of untouched state (a frame property);
 - separation of executable state from ghost/proof-only state.
 
-This resembles Iris-style local ownership without requiring Iris itself. It
-also lets the executable model grow by adding a state component and an instance
-instead of rewriting all existing instructions.
+This is component-level engineering modularity, not Iris-style ownership or a
+separation logic. Within memory, dynamic allocations and descriptors use stdpp
+finite maps. Lookup/insert locality theorems state directly that updating one
+allocation does not affect a different key. A resource algebra should only be
+introduced later if ownership transfer or concurrent frame reasoning actually
+requires it.
 
 ## Lessons from Related Implementations
 

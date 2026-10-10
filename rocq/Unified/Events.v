@@ -13,10 +13,5 @@ Inductive event :=
 | EMemoryWrite (allocation : nat) (indices : list Z)
 | ENumericBoundary (operation : string) (input output : dtype).
 
-Inductive runtime_error :=
-| InvalidShape
-| InvalidDescriptor
-| InvalidMemoryAccess
-| UnsupportedInstruction
-| NumericFailure
-| OutOfFuel.
+(* Events are an observation vocabulary only. Core instruction semantics do not
+   receive a trace and therefore cannot inspect or rewrite execution history. *)
