@@ -22,6 +22,8 @@ artifact.
 - `Memory`: stdpp `gmap` buffers and descriptors, independent of unified state.
   A buffer is typed linear storage with allocation identity. A descriptor maps
   n-dimensional coordinates to storage using offset, sizes, and strides.
+  Buffers also carry the HIVM address space (`GM`, `UB`, `L1`, `L0A/B/C`, and
+  specialized buffers); `ASDefault` represents placement not yet decided.
 - `Unified`: errors, optional observation events, capabilities, and the first
   unified state.
 - `HFusion`: instruction functions assembled from the smaller capabilities.

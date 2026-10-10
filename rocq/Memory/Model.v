@@ -11,9 +11,24 @@ Set Implicit Arguments.
 Definition allocation_id := nat.
 Definition descriptor_id := nat.
 
+(* Address spaces follow the HIVM AddressSpace enum. ASDefault is used at IR
+   stages where physical placement has not yet been decided. *)
+Inductive address_space :=
+| ASDefault
+| ASGM
+| ASL1
+| ASL0A
+| ASL0B
+| ASL0C
+| ASUB
+| ASSSBUF
+| ASFixBUF
+| ASBiasBUF.
+
 (* A buffer is mutable linear storage with allocation identity. Unlike a
    tensor, it has no intrinsic n-dimensional shape. *)
 Record buffer (Value : Type) := {
+  buffer_address_space : address_space;
   buffer_element_type : dtype;
   buffer_cells : list Value
 }.
@@ -54,13 +69,14 @@ Definition lookup_descriptor {Value} (id : descriptor_id)
     (memory : memory_state Value) : option memref_descriptor :=
   memory_descriptors memory !! id.
 
-Definition allocate_buffer {Value} (element_type : dtype)
+Definition allocate_buffer {Value} (space : address_space) (element_type : dtype)
     (contents : list Value) (memory : memory_state Value)
     : allocation_id * memory_state Value :=
   let id := memory_next_allocation memory in
   (id,
    {| memory_buffers :=
-        <[id := {| buffer_element_type := element_type;
+        <[id := {| buffer_address_space := space;
+                   buffer_element_type := element_type;
                    buffer_cells := contents |}]>
           (memory_buffers memory);
       memory_descriptors := memory_descriptors memory;
@@ -77,12 +93,12 @@ Definition insert_descriptor {Value} (descriptor : memref_descriptor)
       memory_next_allocation := memory_next_allocation memory;
       memory_next_descriptor := S id |}).
 
-Fixpoint linear_address (offset : Z) (strides : list Z)
+Fixpoint view_cell_offset (offset : Z) (strides : list Z)
     (indices : list nat) : result memory_error Z :=
   match strides, indices with
   | [], [] => Ok offset
   | stride :: strides', index :: indices' =>
-      linear_address (offset + Z.of_nat index * stride) strides' indices'
+      view_cell_offset (offset + Z.of_nat index * stride) strides' indices'
   | _, _ => Error InvalidViewRank
   end.
 
@@ -108,7 +124,7 @@ Fixpoint read_coordinates {Value} (storage : buffer Value)
   match coordinates with
   | [] => Ok []
   | coordinate :: rest =>
-      address <-? linear_address offset strides coordinate ;;
+      address <-? view_cell_offset offset strides coordinate ;;
       value <-? read_buffer_cell storage address ;;
       values <-? read_coordinates storage offset strides rest ;;
       Ok (value :: values)
@@ -136,12 +152,14 @@ Definition read_view {Value} (memory : memory_state Value)
       end
   end.
 
-Lemma allocate_buffer_lookup_new {Value} (element_type : dtype)
+Lemma allocate_buffer_lookup_new {Value} (space : address_space)
+    (element_type : dtype)
     (contents : list Value) (memory memory' : memory_state Value)
     (id : allocation_id) :
-  allocate_buffer element_type contents memory = (id, memory') ->
+  allocate_buffer space element_type contents memory = (id, memory') ->
   lookup_buffer id memory' =
-    Some {| buffer_element_type := element_type;
+    Some {| buffer_address_space := space;
+            buffer_element_type := element_type;
             buffer_cells := contents |}.
 Proof.
   unfold allocate_buffer. intro allocated.
@@ -149,19 +167,21 @@ Proof.
   apply lookup_insert_eq.
 Qed.
 
-Lemma allocate_buffer_preserves_descriptors {Value} (element_type : dtype)
+Lemma allocate_buffer_preserves_descriptors {Value} (space : address_space)
+    (element_type : dtype)
     (contents : list Value) (memory memory' : memory_state Value)
     (id : allocation_id) :
-  allocate_buffer element_type contents memory = (id, memory') ->
+  allocate_buffer space element_type contents memory = (id, memory') ->
   memory_descriptors memory' = memory_descriptors memory.
 Proof.
   unfold allocate_buffer. intro allocated. inversion allocated. reflexivity.
 Qed.
 
-Lemma allocate_buffer_preserves_other {Value} (element_type : dtype)
+Lemma allocate_buffer_preserves_other {Value} (space : address_space)
+    (element_type : dtype)
     (contents : list Value) (memory memory' : memory_state Value)
     (fresh other : allocation_id) :
-  allocate_buffer element_type contents memory = (fresh, memory') ->
+  allocate_buffer space element_type contents memory = (fresh, memory') ->
   fresh <> other ->
   lookup_buffer other memory' = lookup_buffer other memory.
 Proof.

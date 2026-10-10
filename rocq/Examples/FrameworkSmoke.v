@@ -12,7 +12,8 @@ Definition smoke_initial : unified_state Z := initial_unified_state.
 
 Definition smoke_result :
     result runtime_error (allocation_id * unified_state Z) :=
-  exec_alloc (DInt 64 Signed) [10%Z; 20%Z; 30%Z] smoke_initial.
+  exec_alloc ASDefault (DInt 64 Signed)
+    [10%Z; 20%Z; 30%Z] smoke_initial.
 
 Example smoke_allocates_id_zero :
   match smoke_result with
@@ -25,7 +26,8 @@ Example smoke_allocation_is_readable :
   match smoke_result with
   | Ok (id, state) =>
       lookup_buffer id (unified_memory state) =
-      Some {| buffer_element_type := DInt 64 Signed;
+      Some {| buffer_address_space := ASDefault;
+              buffer_element_type := DInt 64 Signed;
               buffer_cells := [10%Z; 20%Z; 30%Z] |}
   | Error _ => False
   end.
@@ -46,7 +48,7 @@ Proof. reflexivity. Qed.
 
 Definition allocate_then_fail :
     M runtime_error (unified_state Z) unit :=
-  _ <- exec_alloc (DInt 64 Signed) [42%Z] ;;
+  _ <- exec_alloc ASDefault (DInt 64 Signed) [42%Z] ;;
   fail InvalidMemoryAccess.
 
 Example failed_sequence_exposes_no_intermediate_state :
@@ -55,7 +57,7 @@ Proof. reflexivity. Qed.
 
 Definition view_example : result memory_error (tensor Z) :=
   let '(allocation, memory) :=
-    allocate_buffer (DInt 64 Signed)
+    allocate_buffer ASGM (DInt 64 Signed)
       [0%Z; 1%Z; 2%Z; 3%Z; 4%Z; 5%Z] empty_memory in
   let descriptor :=
     {| descriptor_allocation := allocation;
