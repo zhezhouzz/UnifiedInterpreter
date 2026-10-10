@@ -21,6 +21,6 @@ Definition exec_scalar_add {Scalar State} `{ScalarOps Scalar}
     (left right : Scalar) : M runtime_error State Scalar :=
   pure (scalar_add left right).
 
-Definition exec_fail {Scalar}
-    : M runtime_error (unified_state Scalar) unit :=
+Definition exec_fail {State}
+    : M runtime_error State unit :=
   fail InvalidMemoryAccess.

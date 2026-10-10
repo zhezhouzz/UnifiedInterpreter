@@ -24,8 +24,8 @@ artifact.
   n-dimensional coordinates to storage using offset, sizes, and strides.
   Buffers also carry the HIVM address space (`GM`, `UB`, `L1`, `L0A/B/C`, and
   specialized buffers); `ASDefault` represents placement not yet decided.
-- `Unified`: errors, optional observation events, capabilities, and the first
-  unified state.
+- `Unified`: errors, optional observation events, and state-component
+  capabilities. There is no one-field unified-state wrapper.
 - `HFusion`: instruction functions assembled from the smaller capabilities.
 - `Examples`: executable examples and basic proofs.
 - `Extraction`: OCaml extraction boundary.
@@ -43,9 +43,12 @@ input to this computation and cannot be inspected by instructions;
 `Unified/Events.v` currently defines only a vocabulary for a future external
 observer.
 
-The unified state contains only data that can affect a later semantic step.
-In particular, a global step counter is meta-level execution bookkeeping, so
-it is not a state component.  Likewise, an observation trace should be
+Machine state contains only data that can affect a later semantic step.  The
+current HFusion machine state is directly `memory_state`; a one-field wrapper
+would add no semantic structure.  `HasMemory` remains as the minimum capability
+required by memory instructions, allowing those instructions to be reused over
+a future, larger HIVM state.  In particular, a global step counter is meta-level
+execution bookkeeping, so it is not a state component.  Likewise, an observation trace should be
 accumulated by the program runner as an output, rather than stored in the
 machine state.  If a future instruction must inspect some fact, that fact must
 have an explicit semantic representation: for example, an asynchronous copy

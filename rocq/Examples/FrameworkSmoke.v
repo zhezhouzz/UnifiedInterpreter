@@ -8,10 +8,10 @@ From UnifiedInterpreter.Value Require Import DType.
 
 Import ListNotations.
 
-Definition smoke_initial : unified_state Z := initial_unified_state.
+Definition smoke_initial : memory_state Z := empty_memory.
 
 Definition smoke_result :
-    result runtime_error (allocation_id * unified_state Z) :=
+    result runtime_error (allocation_id * memory_state Z) :=
   exec_alloc ASDefault (DInt 64 Signed)
     [10%Z; 20%Z; 30%Z] smoke_initial.
 
@@ -25,7 +25,7 @@ Proof. reflexivity. Qed.
 Example smoke_allocation_is_readable :
   match smoke_result with
   | Ok (id, state) =>
-      lookup_buffer id (unified_memory state) =
+      lookup_buffer id state =
       Some {| buffer_address_space := ASDefault;
               buffer_element_type := DInt 64 Signed;
               buffer_cells := [10%Z; 20%Z; 30%Z] |}
@@ -36,18 +36,17 @@ Proof. reflexivity. Qed.
 Example smoke_preserves_descriptor_map :
   match smoke_result with
   | Ok (_, state) =>
-      memory_descriptors (unified_memory state) =
-      memory_descriptors (unified_memory smoke_initial)
+      memory_descriptors state = memory_descriptors smoke_initial
   | Error _ => False
   end.
 Proof. reflexivity. Qed.
 
 Example failure_exposes_no_partial_state :
-  @exec_fail Z smoke_initial = Error InvalidMemoryAccess.
+  @exec_fail (memory_state Z) smoke_initial = Error InvalidMemoryAccess.
 Proof. reflexivity. Qed.
 
 Definition allocate_then_fail :
-    M runtime_error (unified_state Z) unit :=
+    M runtime_error (memory_state Z) unit :=
   _ <- exec_alloc ASDefault (DInt 64 Signed) [42%Z] ;;
   fail InvalidMemoryAccess.
 
