@@ -4,6 +4,8 @@ set -eu
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo_root"
 
+printf '%s\n' "Checking Rocq modules in dependency order..."
+
 switch=${ROCQ_OPAM_SWITCH:-with-rocq-1}
 files="
 rocq/Base/Result.v
@@ -24,6 +26,7 @@ for file in $files; do
 done
 
 mkdir -p _build/rocq
+printf '%s\n' "Extracting executable semantics to _build/rocq..."
 opam exec --switch="$switch" -- rocq compile \
   -Q rocq UnifiedInterpreter rocq/Extraction/Extract.v
 
@@ -32,3 +35,5 @@ opam exec --switch="$switch" -- rocq compile \
   opam exec --switch="$switch" -- ocamlc -c unified_semantics.mli
   opam exec --switch="$switch" -- ocamlc -c unified_semantics.ml
 )
+
+printf '%s\n' "Rocq check and OCaml extraction succeeded."

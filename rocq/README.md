@@ -23,7 +23,7 @@ artifact.
 - `Examples`: executable examples and basic proofs.
 - `Extraction`: OCaml extraction boundary.
 
-## Build
+## Build and extraction
 
 The repository currently uses the `with-rocq-1` opam switch for Rocq 9.1:
 
@@ -31,13 +31,17 @@ The repository currently uses the `with-rocq-1` opam switch for Rocq 9.1:
 ./scripts/check_rocq.sh
 ```
 
-To regenerate the extracted OCaml file after a successful check:
+When the current directory is `rocq/`, run the same entry point as:
 
 ```sh
-cd rocq
-opam exec --switch=with-rocq-1 -- rocq compile \
-  -Q . UnifiedInterpreter Extraction/Extract.v
+../scripts/check_rocq.sh
 ```
+
+The script compiles the modules in dependency order and then compiles
+`Extraction/Extract.v`. A direct command such as
+`rocq compile Extraction/Extract.v` does not recursively build imported `.v`
+files, so it fails on a clean checkout when `FrameworkSmoke.vos` has not yet
+been produced.
 
 The generated extraction output belongs under `_build` and is not edited by
 hand.
