@@ -1,4 +1,4 @@
-From Stdlib Require Import List String ZArith.
+From Stdlib Require Import List ZArith.
 From UnifiedInterpreter.Base Require Import Result StateM.
 From UnifiedInterpreter.Memory Require Import Model.
 From UnifiedInterpreter.Tensor Require Import Model.
@@ -101,10 +101,9 @@ Proof. reflexivity. Qed.
 
 Example ub_memref_type_carries_memory_space :
   RankedMemRefType [StaticDim 2; DynamicDim] (FloatType F32)
-    IdentityLayout (Some (address_space_attribute ASUB)) =
+    IdentityLayout ASUB =
   RankedMemRefType [StaticDim 2; DynamicDim] (FloatType F32)
-    IdentityLayout
-      (Some (DialectAttr "hivm"%string "address_space"%string "ub"%string)).
+    IdentityLayout ASUB.
 Proof. reflexivity. Qed.
 
 Definition tensor_2 (left right : Z) : tensor Z [2%nat] DF32 :=

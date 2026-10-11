@@ -19,9 +19,10 @@ still future work.
 
 - `Base`: result, atomic state computation, and lawful top-level lenses.
 - `Type`: scalar interpreter dtypes, static/dynamic shapes, common MLIR types,
-  and HFusion/HIVM-specific type attributes. `MLIR.mlir_type` is source IR
-  syntax; `DType.dtype` selects an executable scalar backend. They are linked
-  by elaboration rather than identified.
+  and HFusion/HIVM-specific type information. `MLIR.mlir_type` is the checked
+  type language accepted by our semantics; `DType.dtype` selects an executable
+  scalar backend. A future lossless raw parser is deliberately separate and
+  elaborates only supported attributes into these typed cases.
 - `Value`: a parameterized scalar interface implementing the arithmetic of
   each dtype.
 - `Tensor`: pure n-dimensional values indexed by their concrete shape and

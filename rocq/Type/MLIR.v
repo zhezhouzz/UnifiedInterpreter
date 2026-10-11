@@ -1,73 +1,73 @@
-From Stdlib Require Import Bool List String ZArith.
-From UnifiedInterpreter.Type Require Import DType Shape.
-
-(* This is a structural representation of MLIR attributes needed inside types.
-   MLIR's attribute system is open: dialects may define arbitrary attributes.
-   We therefore preserve unknown/dialect attributes by namespace and payload
-   instead of pretending that this inductive enumerates every attribute. *)
-Inductive mlir_attribute :=
-| IntegerAttr (value : Z)
-| StringAttr (value : string)
-| DialectAttr (dialect name payload : string).
+From Stdlib Require Import Bool List ZArith.
+From UnifiedInterpreter.Type Require Import DType HFusion Shape.
 
 Record strided_layout := {
   layout_offset : option Z;
   layout_strides : list (option Z)
 }.
 
-(* MLIR permits any attribute implementing MemRefLayoutAttrInterface here.
-   We execute canonical strided layouts directly and retain affine/dialect
-   layouts structurally for later verification or elaboration. *)
+(* Layouts supported by the typed semantic IR. The captured HFusion program
+   uses only identity and canonical strided layouts. Real MLIR accepts any
+   attribute implementing MemRefLayoutAttrInterface, including affine and
+   dialect-defined layouts; the raw parser must reject such a layout during
+   elaboration until we add a typed semantic case for it. *)
 Inductive memref_layout :=
 | IdentityLayout
-| StridedLayout (layout : strided_layout)
-| AffineMapLayout (assembly : string)
-| DialectLayout (attribute : mlir_attribute).
+| StridedLayout (layout : strided_layout).
 
 (* Relationship to real MLIR types
    --------------------------------
-   This datatype formalizes the builtin type forms needed by the captured
-   HFusion program and its planned SIMD lowering. It follows real MLIR in the
-   following important ways:
+   This is the type language accepted by our typed semantic IR, not a
+   lossless syntax tree for every MLIR type and attribute. Each constructor
+   has semantic content that later interpreters can inspect without comparing
+   strings.
 
-   - integers may be signless, signed, or unsigned;
+   It agrees with real MLIR on the following points:
+   - integers are signless, signed, or unsigned;
    - ranked tensors and memrefs contain static or dynamic dimensions;
-   - tensors may carry an encoding attribute;
-   - memrefs carry both a layout and a target-specific memory-space attribute;
    - ranked and unranked tensor/memref types are distinct;
-   - element types are recursively MLIR types rather than interpreter dtypes;
-   - dialect-defined types remain representable because MLIR's type system is
-     open.
+   - container element types are recursively MLIR types;
+   - vectors distinguish fixed and scalable dimensions;
+   - memrefs carry layout and memory-space information.
 
-   It is still not a byte-for-byte model of MLIR's C++ Type storage. Generic
-   attributes, affine maps, dialect types, and opaque types retain textual
-   payloads; legality is established by a separate verifier. Vector scalable
-   flags are represented explicitly but their length constraints are likewise
-   verifier obligations. Builtin forms not required by HFusion can be added
-   without changing tensor execution semantics.
+   Deliberate restrictions relative to real MLIR:
+   - ranked tensor encoding attributes are not represented because the current
+     HFusion artifact has none;
+   - memref layouts are identity or strided, exactly the forms currently used;
+   - memref memory spaces are the typed Ascend/HIVM cases from Type/HFusion,
+     rather than arbitrary MLIR attributes;
+   - arbitrary dialect types, opaque types, and arbitrary attributes are not
+     admitted into the typed IR. A future raw parser may preserve their text,
+     but elaboration must either translate them to a typed constructor or
+     report UnsupportedType/UnsupportedAttribute;
+   - attributes seen in the current HFusion artifact but attached to arguments,
+     operations, or functions (hacc.arg_type, tt.tensor_kind,
+     linalg.binary_fn, hfusion.type_fn/round_mode, and function execution
+     modes) are not type attributes; HFusion/Instr gives each a separate typed
+     constructor;
+   - legality constraints (positive integer width, valid complex element,
+     matching vector/scalable ranks, and legal container element types) belong
+     to a separate verifier rather than to these constructors.
 
-   [dtype] in Type/DType is different: it selects a scalar interpreter backend
-   representation. [mlir_type] describes source IR syntax. Elaboration maps a
-   supported scalar [mlir_type] to [dtype], and may reject unsupported types. *)
+   [dtype] in Type/DType is also distinct from [mlir_type]: it chooses the
+   executable scalar backend representation. Elaboration maps supported scalar
+   MLIR types to dtypes; tensor, memref, and function types are not dtypes. *)
 Inductive mlir_type :=
 | IndexType
 | IntegerType (bits : nat) (sign : signedness)
 | FloatType (format : float_format)
 | ComplexType (element_type : mlir_type)
 | RankedTensorType (dimensions : shape) (element_type : mlir_type)
-    (encoding : option mlir_attribute)
 | UnrankedTensorType (element_type : mlir_type)
 | VectorType (dimensions : list nat) (scalable : list bool)
     (element_type : mlir_type)
 | RankedMemRefType (dimensions : shape) (element_type : mlir_type)
-    (layout : memref_layout) (memory_space : option mlir_attribute)
+    (layout : memref_layout) (memory_space : address_space)
 | UnrankedMemRefType (element_type : mlir_type)
-    (memory_space : option mlir_attribute)
+    (memory_space : address_space)
 | FunctionType (inputs results : list mlir_type)
 | TupleType (elements : list mlir_type)
-| NoneType
-| DialectType (dialect name payload : string)
-| OpaqueType (dialect payload : string).
+| NoneType.
 
 Definition dtype_to_mlir_type (element_type : dtype) : mlir_type :=
   match element_type with
@@ -75,4 +75,3 @@ Definition dtype_to_mlir_type (element_type : dtype) : mlir_type :=
   | DInt bits sign => IntegerType bits sign
   | DFloat format => FloatType format
   end.
-
