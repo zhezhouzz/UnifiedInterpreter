@@ -1,4 +1,4 @@
-From Stdlib Require Import List ZArith.
+From Stdlib Require Import List String ZArith.
 From UnifiedInterpreter.Base Require Import Result StateM.
 From UnifiedInterpreter.Memory Require Import Model.
 From UnifiedInterpreter.Tensor Require Import Model.
@@ -7,7 +7,8 @@ From UnifiedInterpreter.HFusion Require Import Instr.
 From UnifiedInterpreter.HFusion.Semantics Require Import
   ElemwiseBinary Reduce Cast.
 From UnifiedInterpreter.Examples Require Import TestSupport.
-From UnifiedInterpreter.Type Require Import DType.
+From UnifiedInterpreter.Type Require Import DType HFusion.
+From UnifiedInterpreter.Type Require Import MLIR Shape.
 From UnifiedInterpreter.Value Require Import Scalar.
 
 Import ListNotations.
@@ -92,6 +93,18 @@ Example scalar_operation_preserves_state {Scalar State} `{ScalarOps Scalar}
     (left right : Scalar) (state : State) :
   exec_scalar_operation ScalarAdd left right state =
     Ok (scalar_add left right, state).
+Proof. reflexivity. Qed.
+
+Example signless_integer_is_preserved :
+  dtype_to_mlir_type (DInt 32 Signless) = IntegerType 32 Signless.
+Proof. reflexivity. Qed.
+
+Example ub_memref_type_carries_memory_space :
+  RankedMemRefType [StaticDim 2; DynamicDim] (FloatType F32)
+    IdentityLayout (Some (address_space_attribute ASUB)) =
+  RankedMemRefType [StaticDim 2; DynamicDim] (FloatType F32)
+    IdentityLayout
+      (Some (DialectAttr "hivm"%string "address_space"%string "ub"%string)).
 Proof. reflexivity. Qed.
 
 Definition tensor_2 (left right : Z) : tensor Z [2%nat] DF32 :=

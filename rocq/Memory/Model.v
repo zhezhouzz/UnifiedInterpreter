@@ -2,7 +2,7 @@ From Stdlib Require Import List ZArith.
 From stdpp Require Import gmap.
 From UnifiedInterpreter.Base Require Import Result.
 From UnifiedInterpreter.Tensor Require Import Model.
-From UnifiedInterpreter.Type Require Import DType.
+From UnifiedInterpreter.Type Require Import DType HFusion.
 
 Import ListNotations.
 Open Scope Z_scope.
@@ -10,20 +10,6 @@ Set Implicit Arguments.
 
 Definition allocation_id := nat.
 Definition descriptor_id := nat.
-
-(* Address spaces follow the HIVM AddressSpace enum. ASDefault is used at IR
-   stages where physical placement has not yet been decided. *)
-Inductive address_space :=
-| ASDefault
-| ASGM
-| ASL1
-| ASL0A
-| ASL0B
-| ASL0C
-| ASUB
-| ASSSBUF
-| ASFixBUF
-| ASBiasBUF.
 
 (* A buffer is mutable linear storage with allocation identity. Unlike a
    tensor, it has no intrinsic n-dimensional shape. *)

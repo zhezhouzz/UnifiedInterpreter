@@ -1,6 +1,21 @@
 From Stdlib Require Import String.
 
-Inductive signedness := Signed | Unsigned.
+(* MLIR integers distinguish signless [iN], signed [siN], and unsigned [uiN].
+   Signless is not shorthand for signed: individual operations determine how
+   its bits are interpreted. *)
+Inductive signedness := Signless | Signed | Unsigned.
+
+Inductive float_format :=
+(* IEEE binary16 / FP16: 1 sign bit, 5 exponent bits, and 10 stored fraction
+   bits. It has more significand precision than BF16, but a smaller range. *)
+| F16
+(* Brain floating point 16 / BF16: 1 sign bit, 8 exponent bits, and 7 stored
+   fraction bits. Its range is close to FP32, but its precision is lower. *)
+| BF16
+(* IEEE binary32 / FP32, commonly used as an accumulator format. *)
+| F32
+(* IEEE binary64 / FP64. Ascend support and cost are target-dependent. *)
+| F64.
 
 Inductive dtype :=
 (* Target-sized index used by addressing and shape computations. Its concrete
@@ -8,21 +23,13 @@ Inductive dtype :=
 | DIndex
 (* An integer with an explicit bit width and signedness. *)
 | DInt (bits : nat) (sign : signedness)
-(* IEEE binary16 / FP16: 1 sign bit, 5 exponent bits, and 10 stored fraction
-   bits. It has more significand precision than BF16, but a smaller range. *)
-| DF16
-(* Brain floating point 16 / BF16: 1 sign bit, 8 exponent bits, and 7 stored
-   fraction bits. Its range is close to FP32, but its precision is lower than
-   FP16. *)
-| DBF16
-(* IEEE binary32 / FP32: 1 sign bit, 8 exponent bits, and 23 stored fraction
-   bits. It is commonly used as the accumulator format for lower-precision
-   matrix operations. *)
-| DF32
-(* IEEE binary64 / FP64: 1 sign bit, 11 exponent bits, and 52 stored fraction
-   bits. Ascend support and cost are target-dependent; the interpreter still
-   records the type even when a particular backend cannot execute it. *)
-| DF64.
+(* A floating-point value in one of the supported formats. *)
+| DFloat (format : float_format).
+
+Notation DF16 := (DFloat F16).
+Notation DBF16 := (DFloat BF16).
+Notation DF32 := (DFloat F32).
+Notation DF64 := (DFloat F64).
 
 (* These are rounding modes carried by an actual IR cast. Idealized exact
    execution is deliberately not a constructor here: it is an interpreter
