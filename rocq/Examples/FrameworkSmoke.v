@@ -3,10 +3,26 @@ From UnifiedInterpreter.Base Require Import Result StateM.
 From UnifiedInterpreter.Memory Require Import Model.
 From UnifiedInterpreter.Tensor Require Import Model.
 From UnifiedInterpreter.Unified Require Import Errors State.
-From UnifiedInterpreter.HFusion Require Import Semantics.
+From UnifiedInterpreter.HFusion Require Import Instr Semantics.
+From UnifiedInterpreter.Examples Require Import TestSupport.
 From UnifiedInterpreter.Value Require Import DType Scalar.
 
 Import ListNotations.
+
+#[local] Instance ZScalarOps : ScalarOps Z :=
+  {| scalar_zero := 0%Z;
+     scalar_one := 1%Z;
+     scalar_of_Z := fun value => value;
+     scalar_add := Z.add;
+     scalar_sub := Z.sub;
+     scalar_mul := Z.mul;
+     scalar_div := fun left right =>
+       if Z.eqb right 0 then Error ScalarDivisionByZero
+       else Ok (Z.quot left right);
+     scalar_max := Z.max;
+     scalar_exp := fun _ => Error ScalarDomainError;
+     scalar_log := fun _ => Error ScalarDomainError;
+     scalar_cast := fun _ value => Ok value |}.
 
 Definition smoke_initial : memory_state Z := empty_memory.
 
@@ -64,6 +80,37 @@ Example scalar_operation_preserves_state {Scalar State} `{ScalarOps Scalar}
     (left right : Scalar) (state : State) :
   exec_scalar_operation ScalarAdd left right state =
     Ok (scalar_add left right, state).
+Proof. reflexivity. Qed.
+
+Example elemwise_binary_add_executes :
+  sem_linalg_elemwise_binary LinalgAdd
+    (ElementwiseTensor
+      {| tensor_shape := [2%nat]; tensor_element_type := DF32;
+         tensor_elements := [1%Z; 2%Z] |})
+    (ElementwiseTensor
+      {| tensor_shape := [2%nat]; tensor_element_type := DF32;
+         tensor_elements := [10%Z; 20%Z] |})
+    [2%nat] DF32 =
+  Ok {| tensor_shape := [2%nat]; tensor_element_type := DF32;
+        tensor_elements := [11%Z; 22%Z] |}.
+Proof. reflexivity. Qed.
+
+Example row_reduction_add_executes :
+  sem_linalg_reduce ReductionAdd [1%nat]
+    {| tensor_shape := [2%nat; 3%nat]; tensor_element_type := DF32;
+       tensor_elements := [1%Z; 2%Z; 3%Z; 4%Z; 5%Z; 6%Z] |}
+    {| tensor_shape := [2%nat]; tensor_element_type := DF32;
+       tensor_elements := [10%Z; 20%Z] |} =
+  Ok {| tensor_shape := [2%nat]; tensor_element_type := DF32;
+        tensor_elements := [16%Z; 35%Z] |}.
+Proof. reflexivity. Qed.
+
+Example hfusion_cast_executes :
+  sem_hfusion_cast HFusionCastSigned HFusionRint true false HFusionSI2SI DF16
+    {| tensor_shape := [2%nat]; tensor_element_type := DF32;
+       tensor_elements := [1%Z; 2%Z] |} =
+  Ok {| tensor_shape := [2%nat]; tensor_element_type := DF16;
+        tensor_elements := [1%Z; 2%Z] |}.
 Proof. reflexivity. Qed.
 
 Definition view_example : result memory_error (tensor Z) :=

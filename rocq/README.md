@@ -33,9 +33,12 @@ still future work.
   `instr` type with constructors such as `ArithInstr` and `ScfInstr`.
   `Syntax` supplies common MLIR types, SSA references, and recursive regions;
   `Program` defines programs over `instr`; `Semantics` is the separate home of
-  executable meanings for those instructions. It exposes one handler field per
-  concrete operation and a total dispatcher, with source comments identifying
-  the corresponding AscendNPU-IR or upstream MLIR documentation contract.
+  executable meanings for selected instructions. The current executable slice
+  directly defines `linalg.elemwise_binary`, the row-reduction instances of
+  `linalg.reduce` used by the artifact, and its `hfusion.cast` form. Source
+  comments identify the corresponding AscendNPU-IR or upstream MLIR contract;
+  unsupported modes fail explicitly instead of being hidden behind an abstract
+  handler.
 - `Examples`: executable examples and basic proofs.
 - `Extraction`: OCaml extraction boundary.
 

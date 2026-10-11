@@ -14,5 +14,6 @@ HFusion/Syntax.v
 HFusion/Instr.v
 HFusion/Program.v
 HFusion/Semantics.v
+Examples/TestSupport.v
 Examples/FrameworkSmoke.v
 Extraction/Extract.v

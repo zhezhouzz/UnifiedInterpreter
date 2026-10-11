@@ -1,237 +1,199 @@
-From Stdlib Require Import List.
-From UnifiedInterpreter.Base Require Import Result StateM.
-From UnifiedInterpreter.HFusion Require Import Syntax Instr.
-From UnifiedInterpreter.Memory Require Import Model.
-From UnifiedInterpreter.Unified Require Import Errors State.
+From Stdlib Require Import List PeanoNat.
+From UnifiedInterpreter.Base Require Import Result.
+From UnifiedInterpreter.HFusion Require Import Instr.
+From UnifiedInterpreter.Tensor Require Import Model.
+From UnifiedInterpreter.Unified Require Import Errors.
 From UnifiedInterpreter.Value Require Import DType Scalar.
 
 Import ListNotations.
 Set Implicit Arguments.
 
-(* Documentation sources used below:
-
-   [Ascend interface]
-   AscendNPU-IR, docs/source/en/developer_guide/conversion/interface_api.md.
+(* Huawei documents the Linalg/Tensor part of the Linalg/HFusion layer as
+   using standard MLIR operation semantics:
    https://ascendnpu-ir.readthedocs.io/en/latest/sources/developer_guide/
      conversion/interface_api.html
-   It specifies that the Linalg/Tensor layer uses standard MLIR operator
-   semantics and that the HFusion layer adds Ascend-aware named operations,
-   fusion, bufferization, tiling, and scheduling.
 
-   [Ascend cast ODS]
-   bishengir/include/bishengir/Dialect/HFusion/IR/
-     HFusionNamedStructuredOps.yaml and HFusionEnums.td.
-   https://github.com/Ascend/AscendNPU-IR/tree/master/bishengir/include/
-     bishengir/Dialect/HFusion/IR
-   CastOp is elementwise and carries TypeFn, RoundMode, enable_overflow,
-   enable_saturate, and UnsignedMode.  RINT is nearest with ties to even.
+   These direct executable functions cover the three operation instances used
+   most heavily by the captured FlashAttention HFusion artifact. *)
 
-   The standard-dialect clauses below refer to the upstream MLIR dialect
-   documents, as required by [Ascend interface]:
-   https://mlir.llvm.org/docs/Dialects/ArithOps/
-   https://mlir.llvm.org/docs/Dialects/TensorOps/
-   https://mlir.llvm.org/docs/Dialects/MemRef/
-   https://mlir.llvm.org/docs/Dialects/BufferizationOps/
-   https://mlir.llvm.org/docs/Dialects/Linalg/
-   https://mlir.llvm.org/docs/Dialects/SCFDialect/
-   https://mlir.llvm.org/docs/Dialects/Func/
-*)
-
-(* A handler supplies the runtime value domain and the concrete meaning of
-   every operation admitted by Instr.instr.  Keeping one field per operation
-   makes missing semantics visible at handler construction time: adding an
-   Instr constructor forces every handler to be updated.  Operands are still
-   SSA references here; the concrete handler owns the SSA environment and
-   resolves them in its State. *)
-Record instr_handler (State RuntimeValue : Type) := {
-  (* MLIR Arith: arith.constant materializes its typed literal. *)
-  sem_arith_constant : literal -> mlir_type ->
-    M runtime_error State RuntimeValue;
-  (* MLIR Arith: integer/float binary ops apply the selected scalar operation
-     to two same-typed operands.  DivSI/RemSI use signed integer semantics;
-     MaxNumF follows maxNum NaN behavior. *)
-  sem_arith_binary : arith_binary_operator -> typed_value -> typed_value ->
-    mlir_type -> M runtime_error State RuntimeValue;
-  (* MLIR Arith: ExtSI sign-extends; IndexCast converts between index and an
-     integer type according to the target index width. *)
-  sem_arith_cast : arith_cast_operator -> typed_value -> mlir_type ->
-    M runtime_error State RuntimeValue;
-
-  (* MLIR Tensor: tensor.empty creates an uninitialized destination tensor;
-     reading a cell before it is written must therefore fail, not yield zero. *)
-  sem_tensor_empty : list nat -> dtype ->
-    M runtime_error State RuntimeValue;
-  (* MLIR Tensor: expand/collapse reshape logical indices without changing
-     element order; reassociation and element-count constraints are checked. *)
-  sem_tensor_expand_shape : typed_value -> list (list nat) -> list nat ->
-    mlir_type -> M runtime_error State RuntimeValue;
-  sem_tensor_collapse_shape : typed_value -> list (list nat) -> mlir_type ->
-    M runtime_error State RuntimeValue;
-
-  (* MLIR MemRef: alloc creates fresh storage. *)
-  sem_memref_alloc : mlir_type -> M runtime_error State RuntimeValue;
-  (* MLIR MemRef: copy copies every source element to the destination and
-     requires compatible shapes and element types. *)
-  sem_memref_copy : typed_value -> typed_value ->
-    M runtime_error State RuntimeValue;
-  (* MLIR MemRef: reinterpret_cast creates a descriptor/view with the supplied
-     offset, sizes, and strides.  It does not allocate or copy storage; the
-     MLIR contract places validity/in-bounds responsibility on the program. *)
-  sem_memref_reinterpret_cast : typed_value -> list index_expr ->
-    list index_expr -> list index_expr -> mlir_type ->
-    M runtime_error State RuntimeValue;
-
-  (* MLIR Bufferization: to_tensor exposes a memref through tensor semantics;
-     restrict/writable are aliasing and mutability promises, not data motion. *)
-  sem_bufferization_to_tensor : typed_value -> tensor_access -> mlir_type ->
-    M runtime_error State RuntimeValue;
-  (* MLIR Bufferization: materialize_in_destination writes the tensor value
-     into the destination memref. *)
-  sem_bufferization_materialize : typed_value -> typed_value -> bool ->
-    M runtime_error State RuntimeValue;
-
-  (* MLIR Linalg destination-style operations.  The outs operand supplies the
-     result shape and, for reductions/matmul, the initial accumulator. *)
-  sem_linalg_fill : typed_value -> typed_value ->
-    M runtime_error State RuntimeValue;
-  sem_linalg_transpose : typed_value -> typed_value -> list nat ->
-    M runtime_error State RuntimeValue;
-  sem_linalg_matmul : typed_value -> typed_value -> typed_value ->
-    matmul_input_precision -> M runtime_error State RuntimeValue;
-  sem_linalg_elemwise_binary : linalg_binary_fn -> typed_value ->
-    typed_value -> typed_value -> M runtime_error State RuntimeValue;
-  sem_linalg_elemwise_unary : linalg_unary_fn -> typed_value ->
-    typed_value -> M runtime_error State RuntimeValue;
-  (* MLIR Linalg: reduce folds the selected dimensions.  Its combining
-     operation is the single nested region attached to the operation node. *)
-  sem_linalg_reduce : typed_value -> typed_value -> list nat ->
-    list (region instr) -> M runtime_error State RuntimeValue;
-  sem_linalg_broadcast : typed_value -> typed_value -> list nat ->
-    M runtime_error State RuntimeValue;
-  (* MLIR Linalg: yield terminates a structured-op region and returns its
-     scalar values to the enclosing operation. *)
-  sem_linalg_yield : list typed_value ->
-    M runtime_error State RuntimeValue;
-
-  (* MLIR SCF: scf.for evaluates bounds once, repeatedly executes its one
-     region, and increments the induction variable by step. *)
-  sem_scf_for : block_argument -> typed_value -> typed_value -> typed_value ->
-    list (region instr) -> M runtime_error State RuntimeValue;
-
-  (* MLIR Func: func.func introduces a callable region; func.return terminates
-     it and supplies the declared results.  Ascend hacc.entry/function_kind
-     remain function attributes, as documented by [Ascend interface]. *)
-  sem_func_function : symbol_name -> list function_argument ->
-    list mlir_type -> function_attributes -> list (region instr) ->
-    M runtime_error State RuntimeValue;
-  sem_func_return : list typed_value ->
-    M runtime_error State RuntimeValue;
-
-  (* Ascend CastOp, [Ascend cast ODS]: apply the selected conversion
-     elementwise, using all five semantic attributes even when textual MLIR
-     omits attributes whose ODS defaults are in force. *)
-  sem_hfusion_cast : hfusion_cast_kind -> hfusion_round_mode -> bool -> bool ->
-    hfusion_unsigned_mode -> typed_value -> typed_value -> mlir_type ->
-    M runtime_error State RuntimeValue
-}.
-
-(* The only instruction dispatcher.  It preserves nested regions for the
-   three operations whose meaning depends on a body: linalg.reduce, scf.for,
-   and func.func. *)
-Definition exec_instr {State RuntimeValue}
-    (handler : instr_handler State RuntimeValue)
-    (instruction : instr) (regions : list (region instr))
-    : M runtime_error State RuntimeValue :=
-  match instruction with
-  | ArithInstr operation =>
-      match operation with
-      | ArithConstant value result_type =>
-          sem_arith_constant handler value result_type
-      | ArithBinary operator lhs rhs result_type =>
-          sem_arith_binary handler operator lhs rhs result_type
-      | ArithCast operator input result_type =>
-          sem_arith_cast handler operator input result_type
-      end
-  | TensorInstr operation =>
-      match operation with
-      | TensorEmpty shape element_type =>
-          sem_tensor_empty handler shape element_type
-      | TensorExpandShape input reassociation output_shape result_type =>
-          sem_tensor_expand_shape handler input reassociation output_shape
-            result_type
-      | TensorCollapseShape input reassociation result_type =>
-          sem_tensor_collapse_shape handler input reassociation result_type
-      end
-  | MemRefInstr operation =>
-      match operation with
-      | MemRefAlloc result_type => sem_memref_alloc handler result_type
-      | MemRefCopy source destination =>
-          sem_memref_copy handler source destination
-      | MemRefReinterpretCast source offsets sizes strides result_type =>
-          sem_memref_reinterpret_cast handler source offsets sizes strides
-            result_type
-      end
-  | BufferizationInstr operation =>
-      match operation with
-      | BufferizationToTensor source access result_type =>
-          sem_bufferization_to_tensor handler source access result_type
-      | BufferizationMaterializeInDestination source destination writable =>
-          sem_bufferization_materialize handler source destination writable
-      end
-  | LinalgInstr operation =>
-      match operation with
-      | LinalgFill input output => sem_linalg_fill handler input output
-      | LinalgTranspose input output permutation =>
-          sem_linalg_transpose handler input output permutation
-      | LinalgMatmul lhs rhs output precision =>
-          sem_linalg_matmul handler lhs rhs output precision
-      | LinalgElemwiseBinary function lhs rhs output =>
-          sem_linalg_elemwise_binary handler function lhs rhs output
-      | LinalgElemwiseUnary function input output =>
-          sem_linalg_elemwise_unary handler function input output
-      | LinalgReduce input output dimensions =>
-          sem_linalg_reduce handler input output dimensions regions
-      | LinalgBroadcast input output dimensions =>
-          sem_linalg_broadcast handler input output dimensions
-      | LinalgYield values => sem_linalg_yield handler values
-      end
-  | ScfInstr (ScfFor variable lower upper step) =>
-      sem_scf_for handler variable lower upper step regions
-  | FuncInstr operation =>
-      match operation with
-      | FuncFunction name arguments results attributes =>
-          sem_func_function handler name arguments results attributes regions
-      | FuncReturn values => sem_func_return handler values
-      end
-  | HFusionInstr
-      (HFusionCast cast rounding overflow saturate unsigned input output
-        result_type) =>
-      sem_hfusion_cast handler cast rounding overflow saturate unsigned input
-        output result_type
+Definition scalar_failure {A} (outcome : result scalar_error A)
+    : result runtime_error A :=
+  match outcome with
+  | Ok value => Ok value
+  | Error _ => Error NumericFailure
   end.
 
-(* Temporary executable foundations used by the smoke tests.  Dialect
-   operation semantics will call these helpers; these definitions are not
-   themselves HFusion-stage operation syntax. *)
-Definition local_alloc {Scalar} (space : address_space)
-    (element_type : dtype) (contents : list Scalar)
-    : M runtime_error (memory_state Scalar) allocation_id :=
-  fun memory => Ok (allocate_buffer space element_type contents memory).
+Fixpoint map_scalar_result {Scalar}
+    (function : Scalar -> result scalar_error Scalar) (values : list Scalar)
+    : result runtime_error (list Scalar) :=
+  match values with
+  | [] => Ok []
+  | value :: rest =>
+      mapped <-? scalar_failure (function value) ;;
+      mapped_rest <-? map_scalar_result function rest ;;
+      Ok (mapped :: mapped_rest)
+  end.
 
-Definition exec_alloc {Scalar State} `{HasMemory Scalar State}
-    (space : address_space) (element_type : dtype) (contents : list Scalar)
-    : M runtime_error State allocation_id :=
-  zoom memory_lens (local_alloc space element_type contents).
+Fixpoint map2_scalar_result {Scalar}
+    (function : Scalar -> Scalar -> result scalar_error Scalar)
+    (left right : list Scalar) : result runtime_error (list Scalar) :=
+  match left, right with
+  | [], [] => Ok []
+  | left_value :: left_rest, right_value :: right_rest =>
+      mapped <-? scalar_failure (function left_value right_value) ;;
+      mapped_rest <-? map2_scalar_result function left_rest right_rest ;;
+      Ok (mapped :: mapped_rest)
+  | _, _ => Error InvalidShape
+  end.
 
-Definition exec_scalar_operation {Scalar State} `{ScalarOps Scalar}
-    (operation : scalar_operation) (left right : Scalar)
-    : M runtime_error State Scalar :=
-  fun state =>
-    match eval_scalar_operation operation left right with
-    | Ok value => Ok (value, state)
-    | Error _ => Error NumericFailure
-    end.
+Definition eval_linalg_binary {Scalar} `{ScalarOps Scalar}
+    (function : linalg_binary_fn) (left right : Scalar)
+    : result scalar_error Scalar :=
+  match function with
+  | LinalgAdd => eval_scalar_operation ScalarAdd left right
+  | LinalgSub => eval_scalar_operation ScalarSub left right
+  | LinalgMul => eval_scalar_operation ScalarMul left right
+  | LinalgDiv => eval_scalar_operation ScalarDiv left right
+  end.
 
-Definition exec_fail {State}
-    : M runtime_error State unit :=
-  fail InvalidMemoryAccess.
+Inductive elementwise_operand (Scalar : Type) :=
+| ElementwiseScalar (value : Scalar)
+| ElementwiseTensor (value : tensor Scalar).
+
+Arguments ElementwiseScalar {Scalar} _.
+Arguments ElementwiseTensor {Scalar} _.
+
+Definition expand_elementwise_operand {Scalar} (shape : list nat)
+    (operand : elementwise_operand Scalar) : result runtime_error (list Scalar) :=
+  match operand with
+  | ElementwiseScalar value => Ok (repeat value (shape_size shape))
+  | ElementwiseTensor value =>
+      if list_eq_dec Nat.eq_dec (tensor_shape value) shape
+      then Ok (tensor_elements value)
+      else Error InvalidShape
+  end.
+
+(* linalg.elemwise_binary
+
+   Huawei's framework-integration document maps add/sub/mul/div to
+   linalg.binary_fn<add/sub/mul/div> and shows both scalar and tensor operands:
+   docs/source/en/developer_guide/conversion/framework_interface.md.
+   Huawei's interface overview delegates the operation semantics to MLIR
+   Linalg.  The MLIR named op applies BinaryFn elementwise; outs supplies the
+   result shape.  A scalar operand is broadcast to every result element. *)
+Definition sem_linalg_elemwise_binary {Scalar} `{ScalarOps Scalar}
+    (function : linalg_binary_fn)
+    (left right : elementwise_operand Scalar)
+    (output_shape : list nat) (output_type : dtype)
+    : result runtime_error (tensor Scalar) :=
+  left_values <-? expand_elementwise_operand output_shape left ;;
+  right_values <-? expand_elementwise_operand output_shape right ;;
+  values <-?
+    map2_scalar_result (eval_linalg_binary function) left_values right_values ;;
+  Ok {| tensor_shape := output_shape;
+        tensor_element_type := output_type;
+        tensor_elements := values |}.
+
+Inductive reduction_function := ReductionAdd | ReductionMax.
+
+Definition eval_reduction {Scalar} `{ScalarOps Scalar}
+    (function : reduction_function) (value accumulator : Scalar) : Scalar :=
+  match function with
+  | ReductionAdd => scalar_add value accumulator
+  | ReductionMax => scalar_max value accumulator
+  end.
+
+Fixpoint fold_reduction {Scalar} `{ScalarOps Scalar}
+    (function : reduction_function) (values : list Scalar)
+    (accumulator : Scalar) : Scalar :=
+  match values with
+  | [] => accumulator
+  | value :: rest =>
+      fold_reduction function rest
+        (eval_reduction function value accumulator)
+  end.
+
+Fixpoint reduce_rows {Scalar} `{ScalarOps Scalar}
+    (function : reduction_function) (columns rows : nat)
+    (values initial_values : list Scalar) : result runtime_error (list Scalar) :=
+  match rows, initial_values with
+  | O, [] =>
+      match values with [] => Ok [] | _ => Error InvalidShape end
+  | S remaining_rows, initial :: remaining_initials =>
+      let row := firstn columns values in
+      if Nat.eqb (length row) columns then
+        reduced_rest <-?
+          reduce_rows function columns remaining_rows
+            (skipn columns values) remaining_initials ;;
+        Ok (fold_reduction function row initial :: reduced_rest)
+      else Error InvalidShape
+  | _, _ => Error InvalidShape
+  end.
+
+(* linalg.reduce
+
+   Huawei's framework-integration document says sum lowers to linalg.reduce
+   with arith.addf/addi and max lowers with maximumf/maxsi.  MLIR defines outs
+   as the initial accumulator and the nested region as the combining function.
+
+   hfusion_level.mlir contains rank-2 tensors reduced on dimensions=[1] with
+   arith.addf or arith.maxnumf.  This function implements precisely that
+   executable subset: each row is folded left-to-right from its outs element.
+   Other dimensions are rejected rather than given an invented meaning. *)
+Definition sem_linalg_reduce {Scalar} `{ScalarOps Scalar}
+    (function : reduction_function) (dimensions : list nat)
+    (input initial : tensor Scalar) : result runtime_error (tensor Scalar) :=
+  match dimensions, tensor_shape input, tensor_shape initial with
+  | [1], [rows; columns], [initial_rows] =>
+      if Nat.eqb rows initial_rows then
+        values <-?
+          reduce_rows function columns rows
+            (tensor_elements input) (tensor_elements initial) ;;
+        Ok {| tensor_shape := [rows];
+              tensor_element_type := tensor_element_type initial;
+              tensor_elements := values |}
+      else Error InvalidShape
+  | _, _, _ => Error UnsupportedInstruction
+  end.
+
+Definition hfusion_rounding (mode : hfusion_round_mode) : option round_mode :=
+  match mode with
+  | HFusionRint => Some RoundNearestEven
+  | HFusionFloor => Some RoundDown
+  | HFusionCeil => Some RoundUp
+  | HFusionTrunc => Some RoundTowardZero
+  | HFusionRound | HFusionOdd | HFusionTruncWithOverflow => None
+  end.
+
+(* hfusion.cast
+
+   Huawei's source of truth is
+   bishengir/include/bishengir/Dialect/HFusion/IR/
+     HFusionNamedStructuredOps.yaml and HFusionEnums.td.
+   CastOp applies the conversion elementwise.  Its ODS defaults are
+   cast_signed, RINT, enable_overflow=true, enable_saturate=false, and SI2SI;
+   RINT means nearest with ties to even.  Huawei's FAQ shows the same cast form
+   around normalized HFusion operations.
+
+   This first executable definition covers exactly the numeric cast form in
+   the FlashAttention artifact.  Modes whose behavior ScalarOps cannot yet
+   distinguish fail explicitly. *)
+Definition sem_hfusion_cast {Scalar} `{ScalarOps Scalar}
+    (cast : hfusion_cast_kind) (rounding : hfusion_round_mode)
+    (enable_overflow enable_saturate : bool)
+    (unsigned_mode : hfusion_unsigned_mode) (target_type : dtype)
+    (input : tensor Scalar) : result runtime_error (tensor Scalar) :=
+  match cast, enable_overflow, enable_saturate, unsigned_mode,
+        hfusion_rounding rounding with
+  | HFusionCastSigned, true, false, HFusionSI2SI, Some round_mode =>
+      let specification :=
+        {| cast_source := tensor_element_type input;
+           cast_target := target_type;
+           cast_round_mode := round_mode |} in
+      values <-?
+        map_scalar_result (scalar_cast specification) (tensor_elements input) ;;
+      Ok {| tensor_shape := tensor_shape input;
+            tensor_element_type := target_type;
+            tensor_elements := values |}
+  | _, _, _, _, _ => Error UnsupportedInstruction
+  end.

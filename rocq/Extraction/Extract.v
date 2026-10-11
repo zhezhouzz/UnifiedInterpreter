@@ -1,6 +1,7 @@
 From Stdlib Require Import Extraction ExtrOcamlBasic ExtrOcamlNatInt.
 From UnifiedInterpreter.Examples Require Import FrameworkSmoke.
 From UnifiedInterpreter.HFusion Require Import Semantics.
+From UnifiedInterpreter.Examples Require Import TestSupport.
 From UnifiedInterpreter.Memory Require Import Model.
 From UnifiedInterpreter.Value Require Import Scalar.
 
@@ -13,4 +14,7 @@ Extraction "unified_semantics.ml"
   read_view
   exec_alloc
   eval_scalar_operation
-  exec_scalar_operation.
+  exec_scalar_operation
+  sem_linalg_elemwise_binary
+  sem_linalg_reduce
+  sem_hfusion_cast.
