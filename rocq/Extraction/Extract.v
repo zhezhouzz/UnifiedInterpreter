@@ -1,6 +1,7 @@
 From Stdlib Require Import Extraction ExtrOcamlBasic ExtrOcamlNatInt.
 From UnifiedInterpreter.Examples Require Import FrameworkSmoke.
-From UnifiedInterpreter.HFusion Require Import Semantics.
+From UnifiedInterpreter.HFusion.Semantics Require Import
+  ElemwiseBinary Reduce Cast.
 From UnifiedInterpreter.Examples Require Import TestSupport.
 From UnifiedInterpreter.Memory Require Import Model.
 From UnifiedInterpreter.Value Require Import Scalar.

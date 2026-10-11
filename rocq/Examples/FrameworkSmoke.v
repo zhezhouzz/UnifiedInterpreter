@@ -3,7 +3,9 @@ From UnifiedInterpreter.Base Require Import Result StateM.
 From UnifiedInterpreter.Memory Require Import Model.
 From UnifiedInterpreter.Tensor Require Import Model.
 From UnifiedInterpreter.Unified Require Import Errors State.
-From UnifiedInterpreter.HFusion Require Import Instr Semantics.
+From UnifiedInterpreter.HFusion Require Import Instr.
+From UnifiedInterpreter.HFusion.Semantics Require Import
+  ElemwiseBinary Reduce Cast.
 From UnifiedInterpreter.Examples Require Import TestSupport.
 From UnifiedInterpreter.Value Require Import DType Scalar.
 

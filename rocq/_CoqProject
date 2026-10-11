@@ -17,7 +17,6 @@ HFusion/Semantics/Common.v
 HFusion/Semantics/ElemwiseBinary.v
 HFusion/Semantics/Reduce.v
 HFusion/Semantics/Cast.v
-HFusion/Semantics.v
 Examples/TestSupport.v
 Examples/FrameworkSmoke.v
 Extraction/Extract.v
