@@ -3,10 +3,10 @@
 Base/Result.v
 Base/Lens.v
 Base/StateM.v
-Type/DType.v
 Type/Shape.v
 Type/HFusion.v
 Type/MLIR.v
+HFusion/Attrs.v
 Value/Scalar.v
 Tensor/Model.v
 Memory/Model.v

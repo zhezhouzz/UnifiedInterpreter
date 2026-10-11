@@ -76,4 +76,4 @@ differential tests against PyTorch, Triton-Ascend, and hardware results. Use
 litmus-style kernels to distinguish ordering and synchronization alternatives.
 For imprecise arithmetic, use SMT-generated discriminating inputs where useful.
 Every archived compiler artifact must record its source, compiler revision,
-shape, dtype, and launch configuration.
+shape, element type, and launch configuration.

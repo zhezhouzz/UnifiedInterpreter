@@ -148,7 +148,7 @@ part of the execution semantics rather than only a debugging trace.
 1. **P0: exact artifact.** Parse or adapt all operations above, execute the
    fixed `f16`, non-causal `128 x 128` instance, and compare both output and
    log-sum-exp with a trusted reference.
-2. **P1: source variants.** Generalize shapes and dtypes and add causal masking,
+2. **P1: source variants.** Generalize shapes and element types and add causal masking,
    which will require the corresponding selection/slicing operations emitted
    by the compiler.
 3. **P2: broader HFusion.** Inventory the official dialect definition and add

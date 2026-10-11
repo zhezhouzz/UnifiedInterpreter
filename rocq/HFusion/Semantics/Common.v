@@ -2,7 +2,7 @@ From Stdlib Require Import Bool List PeanoNat.
 From UnifiedInterpreter.Base Require Import Result.
 From UnifiedInterpreter.Tensor Require Import Model.
 From UnifiedInterpreter.Unified Require Import Errors.
-From UnifiedInterpreter.Type Require Import DType.
+From UnifiedInterpreter.Type Require Import MLIR.
 From UnifiedInterpreter.Value Require Import Scalar.
 
 Import ListNotations.
@@ -51,7 +51,7 @@ Fixpoint flat_index (shape coordinate : list nat)
   | dimension :: shape_rest, index :: coordinate_rest =>
       if index <? dimension then
         rest <-? flat_index shape_rest coordinate_rest ;;
-        Ok (index * shape_size shape_rest + rest)
+        Ok (index * num_elements shape_rest + rest)
       else Error InvalidShape
   | _, _ => Error InvalidShape
   end.

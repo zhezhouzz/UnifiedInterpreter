@@ -18,15 +18,14 @@ still future work.
 ## Layout
 
 - `Base`: result, atomic state computation, and lawful top-level lenses.
-- `Type`: scalar interpreter dtypes, static/dynamic shapes, common MLIR types,
-  and HFusion/HIVM-specific type information. `MLIR.mlir_type` is the checked
-  type language accepted by our semantics; `DType.dtype` selects an executable
-  scalar backend. A future lossless raw parser is deliberately separate and
+- `Type`: static/dynamic shapes, supported MLIR types, and HFusion/HIVM-specific
+  type information. `MLIR.mlir_type` is the checked type language accepted by
+  our semantics. A future lossless raw parser is deliberately separate and
   elaborates only supported attributes into these typed cases.
-- `Value`: a parameterized scalar interface implementing the arithmetic of
-  each dtype.
-- `Tensor`: pure n-dimensional values indexed by their concrete shape and
-  element dtype. Their row-major element count is certified in `Prop`, so an
+- `Value`: a parameterized scalar interface implementing arithmetic for MLIR
+  scalar element types.
+- `Tensor`: pure n-dimensional values indexed by their runtime shape and MLIR
+  element type. Their row-major element count is certified in `Prop`, so an
   ill-sized tensor cannot enter instruction semantics and the proof is erased
   during extraction. `refined_tensor` connects such a concrete value to an
   MLIR shape containing static or dynamic dimensions. Tensors have no
@@ -94,13 +93,13 @@ semantics to run over either the small HFusion state or a larger HIVM state.
 
 The parsed HFusion syntax remains extrinsic: it can represent malformed MLIR
 so that a verifier can report compiler bugs. In contrast, executable tensor
-semantics consumes intrinsically indexed values. Tensor shape and dtype are
+semantics consumes intrinsically indexed values. Runtime shape and element type are
 Rocq type parameters, and variadic operations use `shaped_tensor` when element
-dtypes may differ but shapes must agree. Static shape mismatches therefore
+types may differ but shapes must agree. Static shape mismatches therefore
 cannot reach `sem_linalg_elemwise_binary` or `sem_linalg_reduce`.
 
 Dynamic MLIR dimensions are represented by `Type/Shape.dimension`.
-`refined_tensor` carries the proof that a runtime concrete shape refines those
+`refined_tensor` carries the proof that a runtime shape refines those
 static/dynamic dimensions. A future raw-to-typed elaborator is the only place
 that should construct these witnesses or return a shape type error; operation
 semantics must not repeat that verification.

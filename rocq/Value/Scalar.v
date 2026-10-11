@@ -1,6 +1,7 @@
 From Stdlib Require Import ZArith QArith.
 From UnifiedInterpreter.Base Require Import Result.
-From UnifiedInterpreter.Type Require Import DType.
+From UnifiedInterpreter.HFusion Require Import Attrs.
+From UnifiedInterpreter.Type Require Import MLIR.
 
 Open Scope Z_scope.
 Set Implicit Arguments.
@@ -13,7 +14,8 @@ Inductive scalar_error :=
 (* This class is the numeric backend used by tensor-operation semantics.  A
    concrete instance owns the representation-dependent details (bit width,
    signedness, IEEE exceptional values, rounding, overflow, and saturation).
-   HFusion semantics must forward the complete operation and cast_spec here;
+   HFusion semantics must forward the complete operation and
+   [hfusion_cast_spec] here;
    it must not silently discard attributes. Algebraic laws belong in
    ScalarLaws below and therefore disappear during extraction. *)
 Class ScalarOps (Scalar : Type) := {
@@ -32,7 +34,7 @@ Class ScalarOps (Scalar : Type) := {
   scalar_pow : Scalar -> Scalar -> result scalar_error Scalar;
   scalar_exp : Scalar -> result scalar_error Scalar;
   scalar_log : Scalar -> result scalar_error Scalar;
-  scalar_cast : cast_spec -> Scalar -> result scalar_error Scalar
+  scalar_cast : hfusion_cast_spec -> Scalar -> result scalar_error Scalar
 }.
 
 (* The binary scalar operations that an IR instruction may request.  Keeping

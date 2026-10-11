@@ -1,12 +1,13 @@
 From Stdlib Require Import List String ZArith QArith.
-From UnifiedInterpreter.Type Require Import DType MLIR Shape.
+From UnifiedInterpreter.Type Require Import MLIR Shape.
 
 Import ListNotations.
 
 Definition value_id := nat.
 Definition symbol_name := string.
 
-Record typed_value := {
+(* An MLIR SSA value is identified by its SSA name and always has a Type. *)
+Record ssa_value := {
   value_name : value_id;
   value_type : mlir_type
 }.

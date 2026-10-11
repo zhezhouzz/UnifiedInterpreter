@@ -3,11 +3,11 @@ From UnifiedInterpreter.Base Require Import Result StateM.
 From UnifiedInterpreter.Memory Require Import Model.
 From UnifiedInterpreter.Tensor Require Import Model.
 From UnifiedInterpreter.Unified Require Import Errors State.
-From UnifiedInterpreter.HFusion Require Import Instr.
+From UnifiedInterpreter.HFusion Require Import Attrs Instr.
 From UnifiedInterpreter.HFusion.Semantics Require Import
   ElemwiseBinary Reduce Cast.
 From UnifiedInterpreter.Examples Require Import TestSupport.
-From UnifiedInterpreter.Type Require Import DType HFusion.
+From UnifiedInterpreter.Type Require Import HFusion MLIR.
 From UnifiedInterpreter.Type Require Import MLIR Shape.
 From UnifiedInterpreter.Value Require Import Scalar.
 
@@ -41,7 +41,7 @@ Definition smoke_initial : memory_state Z := empty_memory.
 
 Definition smoke_result :
     result runtime_error (allocation_id * memory_state Z) :=
-  exec_alloc ASDefault (DInt 64 Signed)
+  exec_alloc ASDefault (IntegerType 64 Signed)
     [10%Z; 20%Z; 30%Z] smoke_initial.
 
 Example smoke_allocates_id_zero :
@@ -56,7 +56,7 @@ Example smoke_allocation_is_readable :
   | Ok (id, state) =>
       lookup_buffer id state =
       Some {| buffer_address_space := ASDefault;
-              buffer_element_type := DInt 64 Signed;
+              buffer_element_type := IntegerType 64 Signed;
               buffer_cells := [10%Z; 20%Z; 30%Z] |}
   | Error _ => False
   end.
@@ -76,7 +76,7 @@ Proof. reflexivity. Qed.
 
 Definition allocate_then_fail :
     M runtime_error (memory_state Z) unit :=
-  _ <- exec_alloc ASDefault (DInt 64 Signed) [42%Z] ;;
+  _ <- exec_alloc ASDefault (IntegerType 64 Signed) [42%Z] ;;
   fail InvalidMemoryAccess.
 
 Example failed_sequence_exposes_no_intermediate_state :
@@ -95,35 +95,31 @@ Example scalar_operation_preserves_state {Scalar State} `{ScalarOps Scalar}
     Ok (scalar_add left right, state).
 Proof. reflexivity. Qed.
 
-Example signless_integer_is_preserved :
-  dtype_to_mlir_type (DInt 32 Signless) = IntegerType 32 Signless.
-Proof. reflexivity. Qed.
-
 Example ub_memref_type_carries_memory_space :
-  RankedMemRefType [StaticDim 2; DynamicDim] (FloatType F32)
+  RankedMemRefType [StaticDim 2; DynamicDim] Float32Type
     IdentityLayout ASUB =
-  RankedMemRefType [StaticDim 2; DynamicDim] (FloatType F32)
+  RankedMemRefType [StaticDim 2; DynamicDim] Float32Type
     IdentityLayout ASUB.
 Proof. reflexivity. Qed.
 
-Definition tensor_2 (left right : Z) : tensor Z [2%nat] DF32 :=
-  @Build_tensor Z [2%nat] DF32 [left; right] eq_refl.
+Definition tensor_2 (left right : Z) : tensor Z [2%nat] Float32Type :=
+  @Build_tensor Z [2%nat] Float32Type [left; right] eq_refl.
 
-Definition tensor_2_f16 (left right : Z) : tensor Z [2%nat] DF16 :=
-  @Build_tensor Z [2%nat] DF16 [left; right] eq_refl.
+Definition tensor_2_f16 (left right : Z) : tensor Z [2%nat] Float16Type :=
+  @Build_tensor Z [2%nat] Float16Type [left; right] eq_refl.
 
-Definition tensor_2x3 : tensor Z [2%nat; 3%nat] DF32 :=
-  @Build_tensor Z [2%nat; 3%nat] DF32
+Definition tensor_2x3 : tensor Z [2%nat; 3%nat] Float32Type :=
+  @Build_tensor Z [2%nat; 3%nat] Float32Type
     [1%Z; 2%Z; 3%Z; 4%Z; 5%Z; 6%Z] eq_refl.
 
-Definition tensor_2x2x2 : tensor Z [2%nat; 2%nat; 2%nat] DF32 :=
-  @Build_tensor Z [2%nat; 2%nat; 2%nat] DF32
+Definition tensor_2x2x2 : tensor Z [2%nat; 2%nat; 2%nat] Float32Type :=
+  @Build_tensor Z [2%nat; 2%nat; 2%nat] Float32Type
     [1%Z; 2%Z; 3%Z; 4%Z; 5%Z; 6%Z; 7%Z; 8%Z] eq_refl.
 
 Example elemwise_binary_add_executes :
   sem_linalg_elemwise_binary LinalgAdd
     LinalgCastSigned
-    DF32
+    Float32Type
     (ElementwiseTensor (tensor_2 1%Z 2%Z))
     (ElementwiseTensor (tensor_2 10%Z 20%Z)) =
   Ok (tensor_2 11%Z 22%Z).
@@ -137,9 +133,9 @@ Example row_reduction_add_executes :
       | _, _ => Error InvalidShape
       end)
     [1%nat]
-    [ShapedTensor DF32 tensor_2x3]
-    [ShapedTensor DF32 (tensor_2 10%Z 20%Z)] =
-  Ok [ShapedTensor DF32 (tensor_2 16%Z 35%Z)].
+    [ShapedTensor Float32Type tensor_2x3]
+    [ShapedTensor Float32Type (tensor_2 10%Z 20%Z)] =
+  Ok [ShapedTensor Float32Type (tensor_2 16%Z 35%Z)].
 Proof. reflexivity. Qed.
 
 Example multi_axis_multi_result_reduction_executes :
@@ -150,15 +146,15 @@ Example multi_axis_multi_result_reduction_executes :
       | _, _ => Error InvalidShape
       end)
     [0%nat; 2%nat]
-    [ShapedTensor DF32 tensor_2x2x2]
-    [ShapedTensor DF32 (tensor_2 0%Z 0%Z);
-     ShapedTensor DF32 (tensor_2 0%Z 0%Z)] =
-  Ok [ShapedTensor DF32 (tensor_2 14%Z 22%Z);
-      ShapedTensor DF32 (tensor_2 6%Z 8%Z)].
+    [ShapedTensor Float32Type tensor_2x2x2]
+    [ShapedTensor Float32Type (tensor_2 0%Z 0%Z);
+     ShapedTensor Float32Type (tensor_2 0%Z 0%Z)] =
+  Ok [ShapedTensor Float32Type (tensor_2 14%Z 22%Z);
+      ShapedTensor Float32Type (tensor_2 6%Z 8%Z)].
 Proof. reflexivity. Qed.
 
 Example malformed_tensor_is_rejected_at_boundary :
-  @tensor_of_list Z [2%nat] DF32 [1%Z] = None.
+  @tensor_of_list Z [2%nat] Float32Type [1%Z] = None.
 Proof. reflexivity. Qed.
 
 Example complete_binary_fn_cases_are_executable :
@@ -177,14 +173,15 @@ Example complete_binary_fn_cases_are_executable :
 Proof. repeat split; reflexivity. Qed.
 
 Example hfusion_cast_executes :
-  sem_hfusion_cast CastSigned HFusionRint true false SI2SI DF16
+  sem_hfusion_cast HFusionCastSigned HFusionRint true false
+    HFusionSI2SI Float16Type
     (tensor_2 1%Z 2%Z) =
   Ok (tensor_2_f16 1%Z 2%Z).
 Proof. reflexivity. Qed.
 
 Definition view_example : result memory_error (packed_tensor Z) :=
   let '(allocation, memory) :=
-    allocate_buffer ASGM (DInt 64 Signed)
+    allocate_buffer ASGM (IntegerType 64 Signed)
       [0%Z; 1%Z; 2%Z; 3%Z; 4%Z; 5%Z] empty_memory in
   let descriptor :=
     {| descriptor_allocation := allocation;
@@ -196,7 +193,7 @@ Definition view_example : result memory_error (packed_tensor Z) :=
 
 Example view_materializes_independent_tensor :
   view_example =
-    Ok (PackTensor [2%nat; 2%nat] (DInt 64 Signed)
-      (@Build_tensor Z [2%nat; 2%nat] (DInt 64 Signed)
+    Ok (PackTensor [2%nat; 2%nat] (IntegerType 64 Signed)
+      (@Build_tensor Z [2%nat; 2%nat] (IntegerType 64 Signed)
         [1%Z; 2%Z; 4%Z; 5%Z] eq_refl)).
 Proof. reflexivity. Qed.

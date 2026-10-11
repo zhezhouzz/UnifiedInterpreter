@@ -8,9 +8,9 @@ Inductive dimension :=
 | DynamicDim.
 
 Definition shape := list dimension.
-Definition concrete_shape := list nat.
+Definition runtime_shape := list nat.
 
-Fixpoint shape_matches (concrete : concrete_shape) (abstract : shape) : Prop :=
+Fixpoint shape_matches (concrete : runtime_shape) (abstract : shape) : Prop :=
   match concrete, abstract with
   | [], [] => True
   | size :: concrete_rest, dimension :: abstract_rest =>
@@ -21,7 +21,7 @@ Fixpoint shape_matches (concrete : concrete_shape) (abstract : shape) : Prop :=
   | _, _ => False
   end.
 
-Fixpoint shape_matchesb (concrete : concrete_shape) (abstract : shape) : bool :=
+Fixpoint shape_matchesb (concrete : runtime_shape) (abstract : shape) : bool :=
   match concrete, abstract with
   | [], [] => true
   | size :: concrete_rest, dimension :: abstract_rest =>

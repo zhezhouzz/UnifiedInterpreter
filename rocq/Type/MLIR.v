@@ -1,5 +1,9 @@
 From Stdlib Require Import Bool List ZArith.
-From UnifiedInterpreter.Type Require Import DType HFusion Shape.
+From UnifiedInterpreter.Type Require Import HFusion Shape.
+
+(* MLIR IntegerType::SignednessSemantics. [Signless] is the spelling used by
+   ordinary [iN] types; signed and unsigned spellings are [siN] and [uiN]. *)
+Inductive signedness_semantics := Signless | Signed | Unsigned.
 
 Record strided_layout := {
   layout_offset : option Z;
@@ -49,13 +53,16 @@ Inductive memref_layout :=
      matching vector/scalable ranks, and legal container element types) belong
      to a separate verifier rather than to these constructors.
 
-   [dtype] in Type/DType is also distinct from [mlir_type]: it chooses the
-   executable scalar backend representation. Elaboration maps supported scalar
-   MLIR types to dtypes; tensor, memref, and function types are not dtypes. *)
+   Scalar backends consume the same [mlir_type] values. Their implementation
+   domain is restricted by elaboration to MLIR scalar element types; there is
+   no second interpreter-specific type language. *)
 Inductive mlir_type :=
 | IndexType
-| IntegerType (bits : nat) (sign : signedness)
-| FloatType (format : float_format)
+| IntegerType (width : nat) (signedness : signedness_semantics)
+| Float16Type
+| BFloat16Type
+| Float32Type
+| Float64Type
 | ComplexType (element_type : mlir_type)
 | RankedTensorType (dimensions : shape) (element_type : mlir_type)
 | UnrankedTensorType (element_type : mlir_type)
@@ -68,10 +75,3 @@ Inductive mlir_type :=
 | FunctionType (inputs results : list mlir_type)
 | TupleType (elements : list mlir_type)
 | NoneType.
-
-Definition dtype_to_mlir_type (element_type : dtype) : mlir_type :=
-  match element_type with
-  | DIndex => IndexType
-  | DInt bits sign => IntegerType bits sign
-  | DFloat format => FloatType format
-  end.

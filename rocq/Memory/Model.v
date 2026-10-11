@@ -2,7 +2,7 @@ From Stdlib Require Import List ZArith.
 From stdpp Require Import gmap.
 From UnifiedInterpreter.Base Require Import Result.
 From UnifiedInterpreter.Tensor Require Import Model.
-From UnifiedInterpreter.Type Require Import DType HFusion.
+From UnifiedInterpreter.Type Require Import HFusion MLIR.
 
 Import ListNotations.
 Open Scope Z_scope.
@@ -15,7 +15,7 @@ Definition descriptor_id := nat.
    tensor, it has no intrinsic n-dimensional shape. *)
 Record buffer (Value : Type) := {
   buffer_address_space : address_space;
-  buffer_element_type : dtype;
+  buffer_element_type : mlir_type;
   buffer_cells : list Value
 }.
 
@@ -55,7 +55,7 @@ Definition lookup_descriptor {Value} (id : descriptor_id)
     (memory : memory_state Value) : option memref_descriptor :=
   memory_descriptors memory !! id.
 
-Definition allocate_buffer {Value} (space : address_space) (element_type : dtype)
+Definition allocate_buffer {Value} (space : address_space) (element_type : mlir_type)
     (contents : list Value) (memory : memory_state Value)
     : allocation_id * memory_state Value :=
   let id := memory_next_allocation memory in
@@ -142,7 +142,7 @@ Definition read_view {Value} (memory : memory_state Value)
   end.
 
 Lemma allocate_buffer_lookup_new {Value} (space : address_space)
-    (element_type : dtype)
+    (element_type : mlir_type)
     (contents : list Value) (memory memory' : memory_state Value)
     (id : allocation_id) :
   allocate_buffer space element_type contents memory = (id, memory') ->
@@ -157,7 +157,7 @@ Proof.
 Qed.
 
 Lemma allocate_buffer_preserves_descriptors {Value} (space : address_space)
-    (element_type : dtype)
+    (element_type : mlir_type)
     (contents : list Value) (memory memory' : memory_state Value)
     (id : allocation_id) :
   allocate_buffer space element_type contents memory = (id, memory') ->
@@ -167,7 +167,7 @@ Proof.
 Qed.
 
 Lemma allocate_buffer_preserves_other {Value} (space : address_space)
-    (element_type : dtype)
+    (element_type : mlir_type)
     (contents : list Value) (memory memory' : memory_state Value)
     (fresh other : allocation_id) :
   allocate_buffer space element_type contents memory = (fresh, memory') ->
