@@ -42,7 +42,13 @@ Inductive bufferization_operation :=
 | BufferizationMaterializeInDestination
     (source destination : typed_value) (writable : bool).
 
-Inductive linalg_binary_fn := LinalgAdd | LinalgSub | LinalgMul | LinalgDiv.
+(* Upstream MLIR LinalgEnums.td: complete BinaryFn enumeration. *)
+Inductive linalg_binary_fn :=
+| LinalgAdd | LinalgSub | LinalgMul | LinalgDiv | LinalgDivUnsigned
+| LinalgMaxSigned | LinalgMinSigned
+| LinalgMaxUnsigned | LinalgMinUnsigned
+| LinalgPowF.
+Inductive linalg_type_fn := LinalgCastSigned | LinalgCastUnsigned.
 Inductive linalg_unary_fn := LinalgExp | LinalgLog.
 Inductive matmul_input_precision := MatmulIEEE.
 
@@ -51,7 +57,7 @@ Inductive linalg_operation :=
 | LinalgTranspose (input output : typed_value) (permutation : list nat)
 | LinalgMatmul (left right output : typed_value)
     (input_precision : matmul_input_precision)
-| LinalgElemwiseBinary (function : linalg_binary_fn)
+| LinalgElemwiseBinary (function : linalg_binary_fn) (cast : linalg_type_fn)
     (left right output : typed_value)
 | LinalgElemwiseUnary (function : linalg_unary_fn)
     (input output : typed_value)
@@ -93,12 +99,6 @@ Inductive func_operation :=
     (results : list mlir_type) (attributes : function_attributes)
 | FuncReturn (values : list typed_value).
 
-(* AscendNPU-IR HFusionEnums.td: TypeFn. *)
-Inductive hfusion_cast_kind :=
-| HFusionCastSigned
-| HFusionCastUnsigned
-| HFusionBitcast.
-
 (* AscendNPU-IR HFusionEnums.td: RoundMode. *)
 Inductive hfusion_round_mode :=
 | HFusionRint
@@ -109,17 +109,10 @@ Inductive hfusion_round_mode :=
 | HFusionOdd
 | HFusionTruncWithOverflow.
 
-(* AscendNPU-IR HFusionEnums.td: UnsignedMode. *)
-Inductive hfusion_unsigned_mode :=
-| HFusionSI2SI
-| HFusionSI2UI
-| HFusionUI2SI
-| HFusionUI2UI.
-
 Inductive hfusion_dialect_operation :=
-| HFusionCast (cast : hfusion_cast_kind) (rounding : hfusion_round_mode)
+| HFusionCast (cast : cast_kind) (rounding : hfusion_round_mode)
     (enable_overflow enable_saturate : bool)
-    (unsigned_mode : hfusion_unsigned_mode)
+    (unsigned_mode : unsigned_mode)
     (input output : typed_value) (result_type : mlir_type).
 
 (* The closed instruction type for the captured HFusion-stage artifact. *)

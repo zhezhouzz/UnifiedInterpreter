@@ -33,12 +33,14 @@ still future work.
   `instr` type with constructors such as `ArithInstr` and `ScfInstr`.
   `Syntax` supplies common MLIR types, SSA references, and recursive regions;
   `Program` defines programs over `instr`; `Semantics` is the separate home of
-  executable meanings for selected instructions. The current executable slice
-  directly defines `linalg.elemwise_binary`, the row-reduction instances of
-  `linalg.reduce` used by the artifact, and its `hfusion.cast` form. Source
-  comments identify the corresponding AscendNPU-IR or upstream MLIR contract;
-  unsupported modes fail explicitly instead of being hidden behind an abstract
-  handler.
+  executable meanings for selected instructions. Implementations are split
+  into `Semantics/Common`, `ElemwiseBinary`, `Reduce`, and `Cast`, with
+  `Semantics.v` as a small public facade. The selected operations cover the
+  complete documented parameter space structurally: all Linalg `BinaryFn` and
+  `TypeFn` cases, arbitrary-rank/variadic reduction driven by its actual
+  combiner region, and every HFusion cast attribute. Bit-accurate arithmetic is
+  supplied by the chosen `ScalarOps` model rather than duplicated in each
+  tensor operation.
 - `Examples`: executable examples and basic proofs.
 - `Extraction`: OCaml extraction boundary.
 

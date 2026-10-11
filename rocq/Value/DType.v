@@ -38,8 +38,31 @@ Inductive round_mode :=
 (* Round toward negative infinity. *)
 | RoundDown.
 
+Inductive cast_kind :=
+| CastSigned
+| CastUnsigned
+| Bitcast.
+
+Inductive unsigned_mode :=
+| SI2SI
+| SI2UI
+| UI2SI
+| UI2UI.
+
+(* HFusion additionally supports these rounding modes beyond the four basic
+   directed IEEE modes above. *)
+Inductive extended_round_mode :=
+| RoundBasic (mode : round_mode)
+| RoundNearestAway
+| RoundOdd
+| TruncWithOverflow.
+
 Record cast_spec := {
   cast_source : dtype;
   cast_target : dtype;
-  cast_round_mode : round_mode
+  cast_kind_value : cast_kind;
+  cast_round_mode : extended_round_mode;
+  cast_unsigned_mode : unsigned_mode;
+  cast_enable_overflow : bool;
+  cast_enable_saturate : bool
 }.

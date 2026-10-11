@@ -22,6 +22,10 @@ Fixpoint shape_size (shape : list nat) : nat :=
 Definition tensor_well_formed {Value} (value : tensor Value) : Prop :=
   List.length (tensor_elements value) = shape_size (tensor_shape value).
 
+Definition tensor_well_formedb {Value} (value : tensor Value) : bool :=
+  Nat.eqb (List.length (tensor_elements value))
+    (shape_size (tensor_shape value)).
+
 Fixpoint prepend_each (index : nat) (coordinates : list (list nat))
     : list (list nat) :=
   match coordinates with
