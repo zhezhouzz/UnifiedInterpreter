@@ -2,7 +2,7 @@ From Stdlib Require Import List ZArith.
 From stdpp Require Import gmap.
 From UnifiedInterpreter.Base Require Import Result.
 From UnifiedInterpreter.Tensor Require Import Model.
-From UnifiedInterpreter.Value Require Import DType.
+From UnifiedInterpreter.Type Require Import DType.
 
 Import ListNotations.
 Open Scope Z_scope.
@@ -134,7 +134,7 @@ Fixpoint read_coordinates {Value} (storage : buffer Value)
    independent tensor value. Later writes to the buffer do not mutate the
    returned tensor. *)
 Definition read_view {Value} (memory : memory_state Value)
-    (descriptor_id : descriptor_id) : result memory_error (tensor Value) :=
+    (descriptor_id : descriptor_id) : result memory_error (packed_tensor Value) :=
   match lookup_descriptor descriptor_id memory with
   | None => Error UnknownDescriptor
   | Some descriptor =>
@@ -146,9 +146,12 @@ Definition read_view {Value} (memory : memory_state Value)
               (descriptor_offset descriptor)
               (descriptor_strides descriptor)
               (tensor_indices (descriptor_sizes descriptor)) ;;
-          Ok {| tensor_shape := descriptor_sizes descriptor;
-                tensor_element_type := buffer_element_type storage;
-                tensor_elements := values |}
+          let shape := descriptor_sizes descriptor in
+          let element_type := buffer_element_type storage in
+          match tensor_of_list shape element_type values with
+          | Some value => Ok (PackTensor shape element_type value)
+          | None => Error ViewAddressOutOfBounds
+          end
       end
   end.
 

@@ -1,6 +1,6 @@
 From Stdlib Require Import ZArith QArith.
 From UnifiedInterpreter.Base Require Import Result.
-From UnifiedInterpreter.Value Require Import DType.
+From UnifiedInterpreter.Type Require Import DType.
 
 Open Scope Z_scope.
 Set Implicit Arguments.

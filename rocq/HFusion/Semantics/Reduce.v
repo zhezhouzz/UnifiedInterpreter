@@ -15,11 +15,12 @@ Set Implicit Arguments.
 Definition reduction_combiner (Scalar : Type) :=
   list Scalar -> list Scalar -> result runtime_error (list Scalar).
 
-Fixpoint lookup_tensors {Scalar} (values : list (tensor Scalar))
+Fixpoint lookup_tensors {Scalar shape}
+    (values : list (shaped_tensor Scalar shape))
     (coordinate : list nat) : result runtime_error (list Scalar) :=
   match values with
   | [] => Ok []
-  | value :: rest =>
+  | ShapedTensor _ value :: rest =>
       element <-? tensor_lookup value coordinate ;;
       elements <-? lookup_tensors rest coordinate ;;
       Ok (element :: elements)
@@ -27,7 +28,8 @@ Fixpoint lookup_tensors {Scalar} (values : list (tensor Scalar))
 
 Fixpoint fold_reduction_coordinates {Scalar}
     (combiner : reduction_combiner Scalar) (shape dimensions : list nat)
-    (inputs : list (tensor Scalar)) (output_coordinate : list nat)
+    (inputs : list (shaped_tensor Scalar shape))
+    (output_coordinate : list nat)
     (reduction_coordinates : list (list nat)) (accumulators : list Scalar)
     : result runtime_error (list Scalar) :=
   match reduction_coordinates with
@@ -39,7 +41,7 @@ Fixpoint fold_reduction_coordinates {Scalar}
       input_values <-? lookup_tensors inputs coordinate ;;
       accumulators' <-? combiner input_values accumulators ;;
       if Nat.eqb (length accumulators') (length accumulators) then
-        fold_reduction_coordinates combiner shape dimensions inputs
+        fold_reduction_coordinates combiner dimensions inputs
           output_coordinate rest accumulators'
       else Error InvalidShape
   end.
@@ -56,7 +58,8 @@ Fixpoint append_columns {Scalar} (columns : list (list Scalar))
 
 Fixpoint reduce_output_coordinates {Scalar}
     (combiner : reduction_combiner Scalar) (shape dimensions : list nat)
-    (inputs inits : list (tensor Scalar))
+    (inputs : list (shaped_tensor Scalar shape))
+    (inits : list (shaped_tensor Scalar (result_shape shape dimensions)))
     (reduction_coordinates output_coordinates : list (list nat))
     (columns : list (list Scalar))
     : result runtime_error (list (list Scalar)) :=
@@ -65,23 +68,25 @@ Fixpoint reduce_output_coordinates {Scalar}
   | output_coordinate :: rest =>
       initial_values <-? lookup_tensors inits output_coordinate ;;
       reduced <-?
-        fold_reduction_coordinates combiner shape dimensions inputs
+        fold_reduction_coordinates combiner dimensions inputs
           output_coordinate reduction_coordinates initial_values ;;
       columns' <-? append_columns columns reduced ;;
-      reduce_output_coordinates combiner shape dimensions inputs inits
+      reduce_output_coordinates combiner dimensions inputs inits
         reduction_coordinates rest columns'
   end.
 
-Fixpoint build_reduction_results {Scalar} (shape : list nat)
-    (inits : list (tensor Scalar)) (columns : list (list Scalar))
-    : result runtime_error (list (tensor Scalar)) :=
+Fixpoint build_reduction_results {Scalar shape}
+    (inits : list (shaped_tensor Scalar shape))
+    (columns : list (list Scalar))
+    : result runtime_error (list (shaped_tensor Scalar shape)) :=
   match inits, columns with
   | [], [] => Ok []
-  | init :: inits_rest, column :: columns_rest =>
-      results <-? build_reduction_results shape inits_rest columns_rest ;;
-      Ok ({| tensor_shape := shape;
-             tensor_element_type := tensor_element_type init;
-             tensor_elements := column |} :: results)
+  | ShapedTensor element_type _ :: inits_rest, column :: columns_rest =>
+      results <-? build_reduction_results inits_rest columns_rest ;;
+      match tensor_of_list shape element_type column with
+      | Some output => Ok (ShapedTensor element_type output :: results)
+      | None => Error InvalidShape
+      end
   | _, _ => Error InvalidShape
   end.
 
@@ -100,20 +105,18 @@ Fixpoint build_reduction_results {Scalar} (shape : list nat)
    actual combiner region. *)
 Definition sem_linalg_reduce {Scalar}
     (combiner : reduction_combiner Scalar) (dimensions : list nat)
-    (inputs inits : list (tensor Scalar))
-    : result runtime_error (list (tensor Scalar)) :=
-  match inputs with
-  | [] => Error InvalidShape
-  | first_input :: _ =>
-      let input_shape := tensor_shape first_input in
-      let output_shape := result_shape input_shape dimensions in
-      if valid_dimensions (length input_shape) dimensions &&
-         same_shape input_shape inputs && same_shape output_shape inits then
-        columns <-?
-          reduce_output_coordinates combiner input_shape dimensions inputs inits
-            (tensor_indices (reduction_shape input_shape dimensions))
-            (tensor_indices output_shape)
-            (repeat [] (length inits)) ;;
-        build_reduction_results output_shape inits columns
-      else Error InvalidShape
-  end.
+    (input_shape : list nat)
+    (inputs : list (shaped_tensor Scalar input_shape))
+    (inits : list
+      (shaped_tensor Scalar (result_shape input_shape dimensions)))
+    : result runtime_error
+        (list (shaped_tensor Scalar (result_shape input_shape dimensions))) :=
+  let output_shape := result_shape input_shape dimensions in
+  if valid_dimensions (length input_shape) dimensions then
+    columns <-?
+      reduce_output_coordinates combiner dimensions inputs inits
+        (tensor_indices (reduction_shape input_shape dimensions))
+        (tensor_indices output_shape)
+        (repeat [] (length inits)) ;;
+    build_reduction_results inits columns
+  else Error InvalidShape.

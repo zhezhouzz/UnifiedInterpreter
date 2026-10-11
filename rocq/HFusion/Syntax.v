@@ -1,27 +1,10 @@
 From Stdlib Require Import List String ZArith QArith.
-From UnifiedInterpreter.Value Require Import DType.
+From UnifiedInterpreter.Type Require Import DType MLIR Shape.
 
 Import ListNotations.
 
 Definition value_id := nat.
 Definition symbol_name := string.
-
-Inductive dimension :=
-| StaticDim (size : nat)
-| DynamicDim.
-
-Record strided_layout := {
-  layout_offset : option Z;
-  layout_strides : list (option Z)
-}.
-
-Inductive mlir_type :=
-| IndexType
-| IntegerType (bits : nat) (sign : signedness)
-| FloatType (format : dtype)
-| TensorType (shape : list nat) (element_type : dtype)
-| MemRefType (shape : list dimension) (element_type : dtype)
-    (layout : option strided_layout).
 
 Record typed_value := {
   value_name : value_id;

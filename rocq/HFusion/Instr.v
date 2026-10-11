@@ -1,6 +1,6 @@
 From Stdlib Require Import List String.
 From UnifiedInterpreter.HFusion Require Import Syntax.
-From UnifiedInterpreter.Value Require Import DType.
+From UnifiedInterpreter.Type Require Import DType MLIR.
 
 Import ListNotations.
 

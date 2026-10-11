@@ -1,5 +1,5 @@
 From Stdlib Require Import List String ZArith.
-From UnifiedInterpreter.Value Require Import DType.
+From UnifiedInterpreter.Type Require Import DType.
 
 Import ListNotations.
 

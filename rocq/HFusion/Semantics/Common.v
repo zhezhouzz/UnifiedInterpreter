@@ -2,7 +2,8 @@ From Stdlib Require Import Bool List PeanoNat.
 From UnifiedInterpreter.Base Require Import Result.
 From UnifiedInterpreter.Tensor Require Import Model.
 From UnifiedInterpreter.Unified Require Import Errors.
-From UnifiedInterpreter.Value Require Import DType Scalar.
+From UnifiedInterpreter.Type Require Import DType.
+From UnifiedInterpreter.Value Require Import Scalar.
 
 Import ListNotations.
 Set Implicit Arguments.
@@ -56,24 +57,13 @@ Fixpoint flat_index (shape coordinate : list nat)
   end.
 
 (* Read one tensor element by its n-dimensional coordinate. *)
-Definition tensor_lookup {Scalar} (value : tensor Scalar)
+Definition tensor_lookup {Scalar shape element_type}
+    (value : tensor Scalar shape element_type)
     (coordinate : list nat) : result runtime_error Scalar :=
-  index <-? flat_index (tensor_shape value) coordinate ;;
+  index <-? flat_index shape coordinate ;;
   match nth_error (tensor_elements value) index with
   | Some element => Ok element
   | None => Error InvalidShape
-  end.
-
-(* Check that every tensor is well formed and has the requested shape. *)
-Fixpoint same_shape {Scalar} (shape : list nat) (values : list (tensor Scalar))
-    : bool :=
-  match values with
-  | [] => true
-  | value :: rest =>
-      if tensor_well_formedb value &&
-         if list_eq_dec Nat.eq_dec (tensor_shape value) shape then true else false
-      then same_shape shape rest
-      else false
   end.
 
 (* Check that [values] is strictly increasing and starts no lower than

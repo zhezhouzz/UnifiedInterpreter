@@ -2,7 +2,8 @@ From Stdlib Require Import List.
 From UnifiedInterpreter.Base Require Import Result StateM.
 From UnifiedInterpreter.Memory Require Import Model.
 From UnifiedInterpreter.Unified Require Import Errors State.
-From UnifiedInterpreter.Value Require Import DType Scalar.
+From UnifiedInterpreter.Type Require Import DType.
+From UnifiedInterpreter.Value Require Import Scalar.
 
 Import ListNotations.
 Set Implicit Arguments.

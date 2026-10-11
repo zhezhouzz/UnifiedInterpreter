@@ -4,7 +4,8 @@ From UnifiedInterpreter.HFusion Require Import Instr.
 From UnifiedInterpreter.HFusion.Semantics Require Import Common.
 From UnifiedInterpreter.Tensor Require Import Model.
 From UnifiedInterpreter.Unified Require Import Errors.
-From UnifiedInterpreter.Value Require Import DType Scalar.
+From UnifiedInterpreter.Type Require Import DType.
+From UnifiedInterpreter.Value Require Import Scalar.
 
 Import ListNotations.
 Set Implicit Arguments.
@@ -27,18 +28,19 @@ Definition scalar_operation_of_linalg_binary
   | LinalgPowF => ScalarPow
   end.
 
-Inductive elementwise_operand (Scalar : Type) :=
+Inductive elementwise_operand (Scalar : Type) (shape : list nat) :=
 | ElementwiseScalar (element_type : dtype) (value : Scalar)
-| ElementwiseTensor (value : tensor Scalar).
+| ElementwiseTensor (element_type : dtype)
+    (value : tensor Scalar shape element_type).
 
-Arguments ElementwiseScalar {Scalar} _ _.
-Arguments ElementwiseTensor {Scalar} _.
+Arguments ElementwiseScalar {Scalar shape} _ _.
+Arguments ElementwiseTensor {Scalar shape element_type} _.
 
-Definition elementwise_operand_type {Scalar}
-    (operand : elementwise_operand Scalar) : dtype :=
+Definition elementwise_operand_type {Scalar shape}
+    (operand : elementwise_operand Scalar shape) : dtype :=
   match operand with
   | ElementwiseScalar element_type _ => element_type
-  | ElementwiseTensor value => tensor_element_type value
+  | @ElementwiseTensor _ _ element_type _ => element_type
   end.
 
 Definition linalg_cast_spec (cast : linalg_type_fn)
@@ -61,7 +63,7 @@ Definition linalg_cast_spec (cast : linalg_type_fn)
 
 Definition expand_elementwise_operand {Scalar} `{ScalarOps Scalar}
     (cast : linalg_type_fn) (output_shape : list nat) (output_type : dtype)
-    (operand : elementwise_operand Scalar)
+    (operand : elementwise_operand Scalar output_shape)
     : result runtime_error (list Scalar) :=
   let specification :=
     linalg_cast_spec cast (elementwise_operand_type operand) output_type in
@@ -70,16 +72,11 @@ Definition expand_elementwise_operand {Scalar} `{ScalarOps Scalar}
   | ElementwiseScalar _ value =>
       cast_value <-? scalar_failure (scalar_cast specification value) ;;
       Ok (repeat cast_value (shape_size output_shape))
-  | ElementwiseTensor value =>
-      if tensor_well_formedb value &&
-         if list_eq_dec Nat.eq_dec (tensor_shape value) output_shape
-         then true else false
-      then cast_values (tensor_elements value)
-      else Error InvalidShape
+  | @ElementwiseTensor _ _ _ value => cast_values (tensor_elements value)
   end.
 
 (* Complete named-op semantics for linalg.elemwise_binary:
-   1. verify tensor operands match the destination shape;
+   1. receive operands whose destination shape already agrees by type;
    2. broadcast rank-0 scalar operands over that shape;
    3. cast both operands to the destination/accumulator dtype using TypeFn;
    4. apply any legal BinaryFn pointwise.
@@ -88,17 +85,18 @@ Definition expand_elementwise_operand {Scalar} `{ScalarOps Scalar}
    output element. *)
 Definition sem_linalg_elemwise_binary {Scalar} `{ScalarOps Scalar}
     (function : linalg_binary_fn) (cast : linalg_type_fn)
-    (left right : elementwise_operand Scalar)
     (output_shape : list nat) (output_type : dtype)
-    : result runtime_error (tensor Scalar) :=
+    (left right : elementwise_operand Scalar output_shape)
+    : result runtime_error (tensor Scalar output_shape output_type) :=
   left_values <-?
-    expand_elementwise_operand cast output_shape output_type left ;;
+    expand_elementwise_operand cast output_type left ;;
   right_values <-?
-    expand_elementwise_operand cast output_shape output_type right ;;
+    expand_elementwise_operand cast output_type right ;;
   values <-?
     map2_scalar_result
       (eval_scalar_operation (scalar_operation_of_linalg_binary function))
       left_values right_values ;;
-  Ok {| tensor_shape := output_shape;
-        tensor_element_type := output_type;
-        tensor_elements := values |}.
+  match tensor_of_list output_shape output_type values with
+  | Some output => Ok output
+  | None => Error InvalidShape
+  end.
