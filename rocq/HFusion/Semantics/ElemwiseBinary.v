@@ -12,20 +12,19 @@ Set Implicit Arguments.
 (* Upstream MLIR LinalgEnums.td defines all ten BinaryFn cases represented
    below. Huawei's framework_interface.md selects this standard Linalg
    operation for add/sub/mul/div/max/min and delegates its semantics to MLIR. *)
-Definition eval_linalg_binary {Scalar} `{ScalarOps Scalar}
-    (function : linalg_binary_fn) (left right : Scalar)
-    : result scalar_error Scalar :=
+Definition scalar_operation_of_linalg_binary
+    (function : linalg_binary_fn) : scalar_operation :=
   match function with
-  | LinalgAdd => eval_scalar_operation ScalarAdd left right
-  | LinalgSub => eval_scalar_operation ScalarSub left right
-  | LinalgMul => eval_scalar_operation ScalarMul left right
-  | LinalgDiv => eval_scalar_operation ScalarDiv left right
-  | LinalgDivUnsigned => eval_scalar_operation ScalarDivUnsigned left right
-  | LinalgMaxSigned => eval_scalar_operation ScalarMax left right
-  | LinalgMinSigned => eval_scalar_operation ScalarMin left right
-  | LinalgMaxUnsigned => eval_scalar_operation ScalarMaxUnsigned left right
-  | LinalgMinUnsigned => eval_scalar_operation ScalarMinUnsigned left right
-  | LinalgPowF => eval_scalar_operation ScalarPow left right
+  | LinalgAdd => ScalarAdd
+  | LinalgSub => ScalarSub
+  | LinalgMul => ScalarMul
+  | LinalgDiv => ScalarDiv
+  | LinalgDivUnsigned => ScalarDivUnsigned
+  | LinalgMaxSigned => ScalarMax
+  | LinalgMinSigned => ScalarMin
+  | LinalgMaxUnsigned => ScalarMaxUnsigned
+  | LinalgMinUnsigned => ScalarMinUnsigned
+  | LinalgPowF => ScalarPow
   end.
 
 Inductive elementwise_operand (Scalar : Type) :=
@@ -97,7 +96,9 @@ Definition sem_linalg_elemwise_binary {Scalar} `{ScalarOps Scalar}
   right_values <-?
     expand_elementwise_operand cast output_shape output_type right ;;
   values <-?
-    map2_scalar_result (eval_linalg_binary function) left_values right_values ;;
+    map2_scalar_result
+      (eval_scalar_operation (scalar_operation_of_linalg_binary function))
+      left_values right_values ;;
   Ok {| tensor_shape := output_shape;
         tensor_element_type := output_type;
         tensor_elements := values |}.

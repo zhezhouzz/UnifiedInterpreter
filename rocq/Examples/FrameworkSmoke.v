@@ -153,12 +153,18 @@ Example malformed_elemwise_tensor_is_rejected :
 Proof. reflexivity. Qed.
 
 Example complete_binary_fn_cases_are_executable :
-  eval_linalg_binary LinalgDivUnsigned 8%Z 2%Z = Ok 4%Z /\
-  eval_linalg_binary LinalgMaxSigned (-1)%Z 2%Z = Ok 2%Z /\
-  eval_linalg_binary LinalgMinSigned (-1)%Z 2%Z = Ok (-1)%Z /\
-  eval_linalg_binary LinalgMaxUnsigned 1%Z 2%Z = Ok 2%Z /\
-  eval_linalg_binary LinalgMinUnsigned 1%Z 2%Z = Ok 1%Z /\
-  eval_linalg_binary LinalgPowF 2%Z 3%Z = Ok 8%Z.
+  eval_scalar_operation
+    (scalar_operation_of_linalg_binary LinalgDivUnsigned) 8%Z 2%Z = Ok 4%Z /\
+  eval_scalar_operation
+    (scalar_operation_of_linalg_binary LinalgMaxSigned) (-1)%Z 2%Z = Ok 2%Z /\
+  eval_scalar_operation
+    (scalar_operation_of_linalg_binary LinalgMinSigned) (-1)%Z 2%Z = Ok (-1)%Z /\
+  eval_scalar_operation
+    (scalar_operation_of_linalg_binary LinalgMaxUnsigned) 1%Z 2%Z = Ok 2%Z /\
+  eval_scalar_operation
+    (scalar_operation_of_linalg_binary LinalgMinUnsigned) 1%Z 2%Z = Ok 1%Z /\
+  eval_scalar_operation
+    (scalar_operation_of_linalg_binary LinalgPowF) 2%Z 3%Z = Ok 8%Z.
 Proof. repeat split; reflexivity. Qed.
 
 Example hfusion_cast_executes :

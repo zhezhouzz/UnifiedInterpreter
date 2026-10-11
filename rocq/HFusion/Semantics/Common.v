@@ -7,6 +7,7 @@ From UnifiedInterpreter.Value Require Import DType Scalar.
 Import ListNotations.
 Set Implicit Arguments.
 
+(* Embed a numeric-backend failure into the instruction-level error type. *)
 Definition scalar_failure {A} (outcome : result scalar_error A)
     : result runtime_error A :=
   match outcome with
@@ -14,6 +15,8 @@ Definition scalar_failure {A} (outcome : result scalar_error A)
   | Error _ => Error NumericFailure
   end.
 
+(* Apply a fallible unary scalar operation to every list element, stopping at
+   the first numeric failure. *)
 Fixpoint map_scalar_result {Scalar}
     (function : Scalar -> result scalar_error Scalar) (values : list Scalar)
     : result runtime_error (list Scalar) :=
@@ -25,6 +28,8 @@ Fixpoint map_scalar_result {Scalar}
       Ok (mapped :: mapped_rest)
   end.
 
+(* Zip two equally sized scalar lists through a fallible binary operation.
+   Unequal lengths denote an invalid tensor shape. *)
 Fixpoint map2_scalar_result {Scalar}
     (function : Scalar -> Scalar -> result scalar_error Scalar)
     (left right : list Scalar) : result runtime_error (list Scalar) :=
@@ -37,6 +42,7 @@ Fixpoint map2_scalar_result {Scalar}
   | _, _ => Error InvalidShape
   end.
 
+(* Convert an in-bounds row-major tensor coordinate to a flat list index. *)
 Fixpoint flat_index (shape coordinate : list nat)
     : result runtime_error nat :=
   match shape, coordinate with
@@ -49,6 +55,7 @@ Fixpoint flat_index (shape coordinate : list nat)
   | _, _ => Error InvalidShape
   end.
 
+(* Read one tensor element by its n-dimensional coordinate. *)
 Definition tensor_lookup {Scalar} (value : tensor Scalar)
     (coordinate : list nat) : result runtime_error Scalar :=
   index <-? flat_index (tensor_shape value) coordinate ;;
@@ -57,6 +64,7 @@ Definition tensor_lookup {Scalar} (value : tensor Scalar)
   | None => Error InvalidShape
   end.
 
+(* Check that every tensor is well formed and has the requested shape. *)
 Fixpoint same_shape {Scalar} (shape : list nat) (values : list (tensor Scalar))
     : bool :=
   match values with
@@ -68,6 +76,8 @@ Fixpoint same_shape {Scalar} (shape : list nat) (values : list (tensor Scalar))
       else false
   end.
 
+(* Check that [values] is strictly increasing and starts no lower than
+   [lower]. *)
 Fixpoint strictly_increasing_from (lower : nat) (values : list nat) : bool :=
   match values with
   | [] => true
@@ -75,13 +85,17 @@ Fixpoint strictly_increasing_from (lower : nat) (values : list nat) : bool :=
       (lower <=? value) && strictly_increasing_from (S value) rest
   end.
 
+(* Validate a canonical reduction-dimension list: sorted, duplicate-free, and
+   within the input rank. *)
 Definition valid_dimensions (rank : nat) (dimensions : list nat) : bool :=
   strictly_increasing_from 0 dimensions &&
   forallb (fun dimension => dimension <? rank) dimensions.
 
+(* Decide whether a tensor axis is reduced. *)
 Definition is_reduction_dimension (index : nat) (dimensions : list nat) : bool :=
   existsb (Nat.eqb index) dimensions.
 
+(* Select either reduction axes or non-reduction axes from [shape]. *)
 Fixpoint projected_shape_from (index : nat) (shape dimensions : list nat)
     (keep_reduction : bool) : list nat :=
   match shape with
@@ -92,12 +106,16 @@ Fixpoint projected_shape_from (index : nat) (shape dimensions : list nat)
       else projected_shape_from (S index) rest dimensions keep_reduction
   end.
 
+(* Shape of one reduction result: the non-reduced dimensions. *)
 Definition result_shape (shape dimensions : list nat) : list nat :=
   projected_shape_from 0 shape dimensions false.
 
+(* Shape of the subspace traversed while computing one reduction result. *)
 Definition reduction_shape (shape dimensions : list nat) : list nat :=
   projected_shape_from 0 shape dimensions true.
 
+(* Reconstruct an input coordinate by interleaving an output coordinate with
+   a coordinate over the reduced dimensions. *)
 Fixpoint merge_coordinates_from (index : nat) (shape dimensions : list nat)
     (output reduction : list nat) : result runtime_error (list nat) :=
   match shape with
