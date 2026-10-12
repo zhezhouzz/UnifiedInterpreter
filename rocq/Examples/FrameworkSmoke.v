@@ -57,7 +57,8 @@ Example smoke_allocation_is_readable :
       lookup_buffer id state =
       Some {| buffer_address_space := ASDefault;
               buffer_element_type := IntegerType 64 Signed;
-              buffer_cells := [10%Z; 20%Z; 30%Z] |}
+              buffer_cells :=
+                [Initialized 10%Z; Initialized 20%Z; Initialized 30%Z] |}
   | Error _ => False
   end.
 Proof. reflexivity. Qed.

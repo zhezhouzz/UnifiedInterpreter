@@ -4,6 +4,10 @@ From UnifiedInterpreter.HFusion.Semantics Require Import
   ElemwiseBinary Reduce Cast.
 From UnifiedInterpreter.Examples Require Import TestSupport.
 From UnifiedInterpreter.Memory Require Import Model.
+From UnifiedInterpreter.Memory Require Import Effects Handler.
+From UnifiedInterpreter.HFusion Require Import Interpreter Runtime.
+From UnifiedInterpreter.HFusion.Semantics Require Import Memory.
+From UnifiedInterpreter.Examples Require Import MemoryEffects.
 From UnifiedInterpreter.Value Require Import Scalar.
 
 Extraction Language OCaml.
@@ -18,4 +22,8 @@ Extraction "unified_semantics.ml"
   exec_scalar_operation
   sem_linalg_elemwise_binary
   sem_linalg_reduce
-  sem_hfusion_cast.
+  sem_hfusion_cast
+  handle_memory
+  eval_memory_instruction
+  artifact_memory_result
+  materialize_program.

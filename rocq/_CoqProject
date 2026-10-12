@@ -1,6 +1,7 @@
 -Q . UnifiedInterpreter
 
 Base/Result.v
+Base/Free.v
 Base/Lens.v
 Base/StateM.v
 Type/Shape.v
@@ -10,16 +11,22 @@ HFusion/Attrs.v
 Value/Scalar.v
 Tensor/Model.v
 Memory/Model.v
+Memory/Effects.v
 Unified/Events.v
 Unified/Errors.v
+Memory/Handler.v
 Unified/State.v
 HFusion/Syntax.v
 HFusion/Instr.v
 HFusion/Program.v
+HFusion/Runtime.v
+HFusion/Interpreter.v
 HFusion/Semantics/Common.v
 HFusion/Semantics/ElemwiseBinary.v
 HFusion/Semantics/Reduce.v
 HFusion/Semantics/Cast.v
+HFusion/Semantics/Memory.v
 Examples/TestSupport.v
 Examples/FrameworkSmoke.v
+Examples/MemoryEffects.v
 Extraction/Extract.v

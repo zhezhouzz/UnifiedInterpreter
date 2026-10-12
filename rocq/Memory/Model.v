@@ -11,12 +11,19 @@ Set Implicit Arguments.
 Definition allocation_id := nat.
 Definition descriptor_id := nat.
 
+Inductive memory_cell (Value : Type) :=
+| Uninitialized
+| Initialized (value : Value).
+
+Arguments Uninitialized {Value}.
+Arguments Initialized {Value} _.
+
 (* A buffer is mutable linear storage with allocation identity. Unlike a
    tensor, it has no intrinsic n-dimensional shape. *)
 Record buffer (Value : Type) := {
   buffer_address_space : address_space;
   buffer_element_type : mlir_type;
-  buffer_cells : list Value
+  buffer_cells : list (memory_cell Value)
 }.
 
 (* A descriptor gives an n-dimensional interpretation of a buffer. Creating a
@@ -31,6 +38,8 @@ Record memref_descriptor := {
 Record memory_state (Value : Type) := {
   memory_buffers : gmap nat (buffer Value);
   memory_descriptors : gmap nat memref_descriptor;
+  (* Descriptor ids claimed by [bufferization.to_tensor restrict]. *)
+  memory_restricted_descriptors : gset nat;
   memory_next_allocation : allocation_id;
   memory_next_descriptor : descriptor_id
 }.
@@ -39,11 +48,17 @@ Inductive memory_error :=
 | UnknownAllocation
 | UnknownDescriptor
 | InvalidViewRank
-| ViewAddressOutOfBounds.
+| ViewAddressOutOfBounds
+| ReadUninitializedCell
+| IncompatibleMemRef
+| OverlappingCopy
+| RestrictAliasConflict
+| ReadOnlyTensorView.
 
 Definition empty_memory {Value} : memory_state Value :=
   {| memory_buffers := ∅;
      memory_descriptors := ∅;
+     memory_restricted_descriptors := ∅;
      memory_next_allocation := O;
      memory_next_descriptor := O |}.
 
@@ -63,9 +78,10 @@ Definition allocate_buffer {Value} (space : address_space) (element_type : mlir_
    {| memory_buffers :=
         <[id := {| buffer_address_space := space;
                    buffer_element_type := element_type;
-                   buffer_cells := contents |}]>
+                   buffer_cells := map Initialized contents |}]>
           (memory_buffers memory);
       memory_descriptors := memory_descriptors memory;
+      memory_restricted_descriptors := memory_restricted_descriptors memory;
       memory_next_allocation := S id;
       memory_next_descriptor := memory_next_descriptor memory |}).
 
@@ -76,6 +92,7 @@ Definition insert_descriptor {Value} (descriptor : memref_descriptor)
    {| memory_buffers := memory_buffers memory;
       memory_descriptors :=
         <[id := descriptor]> (memory_descriptors memory);
+      memory_restricted_descriptors := memory_restricted_descriptors memory;
       memory_next_allocation := memory_next_allocation memory;
       memory_next_descriptor := S id |}).
 
@@ -94,15 +111,92 @@ Definition read_buffer_cell {Value} (storage : buffer Value) (address : Z)
   | Zneg _ => Error ViewAddressOutOfBounds
   | Z0 =>
       match List.nth_error (buffer_cells storage) 0 with
-      | Some value => Ok value
+      | Some (Initialized value) => Ok value
+      | Some Uninitialized => Error ReadUninitializedCell
       | None => Error ViewAddressOutOfBounds
       end
   | Zpos positive =>
       match List.nth_error (buffer_cells storage) (Pos.to_nat positive) with
-      | Some value => Ok value
+      | Some (Initialized value) => Ok value
+      | Some Uninitialized => Error ReadUninitializedCell
+      | None => Error ViewAddressOutOfBounds
+      end
+end.
+
+Fixpoint replace_nth {A} (index : nat) (value : A) (values : list A)
+    : option (list A) :=
+  match index, values with
+  | O, _ :: rest => Some (value :: rest)
+  | S index', head :: rest =>
+      match replace_nth index' value rest with
+      | Some rest' => Some (head :: rest')
+      | None => None
+      end
+  | _, _ => None
+  end.
+
+Definition write_buffer_cell {Value} (storage : buffer Value) (address : Z)
+    (value : Value) : result memory_error (buffer Value) :=
+  match address with
+  | Zneg _ => Error ViewAddressOutOfBounds
+  | Z0 =>
+      match replace_nth 0 (Initialized value) (buffer_cells storage) with
+      | Some cells =>
+          Ok {| buffer_address_space := buffer_address_space storage;
+                buffer_element_type := buffer_element_type storage;
+                buffer_cells := cells |}
+      | None => Error ViewAddressOutOfBounds
+      end
+  | Zpos positive =>
+      match replace_nth (Pos.to_nat positive) (Initialized value)
+          (buffer_cells storage) with
+      | Some cells =>
+          Ok {| buffer_address_space := buffer_address_space storage;
+                buffer_element_type := buffer_element_type storage;
+                buffer_cells := cells |}
       | None => Error ViewAddressOutOfBounds
       end
   end.
+
+Fixpoint row_major_strides (dimensions : list nat) : list Z :=
+  match dimensions with
+  | [] => []
+  | _ :: rest => Z.of_nat (num_elements rest) :: row_major_strides rest
+  end.
+
+Definition allocate_memref {Value} (space : address_space)
+    (element_type : mlir_type) (dimensions : list nat)
+    (memory : memory_state Value) : descriptor_id * memory_state Value :=
+  let allocation := memory_next_allocation memory in
+  let descriptor := memory_next_descriptor memory in
+  let storage :=
+    {| buffer_address_space := space;
+       buffer_element_type := element_type;
+       buffer_cells := repeat Uninitialized (num_elements dimensions) |} in
+  let view :=
+    {| descriptor_allocation := allocation;
+       descriptor_offset := 0;
+       descriptor_sizes := dimensions;
+       descriptor_strides := row_major_strides dimensions |} in
+  (descriptor,
+   {| memory_buffers := <[allocation := storage]> (memory_buffers memory);
+      memory_descriptors := <[descriptor := view]> (memory_descriptors memory);
+      memory_restricted_descriptors := memory_restricted_descriptors memory;
+      memory_next_allocation := S allocation;
+      memory_next_descriptor := S descriptor |}).
+
+Definition descriptor_addresses (descriptor : memref_descriptor) : list Z :=
+  map (fun coordinate =>
+    match view_cell_offset (descriptor_offset descriptor)
+        (descriptor_strides descriptor) coordinate with
+    | Ok address => address
+    | Error _ => descriptor_offset descriptor
+    end) (tensor_indices (descriptor_sizes descriptor)).
+
+Definition descriptors_overlap (left right : memref_descriptor) : bool :=
+  Nat.eqb (descriptor_allocation left) (descriptor_allocation right) &&
+  existsb (fun address => existsb (Z.eqb address)
+    (descriptor_addresses right)) (descriptor_addresses left).
 
 Fixpoint read_coordinates {Value} (storage : buffer Value)
     (offset : Z) (strides : list Z) (coordinates : list (list nat))
@@ -149,7 +243,7 @@ Lemma allocate_buffer_lookup_new {Value} (space : address_space)
   lookup_buffer id memory' =
     Some {| buffer_address_space := space;
             buffer_element_type := element_type;
-            buffer_cells := contents |}.
+            buffer_cells := map Initialized contents |}.
 Proof.
   unfold allocate_buffer. intro allocated.
   inversion allocated; subst. unfold lookup_buffer. cbn.

@@ -75,3 +75,23 @@ Inductive mlir_type :=
 | FunctionType (inputs results : list mlir_type)
 | TupleType (elements : list mlir_type)
 | NoneType.
+
+Definition signedness_eqb (left right : signedness_semantics) : bool :=
+  match left, right with
+  | Signless, Signless | Signed, Signed | Unsigned, Unsigned => true
+  | _, _ => false
+  end.
+
+(* Executable equality for legal scalar element types. Containers are rejected:
+   callers comparing shaped types must compare their shape separately. *)
+Fixpoint mlir_element_type_eqb (left right : mlir_type) : bool :=
+  match left, right with
+  | IndexType, IndexType => true
+  | IntegerType left_width left_sign, IntegerType right_width right_sign =>
+      Nat.eqb left_width right_width && signedness_eqb left_sign right_sign
+  | Float16Type, Float16Type | BFloat16Type, BFloat16Type
+  | Float32Type, Float32Type | Float64Type, Float64Type => true
+  | ComplexType left_element, ComplexType right_element =>
+      mlir_element_type_eqb left_element right_element
+  | _, _ => false
+  end.
