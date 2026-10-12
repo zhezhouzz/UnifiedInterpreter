@@ -15,6 +15,13 @@ design discussion. `papers/SHA256SUMS` records the exact local copies.
 | `papers/simt-correctness-2012.pdf` | SIMT correctness | Earlier formal account of SIMT execution. |
 | `papers/ptx-memory-model-asplos2019.pdf` | PTX memory consistency model | Litmus tests, Alloy exploration, and mechanized reasoning for GPU memory ordering. |
 | `papers/gpu-ila-iccad2018.pdf` | GPU ILA | Instruction-level abstraction for GPU hardware semantics and validation. |
+| `papers/vellvm-popl2012.pdf` | Zhao et al., *Formalizing the LLVM Intermediate Representation for Verified Program Transformations* | The original Vellvm design: mechanized LLVM syntax, static and dynamic semantics, executable validation, and verified SSA transformations. |
 
 The archive was assembled on 2026-10-09. It is a research snapshot, not a
 claim that these are the latest available revisions.
+
+For Vellvm, the archived paper describes the original 2012 development.  The
+modern project has since moved to interaction/choice trees, layered event
+handlers, and a refinement proof from its executable interpreter to an
+abstract nondeterministic specification.  See `docs/vellvm-lessons.md` for the
+version distinction and its relevance to this project.
