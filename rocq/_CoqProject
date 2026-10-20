@@ -29,4 +29,13 @@ HFusion/Semantics/Memory.v
 Examples/TestSupport.v
 Examples/FrameworkSmoke.v
 Examples/MemoryEffects.v
+HIVM/Instr.v
+HIVM/Numeric.v
+HIVM/Value.v
+HIVM/Semantics.v
+HIVM/Arith.v
+HIVM/Execution.v
+Examples/HIVMCompute.v
+Examples/HIVMMemory.v
+Examples/HIVMExceptional.v
 Extraction/Extract.v

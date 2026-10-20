@@ -1,5 +1,12 @@
 # Rocq Executable Semantics
 
+The attention **HIVM compute-stage primitive** milestone is documented in
+[`../docs/hivm-compute-semantics.md`](../docs/hivm-compute-semantics.md), including
+its exact operation inventory, numerical backend contract, lens integration,
+and executable extraction check. It adds `HIVM/` and `Examples/HIVMCompute.v`
+and `Examples/HIVMMemory.v` while retaining the HFusion API described below.
+It does not yet execute the complete attention MLIR function.
+
 This directory contains the executable-semantics foundation for the HFusion
 interpreter. Its definitions are organized around three constraints:
 
