@@ -1,6 +1,9 @@
 _build/
+.attention-build/
 *.install
 .venv-tools/
+.venv-attention/
+__pycache__/
 reports/
 *.vo
 *.vos

@@ -1,0 +1,42 @@
+(test
+ (name parser_test)
+ (modules parser_test)
+ (libraries attention_runtime yojson)
+ (deps
+  fixtures/attention_hivm_vadd.mlir
+  ../scripts/attention_frontend.py
+  ../scripts/attention_dialects.py
+  ../requirements-attention.txt
+  ../artifacts/flash_attention/ir/hfusion_level.mlir
+  ../artifacts/flash_attention/ir/attention_hivm_compute.mlir))
+
+(test
+ (name execution_test)
+ (modules execution_test)
+ (libraries attention_runtime yojson)
+ (deps
+  fixtures/attention_hivm_vadd.mlir
+  ../scripts/attention_frontend.py
+  ../scripts/attention_dialects.py
+  ../requirements-attention.txt
+  ../artifacts/flash_attention/ir/hfusion_level.mlir
+  ../artifacts/flash_attention/ir/attention_hivm_compute.mlir))
+
+(test
+ (name handler_test)
+ (modules handler_test)
+ (libraries attention_runtime extracted_semantics))
+
+(test
+ (name mixed_test)
+ (modules mixed_test)
+ (libraries attention_runtime extracted_semantics yojson)
+ (deps fixtures/mixed.mlir ../scripts/attention_frontend.py
+  ../scripts/attention_dialects.py ../requirements-attention.txt))
+
+(test
+ (name mixed_execution_test)
+ (modules mixed_execution_test)
+ (libraries attention_runtime yojson)
+ (deps ../examples/attention_mixed.mlir ../scripts/attention_frontend.py
+  ../scripts/attention_dialects.py ../requirements-attention.txt))

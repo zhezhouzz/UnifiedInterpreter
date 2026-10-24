@@ -9,4 +9,8 @@
  (synopsis "A small OCaml 5 effect-based multi-level IR interpreter demo")
  (depends
   (ocaml (>= 5.0))
-  dune))
+  dune
+  rocq-prover
+  rocq-stdpp
+  zarith
+  yojson))

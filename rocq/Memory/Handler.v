@@ -195,10 +195,10 @@ Definition handle_validate {Value} (descriptor_id : descriptor_id)
       end
   end.
 
-Definition handle_effect {Value X} (effect : memory_effect Value X)
+Definition handle_effect {Value X} (request : memory_effect Value X)
     (memory : memory_state Value)
     : result runtime_error (X * memory_state Value * list event) :=
-  match effect with
+  match request with
   | Allocate space element_type dimensions =>
       let '(descriptor, memory', trace) :=
         handle_allocate space element_type dimensions memory in
@@ -224,8 +224,8 @@ Fixpoint handle_memory {Value A} (fuel : nat)
   | S fuel' =>
       match program with
       | Return value => Ok (value, memory, [])
-      | Trigger effect continue =>
-          match handle_effect effect memory with
+      | Trigger request continue =>
+          match handle_effect request memory with
           | Error error => Error error
           | Ok (answer, memory', trace) =>
               match handle_memory fuel' (continue answer) memory' with
@@ -236,3 +236,41 @@ Fixpoint handle_memory {Value A} (fuel : nat)
           end
       end
   end.
+
+(* Accumulate events backwards to release previous memory states immediately.
+   This has the same fuel convention and observable trace as handle_memory. *)
+Fixpoint handle_memory_tail {Value A} (fuel : nat)
+    (program : memory_computation Value A) (memory : memory_state Value)
+    (reversed_trace : list event)
+    : result runtime_error (A * memory_state Value * list event) :=
+  match fuel with
+  | O => Error OutOfFuel
+  | S fuel' =>
+      match program with
+      | Return value => Ok (value, memory, rev reversed_trace)
+      | Trigger request continue =>
+          match handle_effect request memory with
+          | Error error => Error error
+          | Ok (answer, memory', trace) =>
+              handle_memory_tail fuel' (continue answer) memory'
+                (rev_append trace reversed_trace)
+          end
+      end
+  end.
+
+Lemma handle_memory_tail_correct {Value A} fuel
+    (program : memory_computation Value A) memory acc :
+  handle_memory_tail fuel program memory acc =
+    match handle_memory fuel program memory with
+    | Error e => Error e
+    | Ok (value, memory', trace) => Ok (value, memory', rev acc ++ trace)
+    end.
+Proof.
+  revert program memory acc. induction fuel as [|fuel IH]; intros; cbn; auto.
+  destruct program as [value|X request continue]; cbn.
+  - now rewrite app_nil_r.
+  - destruct (handle_effect request memory) as [[[answer mem] trace]|err]; cbn; auto.
+    rewrite IH. destruct (handle_memory fuel (continue answer) mem)
+      as [[[value mem'] events]|err]; cbn; auto.
+    rewrite rev_append_rev, rev_app_distr, rev_involutive, app_assoc. reflexivity.
+Qed.

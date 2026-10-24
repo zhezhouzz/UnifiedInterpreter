@@ -4,6 +4,10 @@ synopsis: "A small OCaml 5 effect-based multi-level IR interpreter demo"
 depends: [
   "ocaml" {>= "5.0"}
   "dune" {>= "3.11"}
+  "rocq-prover"
+  "rocq-stdpp"
+  "zarith"
+  "yojson"
   "odoc" {with-doc}
 ]
 build: [

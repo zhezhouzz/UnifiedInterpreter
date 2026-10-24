@@ -58,7 +58,7 @@ Definition local_memory {S A} (fuel : nat)
     (program : memory_computation S (result runtime_error A))
     : M runtime_error (memory_state S) (A * list event) :=
   fun memory =>
-    match handle_memory fuel program memory with
+    match handle_memory_tail fuel program memory nil with
     | Error e => Error e
     | Ok (Error e, _, _) => Error e
     | Ok (Ok v, memory', trace) => Ok ((v, trace), memory')

@@ -3,6 +3,35 @@
 UnifiedInterpreter is an OCaml 5 prototype for a unified, effect-based
 interpreter design inspired by the Huawei AscendNPU IR interpreter question.
 
+The repository also includes a CPU interpreter for the archived HFusion and
+HIVM attention MLIR. It parses the input, dispatches OCaml effects to Rocq-extracted
+semantics, and compares both stages with an independent float64 reference.
+See the [attention interpreter design](docs/attention-interpreter-design.md) for
+the semantic layers, handlers, execution model, code reading guide and limits.
+
+```sh
+ATTENTION_PYTHON=python3.12 sh scripts/bootstrap_attention.sh
+export TMPDIR="$PWD/_build/task-tmp"
+opam exec --switch=unified-interpreter -- dune build @all
+opam exec --switch=unified-interpreter -- dune exec attention -- \
+  --stage both --output reports/attention.json --trace reports/attention.jsonl
+```
+
+Execute HFusion and HIVM operations together in one function:
+
+```sh
+opam exec --switch=unified-interpreter -- dune exec attention -- \
+  --stage mixed --ir examples/attention_mixed.mlir \
+  --output reports/attention-mixed.json --trace reports/attention-mixed.jsonl
+```
+
+Each parsed operation carries an IR stage. The runner selects its computation
+handler while sharing SSA values and memory across stages. The mixed example is
+manually derived from the archived HFusion input. Trace field `ir_stage` records
+each operation's stage; `stage` records the CLI execution mode.
+
+The H1–H5 demonstration described below remains a separate shallow embedding.
+
 The key design point is that there is **one shallow-embedded program language**.
 Lowering levels are not represented by separate ASTs. Instead, the same program
 is run under a nested stack of non-overlapping algebraic-effect handlers:

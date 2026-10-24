@@ -10,6 +10,7 @@ Type/MLIR.v
 HFusion/Attrs.v
 Value/Scalar.v
 Tensor/Model.v
+Tensor/Matrix.v
 Memory/Model.v
 Memory/Effects.v
 Unified/Events.v
@@ -35,7 +36,9 @@ HIVM/Value.v
 HIVM/Semantics.v
 HIVM/Arith.v
 HIVM/Execution.v
+HFusion/Semantics/Structured.v
 Examples/HIVMCompute.v
 Examples/HIVMMemory.v
 Examples/HIVMExceptional.v
+Examples/AttentionStructured.v
 Extraction/Extract.v

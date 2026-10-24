@@ -1,0 +1,13 @@
+(rule
+ (targets unified_semantics.ml unified_semantics.mli)
+ (deps
+  ../scripts/build_extraction.sh
+  ../rocq/_CoqProject
+  (glob_files_rec ../rocq/*.v))
+ (action
+  (run sh ../scripts/build_extraction.sh ../rocq)))
+
+(library
+ (name extracted_semantics)
+ (modules unified_semantics)
+ (flags (:standard -w -a)))

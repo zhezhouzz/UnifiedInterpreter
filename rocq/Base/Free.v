@@ -3,24 +3,24 @@ Set Implicit Arguments.
 (* A finite free computation is sufficient for the terminating HFusion
    fragment.  The event signature determines which effects a denotation may
    request; only a handler can assign stateful meaning to those requests. *)
-Inductive computation (Effect : Type -> Type) (A : Type) : Type :=
+Inductive computation (E : Type -> Type) (A : Type) : Type :=
 | Return (value : A)
-| Trigger {X : Type} (effect : Effect X)
-    (continue : X -> computation Effect A).
+| Trigger {X : Type} (request : E X)
+    (continue : X -> computation E A).
 
-Arguments Return {Effect A} _.
-Arguments Trigger {Effect A X} _ _.
+Arguments Return {E A} _.
+Arguments Trigger {E A X} _ _.
 
-Fixpoint bind {Effect A B} (program : computation Effect A)
-    (next : A -> computation Effect B) : computation Effect B :=
+Fixpoint bind {E A B} (program : computation E A)
+    (next : A -> computation E B) : computation E B :=
   match program with
   | Return value => next value
-  | Trigger effect continue =>
-      Trigger effect (fun result => bind (continue result) next)
+  | Trigger request continue =>
+      Trigger request (fun result => bind (continue result) next)
   end.
 
-Definition perform {Effect X} (effect : Effect X) : computation Effect X :=
-  Trigger effect Return.
+Definition perform {E X} (request : E X) : computation E X :=
+  Trigger request Return.
 
 Notation "x <-! program ;; next" :=
   (bind program (fun x => next))

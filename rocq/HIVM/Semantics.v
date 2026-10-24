@@ -2,6 +2,7 @@ From Stdlib Require Import List Bool ZArith.
 From UnifiedInterpreter.Base Require Import Result.
 From UnifiedInterpreter.Type Require Import MLIR.
 From UnifiedInterpreter.Tensor Require Import Model.
+From UnifiedInterpreter.Tensor Require Import Matrix.
 From UnifiedInterpreter.Unified Require Import Errors.
 From UnifiedInterpreter.HFusion.Semantics Require Import Common.
 From UnifiedInterpreter.HIVM Require Import Instr Numeric Value.
@@ -161,8 +162,12 @@ Definition sem_mmad {S} `{Numeric S} (spec : mm_spec)
           init <-? (if mm_init spec
                     then Ok (repeat (number_zero Float32Type) (m*n))
                     else elements dst) ;;
-          result <-? matmul_cells (tensor_indices [m;n]) k n
-            (mm_b_transpose spec) av bv init ;;
+          let columns := if mm_b_transpose spec then matrix_rows n k bv
+            else matrix_columns n (matrix_rows k n bv) in
+          result <-? matrix_product
+            (fun x y acc => scalar_failure
+              (number_mac Float16Type Float32Type x y acc))
+            (matrix_rows m k av) columns (matrix_rows m n init) ;;
           make_value [m;n] Float32Type result
         else Error InvalidShape
     | _,_,_ => Error UnsupportedInstruction

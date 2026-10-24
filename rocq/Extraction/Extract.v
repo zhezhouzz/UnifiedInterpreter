@@ -10,6 +10,7 @@ From UnifiedInterpreter.HFusion.Semantics Require Import Memory.
 From UnifiedInterpreter.Examples Require Import MemoryEffects.
 From UnifiedInterpreter.Value Require Import Scalar.
 From UnifiedInterpreter.HIVM Require Import Semantics Arith Execution.
+From UnifiedInterpreter.HFusion.Semantics Require Import Structured.
 From UnifiedInterpreter.Examples Require Import HIVMCompute HIVMMemory HIVMExceptional.
 
 Extraction Language OCaml.
@@ -31,4 +32,6 @@ Extraction "unified_semantics.ml"
   materialize_program
   sem_empty sem_binary sem_unary sem_broadcast sem_reduce sem_cast sem_mmad sem_reshape
   sem_integer_constant sem_integer_binary sem_integer_cast sem_float_constant
-  evaluate run_memory extracted_checks memory_check exceptional_checks.
+  evaluate run_memory extracted_checks memory_check exceptional_checks
+  sem_linalg_fill sem_linalg_transpose sem_linalg_broadcast
+  sem_linalg_unary sem_linalg_matmul.
