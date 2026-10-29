@@ -1,0 +1,61 @@
+name: Build binaries and Docker image
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      TMPDIR: ${{ github.workspace }}/_build/task-tmp
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Prepare build directories
+        run: mkdir -p "$TMPDIR" _build/release reports
+
+      - name: Build and test native binaries
+        run: docker build --target builder --tag unified-interpreter-builder:ci .
+
+      - name: Export binary distribution
+        run: |
+          container=$(docker create unified-interpreter-builder:ci)
+          trap 'docker rm "$container"' EXIT
+          docker cp "$container:/build/_build/release/." _build/release/
+          cd _build/release
+          sha256sum --check unified-interpreter-linux-x86_64.tar.gz.sha256
+
+      - name: Verify relocated binary distribution
+        env:
+          ATTENTION_PYTHON: python3
+        run: |
+          mkdir -p _build/distribution-check
+          tar -xzf _build/release/unified-interpreter-linux-x86_64.tar.gz -C _build/distribution-check
+          cd _build/distribution-check/unified-interpreter
+          sh scripts/bootstrap_attention.sh
+          bin/unified-interpreter
+          bin/kernel-example --kernel vector-add --output reports/vector-add.json
+          bin/kernel-example --kernel row-sum --output reports/row-sum.json
+          bin/attention --stage both --output reports/attention.json --trace reports/attention.jsonl
+
+      - name: Build runtime image
+        run: docker build --tag unified-interpreter:ci .
+
+      - name: Verify container execution
+        run: sh scripts/check_docker.sh unified-interpreter:ci
+
+      - name: Upload binary distribution
+        uses: actions/upload-artifact@v7
+        with:
+          name: unified-interpreter-linux-x86_64
+          path: |
+            _build/release/*.tar.gz
+            _build/release/*.sha256
+          if-no-files-found: error
+          compression-level: 0
