@@ -96,19 +96,10 @@ let structured_shape op inputs dst =
     | _ -> false in
   if not valid then bad ()
 
-let program ?stage p =
+let kernel ?stage p =
   (match stage with
   | None | Some ("hfusion" | "hivm" | "mixed") -> ()
   | Some _ -> invalid_arg "invalid execution stage");
-  let expected = List.init 16 (fun i ->
-    let ty = if i = 0 then ScalarType (scalar_type "i64")
-      else if i = 1 || i = 2 then ShapedType ("memref",[-1],scalar_type "i8")
-      else if List.mem i [3;4;5;7] then ShapedType ("memref",[-1],E.Float16Type)
-      else if List.mem i [6;8] then ShapedType ("memref",[-1],E.Float32Type)
-      else if i = 9 then ScalarType E.Float32Type
-      else ScalarType (scalar_type "i32") in
-    "%arg" ^ string_of_int i,ty) in
-  if p.arguments <> expected then invalid_arg "unsupported attention entry signature";
   let rec block env local ops =
     List.fold_left (fun (env,local) op ->
       if not (List.mem op.opcode supported) then fail op ("unsupported operation " ^ op.opcode);
@@ -177,3 +168,15 @@ let program ?stage p =
     ) (env,local) ops
   in
   ignore (block p.arguments (List.map fst p.arguments) p.body)
+
+let program ?stage p =
+  let expected = List.init 16 (fun i ->
+    let ty = if i = 0 then ScalarType (scalar_type "i64")
+      else if i = 1 || i = 2 then ShapedType ("memref",[-1],scalar_type "i8")
+      else if List.mem i [3;4;5;7] then ShapedType ("memref",[-1],E.Float16Type)
+      else if List.mem i [6;8] then ShapedType ("memref",[-1],E.Float32Type)
+      else if i = 9 then ScalarType E.Float32Type
+      else ScalarType (scalar_type "i32") in
+    "%arg" ^ string_of_int i,ty) in
+  if p.arguments <> expected then invalid_arg "unsupported attention entry signature";
+  kernel ?stage p

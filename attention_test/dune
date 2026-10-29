@@ -40,3 +40,16 @@
  (libraries attention_runtime yojson)
  (deps ../examples/attention_mixed.mlir ../scripts/attention_frontend.py
   ../scripts/attention_dialects.py ../requirements-attention.txt))
+
+(test
+ (name kernel_test)
+ (modules kernel_test)
+ (libraries attention_runtime yojson)
+ (deps
+  ../examples/kernels/vector_add_hfusion.mlir
+  ../examples/kernels/vector_add_hivm.mlir
+  ../examples/kernels/row_sum_hfusion.mlir
+  ../examples/kernels/row_sum_hivm.mlir
+  ../scripts/attention_frontend.py
+  ../scripts/attention_dialects.py
+  ../requirements-attention.txt))

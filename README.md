@@ -6,6 +6,8 @@ interpreter design inspired by the Huawei AscendNPU IR interpreter question.
 The repository also includes a CPU interpreter for the archived HFusion and
 HIVM attention MLIR. It parses the input, dispatches OCaml effects to Rocq-extracted
 semantics, and compares both stages with an independent float64 reference.
+Start with the [user guide](docs/user-guide.md) for environment setup, running
+attention, inspecting results and traces, and executing mixed-stage IR.
 See the [attention interpreter design](docs/attention-interpreter-design.md) for
 the semantic layers, handlers, execution model, code reading guide and limits.
 
@@ -31,6 +33,19 @@ manually derived from the archived HFusion input. Trace field `ir_stage` records
 each operation's stage; `stage` records the CLI execution mode.
 
 The H1–H5 demonstration described below remains a separate shallow embedding.
+
+Two small MLIR kernel examples are available in
+[`examples/kernels`](examples/kernels): vector addition and row sum, each with
+HFusion and HIVM variants. Run them through the same extracted semantics and
+effect handlers:
+
+```sh
+opam exec --switch=unified-interpreter -- dune exec kernel-example -- --kernel vector-add
+opam exec --switch=unified-interpreter -- dune exec kernel-example -- --kernel row-sum
+```
+
+See the [kernel walkthrough](docs/user-guide.md#9-运行两个小型-kernel) for inputs,
+expected results, trace output and the OCaml interface.
 
 The key design point is that there is **one shallow-embedded program language**.
 Lowering levels are not represented by separate ASTs. Instead, the same program
