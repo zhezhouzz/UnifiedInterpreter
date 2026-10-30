@@ -146,7 +146,7 @@ let kernel ?stage p =
       | "tensor.expand_shape" | "tensor.collapse_shape" ->
           (match op.operand_types,op.result_type with
           | [ShapedType ("tensor",src,ty)],Some (ShapedType ("tensor",dst,ty')) ->
-              let groups = Yojson.Basic.Util.(Runner.attribute op "reassociation" |> to_list
+              let groups = Yojson.Safe.Util.(Runner.attribute op "reassociation" |> to_list
                 |> List.map (fun row -> row |> to_list |> List.map to_int)) in
               let expanded,collapsed = if op.opcode = "tensor.expand_shape" then dst,src else src,dst in
               if ty <> ty' || not (E.valid_reassociation expanded collapsed groups)

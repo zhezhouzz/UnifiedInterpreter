@@ -68,14 +68,14 @@ Fixpoint prepend_each (index : nat) (coordinates : list (list nat))
       (index :: coordinate) :: prepend_each index rest
   end.
 
-Fixpoint enumerate_dimension (size : nat) (coordinates : list (list nat))
+(* The indices of a dimension in ascending order.  Written with [flat_map]
+   rather than a recursion that appends, because appending at each of the
+   [size] steps costs O(size * |coordinates|) per step and therefore
+   O(size^2 * |coordinates|) overall, which dominates every tensor access at
+   realistic shapes. *)
+Definition enumerate_dimension (size : nat) (coordinates : list (list nat))
     : list (list nat) :=
-  match size with
-  | O => []
-  | S size' =>
-      enumerate_dimension size' coordinates ++
-      prepend_each size' coordinates
-  end.
+  flat_map (fun index => prepend_each index coordinates) (seq 0 size).
 
 Fixpoint tensor_indices (shape : list nat) : list (list nat) :=
   match shape with

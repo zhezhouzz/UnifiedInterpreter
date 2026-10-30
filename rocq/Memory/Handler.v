@@ -141,6 +141,61 @@ Definition handle_write {Value} (descriptor_id : descriptor_id)
       end
   end.
 
+(* Bulk access handlers.  They perform the accesses through the bulk model
+   functions, which are definitionally the sequence of single-cell accesses in
+   coordinate order: there is no separate pre-validation, so a per-coordinate
+   error is reported before any length mismatch, exactly as the pointwise
+   specification does.  The trace records one operation. *)
+Definition handle_read_range {Value} (descriptor_id : descriptor_id)
+    (coordinates : list (list nat)) (memory : memory_state Value)
+    : result runtime_error (list Value * memory_state Value * list event) :=
+  match lookup_descriptor descriptor_id memory with
+  | None => memory_failure UnknownDescriptor
+  | Some descriptor =>
+      match lookup_buffer (descriptor_allocation descriptor) memory with
+      | None => memory_failure UnknownAllocation
+      | Some storage =>
+          match read_coordinates storage (descriptor_offset descriptor)
+              (descriptor_strides descriptor) coordinates with
+          | Error error => memory_failure error
+          | Ok values =>
+              Ok (values, memory,
+                [EMemoryReadRange (descriptor_allocation descriptor)
+                  (length coordinates)])
+          end
+      end
+  end.
+
+Definition handle_write_range {Value} (descriptor_id : descriptor_id)
+    (coordinates : list (list nat)) (values : list Value)
+    (memory : memory_state Value)
+    : result runtime_error (unit * memory_state Value * list event) :=
+  match lookup_descriptor descriptor_id memory with
+  | None => memory_failure UnknownDescriptor
+  | Some descriptor =>
+      match lookup_buffer (descriptor_allocation descriptor) memory with
+      | None => memory_failure UnknownAllocation
+      | Some storage =>
+          match write_coordinates storage (descriptor_offset descriptor)
+              (descriptor_strides descriptor) coordinates values with
+          | Error error => memory_failure error
+          | Ok storage' =>
+              let memory' :=
+                {| memory_buffers :=
+                     <[descriptor_allocation descriptor := storage']>
+                       (memory_buffers memory);
+                   memory_descriptors := memory_descriptors memory;
+                   memory_restricted_descriptors :=
+                     memory_restricted_descriptors memory;
+                   memory_next_allocation := memory_next_allocation memory;
+                   memory_next_descriptor := memory_next_descriptor memory |} in
+              Ok (tt, memory',
+                [EMemoryWriteRange (descriptor_allocation descriptor)
+                  (length coordinates)])
+          end
+      end
+  end.
+
 Definition handle_claim {Value} (descriptor_id : descriptor_id)
     (restrict writable : bool) (memory : memory_state Value)
     : result runtime_error (unit * memory_state Value * list event) :=
@@ -208,6 +263,10 @@ Definition handle_effect {Value X} (request : memory_effect Value X)
   | Read descriptor coordinate => handle_read descriptor coordinate memory
   | Write descriptor coordinate value =>
       handle_write descriptor coordinate value memory
+  | ReadRange descriptor coordinates =>
+      handle_read_range descriptor coordinates memory
+  | WriteRange descriptor coordinates values =>
+      handle_write_range descriptor coordinates values memory
   | AssertDisjoint left_id right_id => handle_disjoint left_id right_id memory
   | ValidateDescriptor descriptor shape element_type =>
       handle_validate descriptor shape element_type memory

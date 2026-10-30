@@ -17,6 +17,15 @@ Inductive memory_effect (Value : Type) : Type -> Type :=
     : memory_effect Value Value
 | Write (descriptor : descriptor_id) (coordinate : list nat) (value : Value)
     : memory_effect Value unit
+(* Bulk forms.  A tensor access is one memory request that touches many cells.
+   Issuing one request per cell makes the effect interpreter, not the memory
+   model, the dominant cost of a materialisation.  These forms add no
+   behaviour, only granularity: each is the sequence of the corresponding
+   single-cell requests over the same descriptor. *)
+| ReadRange (descriptor : descriptor_id) (coordinates : list (list nat))
+    : memory_effect Value (list Value)
+| WriteRange (descriptor : descriptor_id) (coordinates : list (list nat))
+    (values : list Value) : memory_effect Value unit
 | AssertDisjoint (left right : descriptor_id) : memory_effect Value unit
 | ValidateDescriptor (descriptor : descriptor_id) (shape : list nat)
     (element_type : mlir_type) : memory_effect Value unit
@@ -28,6 +37,8 @@ Arguments Allocate {Value} _ _ _.
 Arguments Reinterpret {Value} _ _ _ _.
 Arguments Read {Value} _ _.
 Arguments Write {Value} _ _ _.
+Arguments ReadRange {Value} _ _.
+Arguments WriteRange {Value} _ _ _.
 Arguments AssertDisjoint {Value} _ _.
 Arguments ValidateDescriptor {Value} _ _ _.
 Arguments ClaimTensorView {Value} _ _ _.

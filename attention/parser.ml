@@ -1,5 +1,10 @@
 module E = Extracted_semantics.Unified_semantics
-open Yojson.Basic.Util
+(* [Yojson.Safe] rather than [Yojson.Basic]: the frontend writes MLIR integer
+   constants as JSON numbers, and [Basic] can only represent those as an OCaml
+   [int], so it raises on anything that does not fit.  [Safe] keeps the literal
+   text in [`Intlit], which lets the interpreter reject out-of-range constants
+   with a diagnostic instead of crashing. *)
+open Yojson.Safe.Util
 
 type typ = ScalarType of E.mlir_type | ShapedType of string * int list * E.mlir_type
 type operation = {
@@ -11,7 +16,7 @@ type operation = {
   result_type : typ option;
   inputs : string list;
   outputs : string list;
-  attributes : (string * Yojson.Basic.t) list;
+  attributes : (string * Yojson.Safe.t) list;
   region : operation list;
   region_arguments : (string * typ) list;
   span : Source.span;
@@ -70,6 +75,50 @@ let rec project_root directory =
       failwith "Set ATTENTION_ROOT to the repository with its attention Python environment";
     project_root parent
 
+(* The frontend reads all of stdin, then writes its diagnostic to stderr.  If
+   that diagnostic exceeds the pipe capacity (64 KiB on Linux) the child blocks
+   writing while the parent blocks reading stdout, and neither side can make
+   progress.  Reading both pipes with [select] keeps the parent draining
+   whichever one is ready, so a large diagnostic cannot deadlock the tool. *)
+let read_both out err =
+  let out_fd = Unix.descr_of_in_channel out
+  and err_fd = Unix.descr_of_in_channel err in
+  let buffer = Bytes.create 65536 in
+  let out_buffer = Buffer.create 65536 and err_buffer = Buffer.create 1024 in
+  let out_open = ref true and err_open = ref true in
+  while !out_open || !err_open do
+    let ready =
+      (if !out_open then [out_fd] else []) @ (if !err_open then [err_fd] else []) in
+    let fds,_,_ = Unix.select ready [] [] (-1.0) in
+    List.iter (fun fd ->
+        let count = Unix.read fd buffer 0 (Bytes.length buffer) in
+        if count = 0 then
+          (if fd = out_fd then out_open := false else err_open := false)
+        else if fd = out_fd then Buffer.add_subbytes out_buffer buffer 0 count
+        else Buffer.add_subbytes err_buffer buffer 0 count) fds
+  done;
+  Buffer.contents out_buffer,Buffer.contents err_buffer
+
+(* The interpreter represents integers in 63 bits: [nat] extracts to the OCaml
+   [int] in Extracted_semantics, so no value at or beyond 2^62 can survive.  The
+   Coq model is exact there -- it computes in unbounded [Z] and the IR gives
+   [IndexType] 64 bits -- so this bound is a property of the implementation, not
+   of the specification.  [Yojson.Safe] reports every JSON number that does not
+   fit an OCaml [int] as [`Intlit] with its literal text, so this is the one
+   place that has to reject them, before any value reaches the semantics. *)
+let rec check_integer_range file json =
+  let reject literal =
+    failwith
+      (Printf.sprintf
+         "%s: integer constant %s is outside the 63-bit range supported by the \
+          interpreter ([-2^62, 2^62-1])"
+         file literal) in
+  match json with
+  | `Intlit literal -> reject literal
+  | `Assoc fields -> List.iter (fun (_,value) -> check_integer_range file value) fields
+  | `List items -> List.iter (check_integer_range file) items
+  | _ -> ()
+
 let parse ~file input =
   let root = match Sys.getenv_opt "ATTENTION_ROOT" with
     | Some path -> path | None -> project_root (Sys.getcwd ()) in
@@ -79,12 +128,15 @@ let parse ~file input =
   let stdout,stdin,stderr = channels in
   output_string stdin input;
   close_out stdin;
-  let output = In_channel.input_all stdout in
-  let diagnostic = In_channel.input_all stderr in
+  let output,diagnostic = read_both stdout stderr in
   (match Unix.close_process_full channels with
   | Unix.WEXITED 0 -> ()
   | _ -> failwith ("xDSL frontend failed:\n" ^ diagnostic));
-  let json = Yojson.Basic.from_string output in
+  let json =
+    try Yojson.Safe.from_string output
+    with Yojson.Json_error message ->
+      failwith ("xDSL frontend produced malformed JSON: " ^ message) in
+  check_integer_range file json;
   { name = json |> member "name" |> to_string;
     arguments = json |> member "arguments" |> to_list |> List.map argument;
     body = json |> member "body" |> to_list |> List.map operation }

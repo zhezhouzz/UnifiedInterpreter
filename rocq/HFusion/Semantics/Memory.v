@@ -18,24 +18,17 @@ Definition sem_memref_reinterpret_cast {Scalar} (source : descriptor_id)
     : memory_computation Scalar descriptor_id :=
   perform (Reinterpret source offset sizes strides).
 
-Fixpoint copy_coordinates {Scalar} (source destination : descriptor_id)
-    (coordinates : list (list nat)) : memory_computation Scalar unit :=
-  match coordinates with
-  | [] => Return tt
-  | coordinate :: rest =>
-      value <-! perform (Read source coordinate) ;;
-      perform (Write destination coordinate value) ;;!
-      copy_coordinates source destination rest
-  end.
-
 (* MLIR memref.copy permits different layouts but requires equal logical shape
    and element type. Those type conditions belong to elaboration; the dynamic
    semantics checks the documented non-overlap precondition and copies by
-   logical coordinate. *)
+   logical coordinate. Read and write are bulk requests: copying cell by cell
+   costs one index walk per cell, which is quadratic in the tensor size. *)
 Definition sem_memref_copy {Scalar} (shape : list nat)
     (source destination : descriptor_id) : memory_computation Scalar unit :=
   perform (AssertDisjoint source destination) ;;!
-  copy_coordinates source destination (tensor_indices shape).
+  values <-! perform (ReadRange source (tensor_indices shape)) ;;
+  perform (WriteRange destination (tensor_indices shape) values) ;;!
+  Return tt.
 
 Definition sem_bufferization_to_tensor {Scalar} (descriptor : descriptor_id)
     (shape : list nat) (element_type : mlir_type) (access : tensor_access)
@@ -45,15 +38,12 @@ Definition sem_bufferization_to_tensor {Scalar} (descriptor : descriptor_id)
     (access_restrict access) (access_writable access)) ;;!
   Return (MemRefBackedTensor descriptor shape element_type access).
 
-Fixpoint read_tensor_coordinates {Scalar} (descriptor : descriptor_id)
+(* One bulk request per tensor access.  The sequence of single-cell requests it
+   abbreviates is what the handler performs, so this changes how many requests
+   the interpreter dispatches, not what the memory model does. *)
+Definition read_tensor_coordinates {Scalar} (descriptor : descriptor_id)
     (coordinates : list (list nat)) : memory_computation Scalar (list Scalar) :=
-  match coordinates with
-  | [] => Return []
-  | coordinate :: rest =>
-      value <-! perform (Read descriptor coordinate) ;;
-      values <-! read_tensor_coordinates descriptor rest ;;
-      Return (value :: values)
-  end.
+  perform (ReadRange descriptor coordinates).
 
 Definition materialize_runtime_tensor {Scalar} (value : runtime_tensor Scalar)
     : memory_computation Scalar (option (packed_tensor Scalar)) :=
@@ -67,16 +57,14 @@ Definition materialize_runtime_tensor {Scalar} (value : runtime_tensor Scalar)
       end
   end.
 
-Fixpoint write_tensor_coordinates {Scalar} (destination : descriptor_id)
+(* Bulk write, one request per tensor store.  Length disagreement keeps the
+   previous behaviour of reporting a failed store instead of raising. *)
+Definition write_tensor_coordinates {Scalar} (destination : descriptor_id)
     (coordinates : list (list nat)) (values : list Scalar)
     : memory_computation Scalar bool :=
-  match coordinates, values with
-  | [], [] => Return true
-  | coordinate :: coordinates', value :: values' =>
-      perform (Write destination coordinate value) ;;!
-      write_tensor_coordinates destination coordinates' values'
-  | _, _ => Return false
-  end.
+  if Nat.eqb (length coordinates) (length values) then
+    perform (WriteRange destination coordinates values) ;;! Return true
+  else Return false.
 
 Definition sem_bufferization_materialize_in_destination {Scalar}
     (source : runtime_tensor Scalar) (destination : descriptor_id)
