@@ -1,0 +1,73 @@
+{
+  "abi": "static f32 arguments; unused implicit arguments removed",
+  "xdsl": "0.74.0",
+  "generator_sha256": "e7101600dc638d5d61865fd09d9e19e11e2983f72ed4eb86b3c4aadd20bbf4d3",
+  "kernels": {
+    "vector_add": {
+      "signature": [
+        [
+          "a",
+          [
+            8
+          ]
+        ],
+        [
+          "b",
+          [
+            8
+          ]
+        ],
+        [
+          "out",
+          [
+            8
+          ]
+        ]
+      ],
+      "mixed_segments": [
+        "hfusion",
+        "hivm"
+      ],
+      "inputs": {
+        "hfusion": "81e9c431eac2dd1fc27efe1ffa98123fb8e33de3d61fecca3c2a57c00564fe53",
+        "hivm": "cf9cbb6ac6b43ec98720a6cdf67c7d81bba3411ab98764b21635a7e5ee565195"
+      },
+      "outputs": {
+        "hfusion": "74d7a08ccd42c385bbfa0dedfa27365dc0bc1a3f046ff2a78061b2a7c01b919d",
+        "hivm": "35847a215144ace01946ae5c60962b0198a4562e08de84ac20ebc3c814454d34",
+        "mixed": "cb0010ba19b35af06a4235fac5404e0dac80295a224fcea2e08568216fa20e90"
+      }
+    },
+    "row_sum": {
+      "signature": [
+        [
+          "input",
+          [
+            3,
+            4
+          ]
+        ],
+        [
+          "out",
+          [
+            3
+          ]
+        ]
+      ],
+      "mixed_segments": [
+        "hfusion",
+        "hivm",
+        "hivm"
+      ],
+      "inputs": {
+        "hfusion": "70c349a32edca9489aa6611a61d5a3524e698df49a199f4c2fb0c25e10f84b95",
+        "hivm": "1d09ae19aad206e98de796b19d4565b6ac5aadf7d99043b40147472afbdecb80"
+      },
+      "outputs": {
+        "hfusion": "78f16e0374d7221fb4e325a78c8252306e35dccac9f9fdc0512f4da9d720f4d8",
+        "hivm": "dfbf5f41fab569b30d251be6b015906dd18613ad3b852f2a3c9ea2bf2fe8e735",
+        "mixed": "0bb4408142b0ab2617e250655be4ab634f52fd500b1eee5ed292af7158791dd4"
+      }
+    }
+  }
+}

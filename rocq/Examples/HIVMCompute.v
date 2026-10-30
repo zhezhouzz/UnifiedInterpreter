@@ -54,6 +54,19 @@ Definition observe (r : result runtime_error (value Z)) :=
 Definition x2 := v [2%nat] Float32Type [2;4].
 Definition matrix := v [2%nat;3%nat] Float32Type [1;2;3;4;5;6].
 
+Example strided_tensor_slice : observe (sem_extract_slice matrix
+  [0%nat;0%nat] [2%nat;2%nat] [1%nat;2%nat]) = Ok [1;3;4;6].
+Proof. reflexivity. Qed.
+Example empty_tensor_slice : observe (sem_extract_slice x2
+  [2%nat] [0%nat] [1%nat]) = Ok [].
+Proof. reflexivity. Qed.
+Example tensor_slice_out_of_bounds : sem_extract_slice x2
+  [1%nat] [2%nat] [1%nat] = Error InvalidShape.
+Proof. reflexivity. Qed.
+Example tensor_slice_zero_stride : sem_extract_slice x2
+  [0%nat] [1%nat] [0%nat] = Error InvalidShape.
+Proof. reflexivity. Qed.
+
 Example add_tensor : observe (sem_binary VAdd (TensorOperand x2)
   (TensorOperand x2) (out [2%nat])) = Ok [4;8].
 Proof. reflexivity. Qed.
@@ -180,6 +193,18 @@ Proof. reflexivity. Qed.
 Example false_constant : sem_integer_constant (IntegerType 1 Signless) 0 = Ok 0.
 Proof. reflexivity. Qed.
 Example addi_wraps : sem_integer_binary ArithAddI i32 2147483647 1 = Ok (-2147483648).
+Proof. reflexivity. Qed.
+Example subi_wraps : sem_integer_binary ArithSubI i32 (-2147483648) 1 = Ok 2147483647.
+Proof. reflexivity. Qed.
+Example signed_minimum : sem_integer_binary ArithMinSI i32 (-3) 2 = Ok (-3).
+Proof. reflexivity. Qed.
+Example signed_maximum : sem_integer_binary ArithMaxSI i32 (-3) 2 = Ok 2.
+Proof. reflexivity. Qed.
+Example signed_comparison : sem_integer_compare 2 i32 (-1) 1 = Ok 1.
+Proof. reflexivity. Qed.
+Example unsigned_comparison : sem_integer_compare 6 i32 (-1) 1 = Ok 0.
+Proof. reflexivity. Qed.
+Example signed_i1_comparison : sem_integer_compare 2 (IntegerType 1 Signless) 1 0 = Ok 1.
 Proof. reflexivity. Qed.
 Example muli_wraps : sem_integer_binary ArithMulI i32 1073741824 4 = Ok 0.
 Proof. reflexivity. Qed.

@@ -107,6 +107,7 @@ def export_operation(operation, parser):
     outputs = []
     region = []
     region_arguments = []
+    else_region = []
     name = operation.name
     if name.startswith(("linalg.", "hivm.", "hfusion.")) and name != "linalg.yield":
         if name == "linalg.reduce":
@@ -132,6 +133,37 @@ def export_operation(operation, parser):
                     raise ValueError("unsupported implicit region operation")
                 continue
             region.append(export_operation(child, parser))
+    if name == "scf.if":
+        if operation.results:
+            raise ValueError("scf.if results are unsupported")
+        for index, branch in enumerate(operation.regions):
+            if not branch.blocks:
+                continue
+            if len(branch.blocks) != 1 or branch.block.args:
+                raise ValueError("scf.if requires argument-free single-block branches")
+            target = region if index == 0 else else_region
+            for child in branch.block.ops:
+                if child not in parser.locations:
+                    if child.name != "scf.yield" or child.operands:
+                        raise ValueError("unsupported implicit branch operation")
+                    continue
+                target.append(export_operation(child, parser))
+    if name in {"memref.subview", "tensor.extract_slice"}:
+        for key in ("offsets", "sizes", "strides"):
+            dynamic = iter(getattr(operation, key))
+            entries = []
+            for value in getattr(operation, "static_" + key).get_values():
+                if value == DYNAMIC_INDEX:
+                    operand = next(dynamic, None)
+                    if operand is None:
+                        raise ValueError("missing dynamic " + key)
+                    entries.append({"ssa": parser.names[operand]})
+                else:
+                    entries.append({"static": value})
+            if next(dynamic, None) is not None:
+                raise ValueError("extra dynamic " + key)
+            del values["static_" + key]
+            values[key] = entries
     if name == "memref.reinterpret_cast":
         offsets = list(operation.offsets)
         values["offsets"] = [
@@ -153,6 +185,7 @@ def export_operation(operation, parser):
         "outputs": [parser.names[value] for value in outputs],
         "attributes": values,
         "region": region,
+        "else_region": else_region,
         "region_arguments": region_arguments,
         "span": parser.locations[operation],
     }

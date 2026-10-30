@@ -31,7 +31,8 @@ Extraction "unified_semantics.ml"
   artifact_memory_result
   materialize_program
   sem_empty sem_binary sem_unary sem_broadcast sem_reduce sem_cast sem_mmad sem_reshape
-  sem_integer_constant sem_integer_binary sem_integer_cast sem_float_constant
+  sem_integer_constant sem_integer_binary sem_integer_compare sem_integer_cast sem_float_constant
+  sem_extract_slice sem_memref_subview
   evaluate run_memory extracted_checks memory_check exceptional_checks
   sem_linalg_fill sem_linalg_transpose sem_linalg_broadcast
   sem_linalg_unary sem_linalg_matmul.

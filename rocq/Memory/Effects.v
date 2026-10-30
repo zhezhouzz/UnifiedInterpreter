@@ -13,6 +13,8 @@ Inductive memory_effect (Value : Type) : Type -> Type :=
 | Reinterpret (source : descriptor_id) (offset : Z)
     (sizes : list nat) (strides : list Z)
     : memory_effect Value descriptor_id
+| Subview (source : descriptor_id) (offsets sizes strides : list nat)
+    : memory_effect Value descriptor_id
 | Read (descriptor : descriptor_id) (coordinate : list nat)
     : memory_effect Value Value
 | Write (descriptor : descriptor_id) (coordinate : list nat) (value : Value)
@@ -35,6 +37,7 @@ Inductive memory_effect (Value : Type) : Type -> Type :=
 
 Arguments Allocate {Value} _ _ _.
 Arguments Reinterpret {Value} _ _ _ _.
+Arguments Subview {Value} _ _ _ _.
 Arguments Read {Value} _ _.
 Arguments Write {Value} _ _ _.
 Arguments ReadRange {Value} _ _.

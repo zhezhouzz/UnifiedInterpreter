@@ -40,8 +40,12 @@ Definition sem_integer_binary (op : arith_binary_operator) (ty : mlir_type)
   | Some width =>
       let a := canonical_integer width x in
       let b := canonical_integer width y in
+      let signed z := if Nat.eqb width 1 && Z.eqb z 1 then -1 else z in
       match op with
       | ArithAddI => Ok (canonical_integer width (a+b))
+      | ArithSubI => Ok (canonical_integer width (a-b))
+      | ArithMaxSI => Ok (canonical_integer width (Z.max (signed a) (signed b)))
+      | ArithMinSI => Ok (canonical_integer width (Z.min (signed a) (signed b)))
       | ArithMulI => Ok (canonical_integer width (a*b))
       | ArithDivSI | ArithRemSI =>
           if Nat.eqb width 1 then Error UnsupportedInstruction
@@ -69,6 +73,29 @@ Definition sem_integer_cast (op : arith_cast_operator)
       if legal then Ok (canonical_integer dest (canonical_integer from x))
       else Error UnsupportedInstruction
   | _,_ => Error UnsupportedInstruction
+  end.
+
+Definition sem_integer_compare (predicate : nat) (ty : mlir_type)
+    (x y : Z) : result runtime_error Z :=
+  match integer_width ty with
+  | None => Error UnsupportedInstruction
+  | Some width =>
+      let signed z := let bits := canonical_integer width z in
+        if Nat.eqb width 1 && Z.eqb bits 1 then -1 else bits in
+      let a := signed x in
+      let b := signed y in
+      let unsigned z := z mod (2 ^ Z.of_nat width) in
+      let answer := match predicate with
+        | 0%nat => Some (Z.eqb a b) | 1%nat => Some (negb (Z.eqb a b))
+        | 2%nat => Some (Z.ltb a b) | 3%nat => Some (Z.leb a b)
+        | 4%nat => Some (Z.ltb b a) | 5%nat => Some (Z.leb b a)
+        | 6%nat => Some (Z.ltb (unsigned a) (unsigned b))
+        | 7%nat => Some (Z.leb (unsigned a) (unsigned b))
+        | 8%nat => Some (Z.ltb (unsigned b) (unsigned a))
+        | 9%nat => Some (Z.leb (unsigned b) (unsigned a))
+        | _ => None end in
+      match answer with Some b => Ok (if b then 1 else 0)
+      | None => Error UnsupportedInstruction end
   end.
 
 Definition sem_float_constant {S} `{Numeric S} (ty : mlir_type)

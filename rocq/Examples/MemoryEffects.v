@@ -66,9 +66,39 @@ Example allocation_cells_are_uninitialized :
   handle_memory 4 uninitialized_read empty_memory = Error ReadUninitialized.
 Proof. reflexivity. Qed.
 
-Example out_of_bounds_reinterpret_is_rejected :
+Example out_of_bounds_view_read_is_rejected :
   handle_memory 3
-    (sem_memref_reinterpret_cast 0%nat 5 [2%nat] [1]) input_memory =
+    (view <-! sem_memref_reinterpret_cast 0%nat 5 [2%nat] [1] ;;
+     perform (Read view [1%nat])) input_memory =
+    Error (RuntimeMemoryError ViewAddressOutOfBounds).
+Proof. reflexivity. Qed.
+
+Example tail_subview_reads_only_valid_cells :
+  match handle_memory 5
+    (view <-! sem_memref_reinterpret_cast 0%nat 4 [256%nat] [1] ;;
+     tail <-! sem_memref_subview view [0%nat] [2%nat] [1%nat] ;;
+     perform (ReadRange tail [[0%nat];[1%nat]])) input_memory with
+  | Ok (values, _, _) => values = [4;5]
+  | Error _ => False
+  end.
+Proof. vm_compute. reflexivity. Qed.
+
+Example subview_outside_source_is_rejected :
+  handle_memory 3 (sem_memref_subview 0%nat [5%nat] [2%nat] [1%nat]) input_memory =
+    Error (RuntimeMemoryError ViewAddressOutOfBounds).
+Proof. reflexivity. Qed.
+
+Example bulk_read_checks_logical_bounds :
+  handle_memory 4
+    (view <-! sem_memref_reinterpret_cast 0%nat 0 [2%nat] [1] ;;
+     perform (ReadRange view [[3%nat]])) input_memory =
+    Error (RuntimeMemoryError ViewAddressOutOfBounds).
+Proof. reflexivity. Qed.
+
+Example bulk_write_checks_logical_bounds :
+  handle_memory 4
+    (view <-! sem_memref_reinterpret_cast 0%nat 0 [2%nat] [1] ;;
+     perform (WriteRange view [[3%nat]] [9])) input_memory =
     Error (RuntimeMemoryError ViewAddressOutOfBounds).
 Proof. reflexivity. Qed.
 

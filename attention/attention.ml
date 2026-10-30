@@ -25,7 +25,7 @@ let read_file file =
 let run ?stage ?(max_steps=1000000) ?(trace=fun _ -> ()) ~file input =
   validate_input input;
   let program = Parser.parse ~file (read_file file) in
-  Validate.program ?stage program;
+  let abi = Validate.attention_abi ?stage program in
   let state = ref {Handlers.memory = E.empty_memory; marker = 73} in
   let ctx = {R.state; steps=0; max_steps; current=None; pid=0; calls=0; loops=[]; trace} in
   let allocate ty size data =
@@ -47,23 +47,24 @@ let run ?stage ?(max_steps=1000000) ?(trace=fun _ -> ()) ~file input =
   let q = allocate E.Float16Type 16384 (Some input.q) in
   let k = allocate E.Float16Type 16384 (Some input.k) in
   let v = allocate E.Float16Type 16384 (Some input.v) in
-  let lse = allocate E.Float32Type 128 None in
-  let o = allocate E.Float16Type 16384 None in
+  let lse = allocate abi.lse_type 128 None in
+  let o = allocate abi.o_type 16384 None in
   let scratch = allocate E.Float32Type 16384 None in
-  let unused = allocate (R.scalar_type "i8") 1 None in
-  let bindings = List.init 16 (fun i ->
-    let value = match i with
-      | 0 -> R.Int (R.scalar_type "i64",E.Z0)
-      | 1 | 2 -> unused
-      | 3 -> q | 4 -> k | 5 -> v | 6 -> lse | 7 -> o | 8 -> scratch
-      | 9 -> R.Float (E.Float32Type,input.scale)
-      | _ -> R.Int (R.scalar_type "i32",E.Z0)
-    in "%arg" ^ string_of_int i,value) in
+  let lock = allocate (R.scalar_type "i8") 1 None in
+  let workspace = allocate (R.scalar_type "i8") 1 None in
+  let int value = R.Int (R.scalar_type "i32",Numeric.z_of_int value) in
+  let bindings = [abi.sync_lock,lock; abi.workspace,workspace;
+    abi.q,q; abi.k,k; abi.v,v; abi.lse,lse; abi.o,o; abi.scratch,scratch;
+    abi.scale,R.Float (E.Float32Type,input.scale);
+    abi.grid_x,int 20; abi.grid_y,int 1; abi.grid_z,int 1;
+    abi.pid_y,int 0; abi.pid_z,int 0] in
+  let bindings = match abi.ffts with
+    | None -> bindings
+    | Some name -> (name,R.Int (R.scalar_type "i64",E.Z0)) :: bindings in
   R.with_handlers ctx (fun () ->
     for pid = 0 to 19 do
       ctx.pid <- pid;
-      let env = ("%arg13",R.Int (R.scalar_type "i32",Numeric.z_of_int pid)) ::
-        List.remove_assoc "%arg13" bindings in
+      let env = (abi.pid_x,int pid) :: bindings in
       ignore (R.execute_block ctx env program.body)
     done);
   ctx.current <- None;

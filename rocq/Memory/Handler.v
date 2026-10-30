@@ -71,13 +71,28 @@ Definition handle_reinterpret {Value} (source : descriptor_id) (offset : Z)
              descriptor_offset := offset;
              descriptor_sizes := sizes;
              descriptor_strides := strides |} in
-        if descriptor_in_bounds memory descriptor then
-          let '(id, memory') := insert_descriptor descriptor memory in
-          Ok (id, memory',
-            [EDescriptor id (descriptor_allocation descriptor)
-              offset (map Z.of_nat sizes) strides])
-        else memory_failure ViewAddressOutOfBounds
+        let '(id, memory') := insert_descriptor descriptor memory in
+        Ok (id, memory',
+          [EDescriptor id (descriptor_allocation descriptor)
+            offset (map Z.of_nat sizes) strides])
       else memory_failure InvalidViewRank
+  end.
+
+Definition handle_subview {Value} (source : descriptor_id)
+    (offsets sizes strides : list nat) (memory : memory_state Value)
+    : result runtime_error (descriptor_id * memory_state Value * list event) :=
+  match lookup_descriptor source memory with
+  | None => memory_failure UnknownDescriptor
+  | Some descriptor =>
+      if slice_in_bounds (descriptor_sizes descriptor) offsets sizes strides then
+        let offset := fold_left Z.add
+          (map (fun pair => Z.of_nat (fst pair) * snd pair)
+            (combine offsets (descriptor_strides descriptor)))
+          (descriptor_offset descriptor) in
+        let new_strides := map (fun pair => Z.of_nat (fst pair) * snd pair)
+          (combine strides (descriptor_strides descriptor)) in
+        handle_reinterpret source offset sizes new_strides memory
+      else memory_failure ViewAddressOutOfBounds
   end.
 
 Definition handle_read {Value} (descriptor_id : descriptor_id)
@@ -141,11 +156,7 @@ Definition handle_write {Value} (descriptor_id : descriptor_id)
       end
   end.
 
-(* Bulk access handlers.  They perform the accesses through the bulk model
-   functions, which are definitionally the sequence of single-cell accesses in
-   coordinate order: there is no separate pre-validation, so a per-coordinate
-   error is reported before any length mismatch, exactly as the pointwise
-   specification does.  The trace records one operation. *)
+(* 批量访问先检查视图的逻辑坐标，再由底层内存模型检查分配边界和初始化状态。 *)
 Definition handle_read_range {Value} (descriptor_id : descriptor_id)
     (coordinates : list (list nat)) (memory : memory_state Value)
     : result runtime_error (list Value * memory_state Value * list event) :=
@@ -155,6 +166,8 @@ Definition handle_read_range {Value} (descriptor_id : descriptor_id)
       match lookup_buffer (descriptor_allocation descriptor) memory with
       | None => memory_failure UnknownAllocation
       | Some storage =>
+          if forallb (fun coordinate => coordinate_in_bounds coordinate
+              (descriptor_sizes descriptor)) coordinates then
           match read_coordinates storage (descriptor_offset descriptor)
               (descriptor_strides descriptor) coordinates with
           | Error error => memory_failure error
@@ -162,7 +175,7 @@ Definition handle_read_range {Value} (descriptor_id : descriptor_id)
               Ok (values, memory,
                 [EMemoryReadRange (descriptor_allocation descriptor)
                   (length coordinates)])
-          end
+          end else memory_failure ViewAddressOutOfBounds
       end
   end.
 
@@ -176,6 +189,8 @@ Definition handle_write_range {Value} (descriptor_id : descriptor_id)
       match lookup_buffer (descriptor_allocation descriptor) memory with
       | None => memory_failure UnknownAllocation
       | Some storage =>
+          if forallb (fun coordinate => coordinate_in_bounds coordinate
+              (descriptor_sizes descriptor)) coordinates then
           match write_coordinates storage (descriptor_offset descriptor)
               (descriptor_strides descriptor) coordinates values with
           | Error error => memory_failure error
@@ -192,7 +207,7 @@ Definition handle_write_range {Value} (descriptor_id : descriptor_id)
               Ok (tt, memory',
                 [EMemoryWriteRange (descriptor_allocation descriptor)
                   (length coordinates)])
-          end
+          end else memory_failure ViewAddressOutOfBounds
       end
   end.
 
@@ -260,6 +275,8 @@ Definition handle_effect {Value X} (request : memory_effect Value X)
       Ok (descriptor, memory', trace)
   | Reinterpret source offset sizes strides =>
       handle_reinterpret source offset sizes strides memory
+  | Subview source offsets sizes strides =>
+      handle_subview source offsets sizes strides memory
   | Read descriptor coordinate => handle_read descriptor coordinate memory
   | Write descriptor coordinate value =>
       handle_write descriptor coordinate value memory

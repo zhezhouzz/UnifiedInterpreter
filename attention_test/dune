@@ -7,6 +7,8 @@
   ../scripts/attention_frontend.py
   ../scripts/attention_dialects.py
   ../requirements-attention.txt
+  ../artifacts/kernel_IR/attention/hfusion.mlir
+  ../artifacts/kernel_IR/attention/hivm.mlir
   ../artifacts/flash_attention/ir/hfusion_level.mlir
   ../artifacts/flash_attention/ir/attention_hivm_compute.mlir))
 
@@ -19,6 +21,8 @@
   ../scripts/attention_frontend.py
   ../scripts/attention_dialects.py
   ../requirements-attention.txt
+  ../artifacts/kernel_IR/attention/hfusion.mlir
+  ../artifacts/kernel_IR/attention/hivm.mlir
   ../artifacts/flash_attention/ir/hfusion_level.mlir
   ../artifacts/flash_attention/ir/attention_hivm_compute.mlir))
 
@@ -48,8 +52,22 @@
  (deps
   ../examples/kernels/vector_add_hfusion.mlir
   ../examples/kernels/vector_add_hivm.mlir
+  ../examples/kernels/vector_add_mixed.mlir
   ../examples/kernels/row_sum_hfusion.mlir
   ../examples/kernels/row_sum_hivm.mlir
+  ../examples/kernels/row_sum_mixed.mlir
+  ../scripts/attention_frontend.py
+  ../scripts/attention_dialects.py
+  ../requirements-attention.txt))
+
+(test
+ (name vector_add_test)
+ (modules vector_add_test)
+ (libraries attention_runtime yojson)
+ (deps
+  fixtures/dynamic_slices.mlir
+  ../artifacts/kernel_IR/vector-add/hfusion.mlir
+  ../artifacts/kernel_IR/vector-add/hivm.mlir
   ../scripts/attention_frontend.py
   ../scripts/attention_dialects.py
   ../requirements-attention.txt))

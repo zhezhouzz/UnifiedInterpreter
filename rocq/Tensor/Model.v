@@ -87,3 +87,28 @@ Example indices_2_by_3 :
   tensor_indices [2; 3] =
     [[0; 0]; [0; 1]; [0; 2]; [1; 0]; [1; 1]; [1; 2]].
 Proof. reflexivity. Qed.
+
+Fixpoint slice_in_bounds (shape offsets sizes strides : list nat) : bool :=
+  match shape, offsets, sizes, strides with
+  | [], [], [], [] => true
+  | dim :: ds, off :: os, size :: ss, stride :: ts =>
+      Nat.ltb 0 stride &&
+      (if Nat.eqb size 0 then Nat.leb off dim
+       else Nat.ltb (off + (size - 1) * stride) dim) &&
+      slice_in_bounds ds os ss ts
+  | _, _, _, _ => false
+  end.
+
+Fixpoint slice_coordinate (offsets strides indices : list nat) : list nat :=
+  match offsets, strides, indices with
+  | off :: os, stride :: ss, index :: ids =>
+      (off + stride * index) :: slice_coordinate os ss ids
+  | _, _, _ => []
+  end.
+
+Fixpoint linear_coordinate (shape coordinate : list nat) : nat :=
+  match shape, coordinate with
+  | _ :: dims, index :: indices =>
+      index * num_elements dims + linear_coordinate dims indices
+  | _, _ => 0
+  end.

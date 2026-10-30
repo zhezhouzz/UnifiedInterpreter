@@ -3,6 +3,8 @@ module E = Extracted_semantics.Unified_semantics
 
 let supported = [
   "arith.constant";"arith.addi";"arith.muli";"arith.divsi";"arith.remsi";
+  "arith.subi";"arith.maxsi";"arith.minsi";"arith.cmpi";
+  "scf.if";"memref.subview";"tensor.extract_slice";
   "arith.extsi";"arith.index_cast";"arith.addf";"arith.maxnumf";
   "tensor.empty";"tensor.expand_shape";"tensor.collapse_shape";
   "memref.alloc";"memref.copy";"memref.reinterpret_cast";
@@ -18,6 +20,9 @@ let fail op message = Source.fail op.span message
 let attributes op =
   let allowed = match op.opcode with
     | "arith.constant" -> ["value"]
+    | "arith.cmpi" -> ["predicate"]
+    | "scf.if" -> ["hivm.unlikely_condition"]
+    | "memref.subview" | "tensor.extract_slice" -> ["offsets";"sizes";"strides"]
     | "linalg.matmul" -> ["input_precison"]
     | "linalg.elemwise_binary" | "linalg.elemwise_unary" -> ["fun"]
     | "linalg.transpose" -> ["permutation"]
@@ -115,11 +120,55 @@ let kernel ?stage p =
       if List.map lookup op.operands <> op.operand_types then fail op "operand type mismatch";
       if op.outputs <> [] then begin
         let dst = match op.outputs with [name] -> lookup name | _ -> fail op "expected one output" in
-        if op.result_type <> Some dst then fail op "result/destination type mismatch";
         if op.inputs @ op.outputs <> op.operands then fail op "invalid structured operand groups";
-        structured_shape op (List.map lookup op.inputs) dst
+        match dst with
+        | ShapedType ("memref",shape,ty) when
+            List.mem op.opcode ["linalg.fill";"hivm.hir.vbrc"] ->
+            if op.result_type <> None || op.result <> None then fail op "memref fill returns no value";
+            structured_shape op (List.map lookup op.inputs) (ShapedType ("tensor",shape,ty))
+        | _ ->
+            if op.result_type <> Some dst then fail op "result/destination type mismatch";
+            structured_shape op (List.map lookup op.inputs) dst
       end;
       (match op.opcode with
+      | "arith.addi" | "arith.subi" | "arith.maxsi" | "arith.minsi"
+      | "arith.muli" | "arith.divsi" | "arith.remsi" | "arith.cmpi" ->
+          (match op.operand_types with
+          | [ScalarType ty;ScalarType ty'] when ty = ty' && E.integer_width ty <> None ->
+              let result = if op.opcode = "arith.cmpi" then scalar_type "i1" else ty in
+              if op.result_type <> Some (ScalarType result) then fail op "invalid integer result type";
+              if op.opcode = "arith.cmpi" then
+                (match Runner.attribute op "predicate" with
+                | `Int n when n >= 0 && n <= 9 -> ()
+                | _ -> fail op "invalid comparison predicate")
+          | _ -> fail op "invalid integer operands")
+      | "scf.if" ->
+          if op.operand_types <> [ScalarType (scalar_type "i1")] ||
+             op.result_type <> None || op.region_arguments <> [] then fail op "invalid if signature"
+      | "memref.subview" | "tensor.extract_slice" ->
+          let kind = if op.opcode = "memref.subview" then "memref" else "tensor" in
+          (match op.operand_types,op.result_type with
+          | ShapedType (source_kind,shape,ty)::_,Some (ShapedType (target_kind,target,ty'))
+            when kind = source_kind && kind = target_kind && ty = ty' &&
+                 List.length shape = List.length target ->
+              let expressions key =
+                let entries = Yojson.Safe.Util.(Runner.attribute op key |> to_list)
+                    |> List.map Parser.index_expr in
+                if List.length entries <> List.length shape then fail op "slice rank mismatch";
+                List.iter (function
+                  | Static n when n < 0 || (key = "strides" && n = 0) -> fail op "invalid static slice index"
+                  | Dynamic name when lookup name <> ScalarType E.IndexType -> fail op "slice index must have index type"
+                  | _ -> ()) entries;
+                entries in
+              let offsets = expressions "offsets" and sizes = expressions "sizes"
+              and strides = expressions "strides" in
+              List.iter2 (fun dim size -> match size with
+                | Static n when dim <> -1 && dim <> n -> fail op "slice result shape mismatch"
+                | _ -> ()) target sizes;
+              let dynamic = List.filter_map (function Dynamic name -> Some name | Static _ -> None)
+                  (offsets @ sizes @ strides) in
+              if List.tl op.operands <> dynamic then fail op "slice operand groups mismatch"
+          | _ -> fail op "unsupported slice types or rank reduction")
       | "scf.for" ->
           (match op.operand_types,op.region_arguments with
           | [ScalarType a;ScalarType b;ScalarType c],[_,ScalarType d]
@@ -159,6 +208,8 @@ let kernel ?stage p =
       if List.length names <> List.length (List.sort_uniq String.compare names)
       then fail op "duplicate region argument";
       ignore (block (op.region_arguments @ env) names op.region);
+      if op.else_region <> [] && op.opcode <> "scf.if" then fail op "unexpected else region";
+      ignore (block env [] op.else_region);
       match op.result,op.result_type with
       | Some name,Some ty ->
           if List.mem name local then fail op ("duplicate SSA result " ^ name);
@@ -169,14 +220,9 @@ let kernel ?stage p =
   in
   ignore (block p.arguments (List.map fst p.arguments) p.body)
 
-let program ?stage p =
-  let expected = List.init 16 (fun i ->
-    let ty = if i = 0 then ScalarType (scalar_type "i64")
-      else if i = 1 || i = 2 then ShapedType ("memref",[-1],scalar_type "i8")
-      else if List.mem i [3;4;5;7] then ShapedType ("memref",[-1],E.Float16Type)
-      else if List.mem i [6;8] then ShapedType ("memref",[-1],E.Float32Type)
-      else if i = 9 then ScalarType E.Float32Type
-      else ScalarType (scalar_type "i32") in
-    "%arg" ^ string_of_int i,ty) in
-  if p.arguments <> expected then invalid_arg "unsupported attention entry signature";
-  kernel ?stage p
+let attention_abi ?stage p =
+  let abi = Attention_abi.parse p in
+  kernel ?stage p;
+  abi
+
+let program ?stage p = ignore (attention_abi ?stage p)

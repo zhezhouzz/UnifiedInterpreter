@@ -18,6 +18,8 @@ type _ common =
   | Integer_constant : E.mlir_type * E.z -> E.z common
   | Integer_binary : E.arith_binary_operator * E.mlir_type * E.z * E.z -> E.z common
   | Integer_cast : E.arith_cast_operator * E.mlir_type * E.mlir_type * E.z -> E.z common
+  | Integer_compare : int * E.mlir_type * E.z * E.z -> E.z common
+  | Extract_slice : tensor * int list * int list * int list -> tensor common
   | Float_constant : E.mlir_type * E.float_literal -> float common
   | Scalar_binary : E.scalar_operation * float * float -> float common
 
@@ -73,6 +75,7 @@ let common_entry : type a. a common -> string = function
   | Empty _ -> "sem_empty" | Reshape _ -> "sem_reshape"
   | Integer_constant _ -> "sem_integer_constant"
   | Integer_binary _ -> "sem_integer_binary" | Integer_cast _ -> "sem_integer_cast"
+  | Integer_compare _ -> "sem_integer_compare" | Extract_slice _ -> "sem_extract_slice"
   | Float_constant _ -> "sem_float_constant" | Scalar_binary _ -> "eval_scalar_operation"
 
 let common : type a. a common -> (E.runtime_error,a) E.result = function
@@ -81,6 +84,8 @@ let common : type a. a common -> (E.runtime_error,a) E.result = function
   | Integer_constant (ty,n) -> E.sem_integer_constant ty n
   | Integer_binary (op,ty,a,b) -> E.sem_integer_binary op ty a b
   | Integer_cast (op,src,dst,n) -> E.sem_integer_cast op src dst n
+  | Integer_compare (predicate,ty,a,b) -> E.sem_integer_compare predicate ty a b
+  | Extract_slice (src,offsets,sizes,strides) -> E.sem_extract_slice src offsets sizes strides
   | Float_constant (ty,x) -> E.sem_float_constant Numeric.hivm ty x
   | Scalar_binary (op,a,b) ->
       (match E.eval_scalar_operation Numeric.scalar op a b with

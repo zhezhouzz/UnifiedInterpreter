@@ -2,7 +2,7 @@ from typing import ClassVar
 from xdsl.context import Context
 from xdsl.dialects import get_all_dialects
 from xdsl.dialects import bufferization, memref
-from xdsl.dialects.builtin import DenseArrayBase, MemRefType, TensorType, UnitAttr, i64
+from xdsl.dialects.builtin import DenseArrayBase, MemRefType, NoneAttr, TensorType, UnitAttr, i64
 from xdsl.dialects.linalg import Linalg
 from xdsl.dialects.utils import EnumAttribute
 from xdsl.ir import Dialect
@@ -12,10 +12,14 @@ from xdsl.irdl import (
     irdl_op_definition,
     operand_def,
     opt_prop_def,
+    opt_result_def,
     prop_def,
     result_def,
     var_operand_def,
     VarConstraint,
+    AnyAttr,
+    EqAttrConstraint,
+    ParamAttrConstraint,
 )
 from xdsl.utils.str_enum import StrEnum
 
@@ -91,13 +95,16 @@ class MmadOp(StructuredOp):
 
 
 @irdl_op_definition
-class VBrcOp(StructuredOp):
+class VBrcOp(IRDLOperation):
     name = "hivm.hir.vbrc"
+    inputs = var_operand_def()
+    output = operand_def(TensorType | MemRefType)
+    result = opt_result_def(TensorType)
     broadcast_dims = opt_prop_def(DenseArrayBase.constr(i64))
     assembly_format = (
         "attr-dict `ins` `(` $inputs `:` type($inputs) `)` "
         "`outs` `(` $output `:` type($output) `)` "
-        "(`broadcast_dims` `=` $broadcast_dims^)? `->` type($result)"
+        "(`broadcast_dims` `=` $broadcast_dims^)? (`->` type($result)^)?"
     )
 
 
@@ -126,9 +133,12 @@ class VReduceOp(StructuredOp):
 @irdl_op_definition
 class ToTensorOp(IRDLOperation):
     name = "bufferization.to_tensor"
-    T: ClassVar = VarConstraint("T", MemRefType.constr())
-    memref = operand_def(T)
-    tensor = result_def(bufferization.TensorFromMemRefConstraint(T))
+    ELEMENT: ClassVar = VarConstraint("Element", AnyAttr())
+    SHAPE: ClassVar = VarConstraint("Shape", AnyAttr())
+    memref = operand_def(MemRefType.constr(ELEMENT, shape=SHAPE))
+    tensor = result_def(ParamAttrConstraint.get(
+        TensorType, SHAPE, ELEMENT, EqAttrConstraint(NoneAttr())
+    ))
     writable = opt_prop_def(UnitAttr)
     restrict = opt_prop_def(UnitAttr)
     # 归档文件的语法由 memref 类型推导 tensor 类型。

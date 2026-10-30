@@ -1,0 +1,5 @@
+triton-ascend==3.2.0
+ascendnpu-ir==1.2.0
+numpy==2.2.6
+pybind11==3.0.4
+PyYAML==6.0.3

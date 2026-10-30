@@ -15,6 +15,24 @@ Definition sem_empty {S} (sh : list nat) (ty : mlir_type)
   if supported_shape sh && (f16 ty || f32 ty)
   then Ok (EmptyTensor sh ty) else Error UnsupportedInstruction.
 
+Definition sem_extract_slice {S} (input : value S)
+    (offsets sizes strides : list nat) : result runtime_error (value S) :=
+  if slice_in_bounds (shape input) offsets sizes strides then
+    xs <-? elements input ;;
+    let fix gather coordinates :=
+      match coordinates with
+      | [] => Ok []
+      | coordinate :: rest =>
+          match nth_error xs (linear_coordinate (shape input)
+              (slice_coordinate offsets strides coordinate)) with
+          | None => Error InvalidShape
+          | Some x => tail <-? gather rest ;; Ok (x :: tail)
+          end
+      end in
+    result <-? gather (tensor_indices sizes) ;;
+    make_value sizes (element_type input) result
+  else Error InvalidShape.
+
 Definition expand_operand {S} (dst : value S) (arg : operand S)
     : result runtime_error (list S) :=
   match arg with

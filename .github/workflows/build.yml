@@ -9,6 +9,29 @@ permissions:
   contents: read
 
 jobs:
+  kernel-ir:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Regenerate Triton kernel IR
+        env:
+          TRITON_PYTHON: python3.10
+          ATTENTION_PYTHON: python3.12
+        run: sh scripts/generate_kernel_ir.sh
+
+      - name: Verify archived compiler outputs and mixed IR
+        run: git diff --exit-code -- artifacts/kernels examples/kernels
+
   linux:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -22,6 +45,9 @@ jobs:
 
       - name: Build and test native binaries
         run: docker build --target builder --tag unified-interpreter-builder:ci .
+
+      - name: Verify compiled Triton kernels
+        run: docker run --rm -e KERNEL_OPAM_SWITCH=build unified-interpreter-builder:ci sh scripts/check_compiled_kernels.sh
 
       - name: Export binary distribution
         run: |
@@ -42,6 +68,8 @@ jobs:
           bin/unified-interpreter
           bin/kernel-example --kernel vector-add --output reports/vector-add.json
           bin/kernel-example --kernel row-sum --output reports/row-sum.json
+          bin/kernel-example --kernel vector-add --stage mixed --output reports/vector-add-mixed.json
+          bin/kernel-example --kernel row-sum --stage mixed --output reports/row-sum-mixed.json
           bin/attention --stage both --output reports/attention.json --trace reports/attention.jsonl
 
       - name: Build runtime image

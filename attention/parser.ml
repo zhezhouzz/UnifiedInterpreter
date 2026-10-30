@@ -7,6 +7,11 @@ module E = Extracted_semantics.Unified_semantics
 open Yojson.Safe.Util
 
 type typ = ScalarType of E.mlir_type | ShapedType of string * int list * E.mlir_type
+type index_expr = Static of int | Dynamic of string
+let index_expr = function
+  | `Assoc ["static", `Int n] -> Static n
+  | `Assoc ["ssa", `String name] -> Dynamic name
+  | _ -> invalid_arg "invalid dynamic index expression"
 type operation = {
   result : string option;
   opcode : string;
@@ -18,6 +23,7 @@ type operation = {
   outputs : string list;
   attributes : (string * Yojson.Safe.t) list;
   region : operation list;
+  else_region : operation list;
   region_arguments : (string * typ) list;
   span : Source.span;
 }
@@ -61,6 +67,7 @@ let rec operation json = {
   outputs = strings (member "outputs" json);
   attributes = json |> member "attributes" |> to_assoc;
   region = json |> member "region" |> to_list |> List.map operation;
+  else_region = json |> member "else_region" |> to_list |> List.map operation;
   region_arguments = json |> member "region_arguments" |> to_list |> List.map argument;
   span = span (member "span" json);
 }

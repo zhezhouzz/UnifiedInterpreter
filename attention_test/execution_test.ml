@@ -2,8 +2,7 @@ open Attention_runtime
 
 let check_case label input =
   let expected = Attention.reference input in
-  let results = List.map (fun name ->
-    let file = "../artifacts/flash_attention/ir/" ^ name in
+  let results = List.map (fun (name,stage,file) ->
     let seen = Hashtbl.create 20 in
     let trace event = match event with
       | `Assoc fields ->
@@ -17,7 +16,7 @@ let check_case label input =
             (Yojson.Basic.to_channel stderr event; output_char stderr '\n'; flush stderr)
       | _ -> ()
     in
-    let result = Attention.run ~trace ~file input in
+    let result = Attention.run ~stage ~trace ~file input in
     let ok_o,err_o = Attention.compare_array expected.o result.o in
     let ok_lse,err_lse = Attention.compare_array expected.lse result.lse in
     Printf.printf "%s/%s: steps=%d calls=%d O error=%g LSE error=%g\n%!"
@@ -25,11 +24,14 @@ let check_case label input =
     assert (Hashtbl.length seen = 20);
     assert (ok_o && ok_lse);
     result
-  ) ["hfusion_level.mlir"; "attention_hivm_compute.mlir"] in
+  ) ["archived-hfusion", "hfusion", "../artifacts/flash_attention/ir/hfusion_level.mlir";
+     "archived-hivm", "hivm", "../artifacts/flash_attention/ir/attention_hivm_compute.mlir";
+     "compiled-hfusion", "hfusion", "../artifacts/kernel_IR/attention/hfusion.mlir";
+     "compiled-hivm", "hivm", "../artifacts/kernel_IR/attention/hivm.mlir"] in
   match results with
-  | [a;b] ->
+  | a::rest -> List.iter (fun (b : Attention.output) ->
       assert (fst (Attention.compare_array a.o b.o));
-      assert (fst (Attention.compare_array a.lse b.lse))
+      assert (fst (Attention.compare_array a.lse b.lse))) rest
   | _ -> assert false
 
 let check_mutation random =

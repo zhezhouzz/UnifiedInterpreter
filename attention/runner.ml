@@ -39,6 +39,11 @@ let last_type (op : operation) =
   match op.result_type with
   | Some (ShapedType (_,sh,ty)) -> sh,ty
   | _ -> error op "missing shaped result type"
+let check_result_shape op shape =
+  let expected,_ = last_type op in
+  if List.length expected <> List.length shape ||
+     not (List.for_all2 (fun declared actual -> declared = -1 || declared = actual) expected shape)
+  then error op "runtime slice result shape mismatch"
 let trailing_scalar (op : operation) =
   match op.result_type with
   | Some (ScalarType ty) -> ty | _ -> error op "missing scalar result type"
@@ -47,6 +52,14 @@ let get env op name =
   | Some v -> v | None -> error op ("undefined SSA value " ^ name)
 let integer op = function Int (ty,x) -> ty,x | _ -> error op "expected integer"
 let floating op = function Float (ty,x) -> ty,x | _ -> error op "expected float"
+let indices env op key =
+  Yojson.Safe.Util.(attribute op key |> to_list) |> List.map (fun json ->
+    let value = match Parser.index_expr json with
+      | Static n -> n
+      | Dynamic name -> Numeric.int_of_z (snd (integer op (get env op name))) in
+    if value < 0 || (key = "strides" && value = 0) then
+      error op ("invalid slice " ^ key);
+    value)
 let memref op = function Memref (id,sh,ty) -> id,sh,ty | _ -> error op "expected memref"
 let tensor op = function
   | Tensor t -> t
@@ -113,6 +126,14 @@ let rec execute_block ctx env ops =
         if op.opcode = "func.return" || op.opcode = "scf.yield" then env, []
         else if op.opcode = "linalg.yield" then
           env, List.map (get env op) op.operands
+        else if op.opcode = "scf.if" then begin
+          let condition = match op.operands with
+            | [name] -> snd (integer op (get env op name))
+            | _ -> error op "invalid if condition" in
+          ignore (execute_block ctx env
+            (if condition = E.Z0 then op.else_region else op.region));
+          execute_block ctx env rest
+        end
         else if op.opcode = "scf.for" then begin
           (match op.operands,op.region_arguments with
           | [lo;hi;step],[(iv,_)] ->
@@ -170,14 +191,23 @@ and execute_op ctx env op =
           some (Float (ty,common (H.Float_constant (ty,float_literal literal))))
       | `Int n -> some (Int (ty,common (H.Integer_constant (ty,Numeric.z_of_int n))))
       | _ -> error op "invalid constant payload")
-  | "arith.addi" | "arith.muli" | "arith.divsi" | "arith.remsi" ->
+  | "arith.addi" | "arith.subi" | "arith.maxsi" | "arith.minsi"
+  | "arith.muli" | "arith.divsi" | "arith.remsi" ->
       let a,b = two () in
       let ty,a = integer op a and ty',b = integer op b in
       if ty <> ty' || ty <> trailing_scalar op then error op "integer type mismatch";
       let operator = match op.opcode with
         | "arith.addi" -> E.ArithAddI | "arith.muli" -> E.ArithMulI
+        | "arith.subi" -> E.ArithSubI | "arith.maxsi" -> E.ArithMaxSI
+        | "arith.minsi" -> E.ArithMinSI
         | "arith.divsi" -> E.ArithDivSI | _ -> E.ArithRemSI in
       some (Int (ty,common (H.Integer_binary (operator,ty,a,b))))
+  | "arith.cmpi" ->
+      let a,b = two () in
+      let ty,a = integer op a and ty',b = integer op b in
+      if ty <> ty' then error op "comparison type mismatch";
+      let predicate = Yojson.Safe.Util.to_int (attribute op "predicate") in
+      some (Int (scalar_type "i1",common (H.Integer_compare (predicate,ty,a,b))))
   | "arith.extsi" | "arith.index_cast" ->
       let src,x = integer op (one ()) and dst = trailing_scalar op in
       let operator = if op.opcode = "arith.extsi" then E.ArithExtSI else E.ArithIndexCast in
@@ -190,6 +220,19 @@ and execute_op ctx env op =
       some (Float (ty,common (H.Scalar_binary (operator,a,b))))
   | "tensor.empty" ->
       let sh,ty = last_type op in some (Tensor (common (H.Empty (sh,ty))))
+  | "tensor.extract_slice" ->
+      let src = tensor op (lookup (List.hd op.operands)) in
+      let sizes = indices env op "sizes" in
+      check_result_shape op sizes;
+      some (Tensor (common (H.Extract_slice (src,indices env op "offsets",
+        sizes,indices env op "strides"))))
+  | "memref.subview" ->
+      let id,_,ty = memref op (lookup (List.hd op.operands)) in
+      let sizes = indices env op "sizes" in
+      check_result_shape op sizes;
+      let id = H.memory "sem_memref_subview" (E.sem_memref_subview id
+        (indices env op "offsets") sizes (indices env op "strides")) in
+      some (Memref (id,sizes,ty))
   | "tensor.expand_shape" | "tensor.collapse_shape" ->
       let src = tensor op (one ()) in
       let target,_ = last_type op in
@@ -232,7 +275,11 @@ and execute_op ctx env op =
   | _ ->
       let ins = List.map lookup op.inputs in
       let outs = List.map lookup op.outputs in
-      let dst = match outs with [x] -> tensor op x | _ -> error op "expected one destination" in
+      let destination = match outs with [x] -> x | _ -> error op "expected one destination" in
+      let dst = match destination with
+        | Memref (_,shape,ty) when op.opcode = "linalg.fill" || op.opcode = "hivm.hir.vbrc" ->
+            E.EmptyTensor (shape,ty)
+        | x -> tensor op x in
       let unary () = match ins with [x] -> tensor op x | _ -> error op "expected one input" in
       let binary () = match ins with [a;b] -> a,b | _ -> error op "expected two inputs" in
       let result = match op.opcode with
@@ -294,4 +341,7 @@ and execute_op ctx env op =
               hivm (E.MmadRequest (spec,tensor op a,tensor op b,dst))
           | _ -> error op "invalid matrix operands")
       | _ -> error op ("unsupported operation " ^ op.opcode)
-      in some result
+      in match destination with
+      | Memref (id,_,_) ->
+          Effect.perform (H.Memory ("write_result",E.write_result (tensor op result) id)); None
+      | _ -> some result

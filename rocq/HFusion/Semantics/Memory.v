@@ -18,6 +18,10 @@ Definition sem_memref_reinterpret_cast {Scalar} (source : descriptor_id)
     : memory_computation Scalar descriptor_id :=
   perform (Reinterpret source offset sizes strides).
 
+Definition sem_memref_subview {Scalar} (source : descriptor_id)
+    (offsets sizes strides : list nat) : memory_computation Scalar descriptor_id :=
+  perform (Subview source offsets sizes strides).
+
 (* MLIR memref.copy permits different layouts but requires equal logical shape
    and element type. Those type conditions belong to elaboration; the dynamic
    semantics checks the documented non-overlap precondition and copies by

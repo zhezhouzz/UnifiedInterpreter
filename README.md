@@ -39,15 +39,20 @@ The H1–H5 demonstration described below remains a separate shallow embedding.
 
 Two small MLIR kernel examples are available in
 [`examples/kernels`](examples/kernels): vector addition and row sum, each with
-HFusion and HIVM variants. Run them through the same extracted semantics and
+Triton-compiled HFusion and HIVM variants and a mixed variant assembled from
+their compiled output segments. Compiler artifacts, versions and regeneration
+commands are documented in [`artifacts/kernels`](artifacts/kernels/README.md).
+Run them through the same extracted semantics and
 effect handlers:
 
 ```sh
 opam exec --switch=unified-interpreter -- dune exec kernel-example -- --kernel vector-add
 opam exec --switch=unified-interpreter -- dune exec kernel-example -- --kernel row-sum
+opam exec --switch=unified-interpreter -- dune exec kernel-example -- --kernel vector-add --stage mixed
+opam exec --switch=unified-interpreter -- dune exec kernel-example -- --kernel row-sum --stage mixed
 ```
 
-See the [kernel walkthrough](docs/user-guide.md#9-运行两个小型-kernel) for inputs,
+See the [kernel walkthrough](docs/user-guide.md#3-执行并检查三个-kernel) for inputs,
 expected results, trace output and the OCaml interface.
 
 The key design point is that there is **one shallow-embedded program language**.

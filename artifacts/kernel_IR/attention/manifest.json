@@ -1,0 +1,157 @@
+{
+  "target": "Ascend910B1",
+  "versions": {
+    "triton-ascend": "3.2.0",
+    "ascendnpu-ir": "1.2.0",
+    "pybind11": "3.1.0"
+  },
+  "artifacts": {
+    "ttir-raw": {
+      "path": "ttir-raw.mlir",
+      "bytes": 27237,
+      "sha256": "e3bc64828a923dd4ae91484c8d3b6f1878360f4ae9f12530bc07a129c1b5035b"
+    },
+    "ttir": {
+      "path": "ttir.mlir",
+      "bytes": 11490,
+      "sha256": "4ed3827c72707231a8d336160c697cba17a79c22961ce0a3dc51ee89d9cc2d34"
+    },
+    "linalg": {
+      "path": "linalg.mlir",
+      "bytes": 6228,
+      "sha256": "33d223f8b8694531d46aa3aed661ec1efde6f93bc1d8ee080a88a029c606e804"
+    },
+    "hivm-opt": {
+      "path": "lowered.mlir",
+      "bytes": 48875,
+      "sha256": "f860c964130e7d7f53e70369bc3e7c9e2f3139f6d29a326afbc6020d16414150"
+    },
+    "hfusion": {
+      "path": "hfusion.mlir",
+      "bytes": 8879,
+      "sha256": "c5595f4618b8b4cc4d87fe59e244c8115559a61077f9efb83bf178401b48b141"
+    },
+    "hivm": {
+      "path": "hivm.mlir",
+      "bytes": 8216,
+      "sha256": "347bde8bc154f76727ffaae2f697ef718fdb2cd48e17fd90817c506f9c79609a"
+    }
+  },
+  "commands": [
+    {
+      "argv": [
+        "/home/lyf/miniconda3/envs/py310/lib/python3.10/site-packages/ascendnpuir/bin/bishengir-opt",
+        "/home/lyf/workspace/export-ir/exports/attention/linalg.mlir",
+        "--canonicalize-module",
+        "--hacc-append-device-spec=target=Ascend910B1",
+        "--lower-hfusion-pipeline=enable-triton-kernel-compile=true",
+        "--convert-to-hivm-pipeline=enable-triton-kernel-compile=true",
+        "--optimize-hivm-pipeline=enable-triton-kernel-compile=true",
+        "--mlir-disable-threading",
+        "--mlir-print-ir-module-scope",
+        "--mlir-print-ir-tree-dir=/home/lyf/workspace/export-ir/exports/attention/passes",
+        "--mlir-print-ir-after-all",
+        "-o",
+        "/home/lyf/workspace/export-ir/exports/attention/lowered.mlir"
+      ],
+      "returncode": 0,
+      "stderr": "lower.stderr.log"
+    }
+  ],
+  "status": "complete",
+  "kernel": "_attn_fwd",
+  "signature": {
+    "Q": "*fp16",
+    "K": "*fp16",
+    "V": "*fp16",
+    "Out": "*fp16",
+    "M": "*fp32",
+    "acc": "*fp32",
+    "sm_scale": "fp32"
+  },
+  "constants": {
+    "stride_qz": 16384,
+    "stride_qh": 16384,
+    "stride_qm": 128,
+    "stride_qk": 1,
+    "stride_kz": 16384,
+    "stride_kh": 16384,
+    "stride_kn": 128,
+    "stride_kk": 1,
+    "stride_vz": 16384,
+    "stride_vh": 16384,
+    "stride_vn": 128,
+    "stride_vk": 1,
+    "stride_oz": 16384,
+    "stride_oh": 16384,
+    "stride_om": 128,
+    "stride_on": 1,
+    "Z": 1,
+    "H": 1,
+    "N_CTX": 128,
+    "HEAD_DIM": 128,
+    "BLOCK_M": 32,
+    "BLOCK_N": 128,
+    "STAGE": 1
+  },
+  "options": {
+    "debug": false,
+    "sanitize_overflow": true,
+    "llvm_version": 15,
+    "kernel_name": "triton_",
+    "cluster_dims": [
+      1,
+      1,
+      1
+    ],
+    "num_warps": 4,
+    "num_ctas": 1,
+    "num_stages": 1,
+    "warp_size": 32,
+    "num_buffers_warp_spec": 0,
+    "num_consumer_groups": 0,
+    "reg_dec_producer": 0,
+    "reg_inc_consumer": 0,
+    "compile_on_910_95": false,
+    "enable_linearize": false,
+    "enable_warp_specialization": false,
+    "enable_nd2nz_on_vector": false,
+    "enable_persistent": false,
+    "optimize_epilogue": false,
+    "enable_fp_fusion": true,
+    "allow_fp8e4nv": false,
+    "allowed_dot_input_precisions": [
+      "ieee",
+      "hf32"
+    ],
+    "max_num_imprecise_acc_default": null,
+    "extern_libs": null,
+    "multibuffer": true,
+    "enable_auto_bind_sub_block": true,
+    "enable_select_analysis": false,
+    "enable_hivm_auto_cv_balance": null,
+    "sync_solver": null,
+    "unit_flag": null,
+    "inject_barrier_all": null,
+    "inject_block_all": null,
+    "limit_auto_multi_buffer_only_for_local_buffer": null,
+    "limit_auto_multi_buffer_of_local_buffer": null,
+    "set_workspace_multibuffer": null,
+    "tile_mix_vector_loop": null,
+    "tile_mix_cube_loop": null,
+    "disable_auto_inject_block_sync": null,
+    "stream": null,
+    "parallel_mode": "simd",
+    "force_simt_only": false,
+    "force_simt_template": false,
+    "compile_mode": "simd"
+  },
+  "requested_levels": [
+    "ttir-raw",
+    "ttir",
+    "linalg",
+    "hfusion",
+    "hivm",
+    "hivm-opt"
+  ]
+}

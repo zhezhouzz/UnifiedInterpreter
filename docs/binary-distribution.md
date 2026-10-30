@@ -23,6 +23,8 @@ ATTENTION_PYTHON=python3 sh scripts/bootstrap_attention.sh
 bin/unified-interpreter
 bin/kernel-example --kernel vector-add
 bin/kernel-example --kernel row-sum
+bin/kernel-example --kernel vector-add --stage mixed
+bin/kernel-example --kernel row-sum --stage mixed
 bin/attention --stage both --output reports/attention.json
 bin/attention --stage mixed --ir examples/attention_mixed.mlir \
   --output reports/attention-mixed.json
@@ -84,3 +86,9 @@ examples remain available.
 The CI workflow also verifies the relocated binary distribution and builds and
 executes the runtime image, including both attention stages and the mixed-stage
 example. It uploads the binary archive and checksum as workflow artifacts.
+
+A separate CI job regenerates the small kernels from their archived Triton
+source with the pinned compiler environment, assembles mixed IR from the
+HFusion/HIVM output segments, and checks the results against the repository.
+Compiler provenance and regeneration instructions are documented in the
+repository's `artifacts/kernels/README.md`.

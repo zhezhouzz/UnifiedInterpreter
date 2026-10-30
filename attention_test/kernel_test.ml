@@ -20,12 +20,18 @@ let run_case name bindings expected =
     assert (List.length !events = result.calls);
     let expected_entry = if stage = "hivm" then "HIVM.evaluate"
       else if name = "vector-add" then "sem_linalg_elemwise_binary" else "sem_linalg_reduce" in
+    let expected_stage = if stage = "mixed" then "hfusion" else stage in
     assert (List.exists (function `Assoc fields ->
-      List.assoc_opt "ir_stage" fields = Some (`String stage) &&
+      List.assoc_opt "ir_stage" fields = Some (`String expected_stage) &&
       List.assoc_opt "entry" fields = Some (`String expected_entry)
       | _ -> false) !events);
+    if stage = "mixed" then
+      List.iter (fun ir_stage ->
+        assert (List.exists (function `Assoc fields ->
+          List.assoc_opt "ir_stage" fields = Some (`String ir_stage)
+          | _ -> false) !events)) ["hfusion"; "hivm"];
     Printf.printf "%s/%s: numerical result and handler trace passed\n%!" name stage
-  ) ["hfusion";"hivm"]
+  ) ["hfusion";"hivm";"mixed"]
 
 let () =
   List.iter (fun name ->

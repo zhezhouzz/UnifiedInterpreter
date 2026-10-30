@@ -1,0 +1,152 @@
+{
+  "packages": {
+    "triton-ascend": "3.2.0",
+    "ascendnpu-ir": "1.2.0"
+  },
+  "target": "Ascend910B1",
+  "num_warps": 4,
+  "source": "examples/kernels/source/kernels.py",
+  "source_sha256": "84fa7edecdf030b4d54ccfca76ed70dd76e9b8e53469632358f107005b8245b9",
+  "generator_sha256": "29792a5b6973ff2c9b484206b13c03aad48ffd215df0ec3040e32f43a87d546a",
+  "tools": {
+    "triton-adapter-opt": "5383323d7d260eb9ea2d98edc4b64ff8cbf04510e3e284cb7edab1c888678804",
+    "bishengir-opt": "caf28a19f454d0c57d6c0d305e008a5fed4c3be567dd19592b8a040e3e9d9614"
+  },
+  "adapter_options": {
+    "named_ops": true,
+    "enable_nd2nz_on_vector": false,
+    "enable_select_analysis": false,
+    "compile_on_910_95": false,
+    "force_simt_template": false
+  },
+  "hfusion_passes": [
+    "convert-arith-to-hfusion"
+  ],
+  "hivm_passes": [
+    "convert-hfusion-to-hivm"
+  ],
+  "kernels": {
+    "vector_add": {
+      "source": "examples/kernels/source/kernels.py",
+      "source_sha256": "84fa7edecdf030b4d54ccfca76ed70dd76e9b8e53469632358f107005b8245b9",
+      "signature": {
+        "a": "*fp32",
+        "b": "*fp32",
+        "out": "*fp32"
+      },
+      "constants": {
+        "BLOCK": 4
+      },
+      "hfusion_passes": [
+        "convert-arith-to-hfusion"
+      ],
+      "hivm_passes": [
+        "convert-hfusion-to-hivm"
+      ],
+      "artifacts": {
+        "vector_add.ttir.mlir": "d9b0b710e0bca35073e6ef78b0ad857d203d5a3c54170e0b6630fac6a123b620",
+        "vector_add.hfusion.mlir": "81e9c431eac2dd1fc27efe1ffa98123fb8e33de3d61fecca3c2a57c00564fe53",
+        "vector_add.hivm.mlir": "cf9cbb6ac6b43ec98720a6cdf67c7d81bba3411ab98764b21635a7e5ee565195"
+      }
+    },
+    "row_sum": {
+      "source": "examples/kernels/source/kernels.py",
+      "source_sha256": "84fa7edecdf030b4d54ccfca76ed70dd76e9b8e53469632358f107005b8245b9",
+      "signature": {
+        "input": "*fp32",
+        "out": "*fp32"
+      },
+      "constants": {
+        "ROWS": 3,
+        "COLS": 4
+      },
+      "hfusion_passes": [
+        "convert-arith-to-hfusion"
+      ],
+      "hivm_passes": [
+        "convert-hfusion-to-hivm"
+      ],
+      "artifacts": {
+        "row_sum.ttir.mlir": "2bcd1cb02113e0c25d691380f29e3ae5a17483c580dc2594061c0081d1274041",
+        "row_sum.hfusion.mlir": "70c349a32edca9489aa6611a61d5a3524e698df49a199f4c2fb0c25e10f84b95",
+        "row_sum.hivm.mlir": "1d09ae19aad206e98de796b19d4565b6ac5aadf7d99043b40147472afbdecb80"
+      }
+    },
+    "add_kernel": {
+      "source": "examples/kernels/source/kernels.py",
+      "source_sha256": "84fa7edecdf030b4d54ccfca76ed70dd76e9b8e53469632358f107005b8245b9",
+      "signature": {
+        "X": "*fp32",
+        "Y": "*fp32",
+        "Z": "*fp32",
+        "n_elements": "i32"
+      },
+      "constants": {
+        "BLOCK_SIZE": 256
+      },
+      "hfusion_passes": [
+        "convert-arith-to-hfusion"
+      ],
+      "hivm_passes": [
+        "convert-hfusion-to-hivm"
+      ],
+      "artifacts": {
+        "add_kernel.ttir.mlir": "9e107003d1f7280c5eb45fb6a18b2c8d5718ab6613ec15aa8c2cd84b362a31ef",
+        "add_kernel.hfusion.mlir": "8c2afc2b75dc9e698a771a1183ccebbeaa6a26e45ef618a8ca74d203cb46a821",
+        "add_kernel.hivm.mlir": "e4f1561a3b6bc4700a2954d08218db9e3977557b0556bd9b8caf8387126ed88a"
+      }
+    },
+    "_attn_fwd": {
+      "source": "artifacts/flash_attention/source/06-fused-attention.py",
+      "source_sha256": "86db552aa48fc17d6e24a1fe3eb17ee7979145ad0642f47996aae186468bae1b",
+      "signature": {
+        "Q": "*fp16",
+        "K": "*fp16",
+        "V": "*fp16",
+        "M": "*fp32",
+        "Out": "*fp16",
+        "acc": "*fp32",
+        "sm_scale": "fp32"
+      },
+      "constants": {
+        "stride_qz": 16384,
+        "stride_qh": 16384,
+        "stride_qm": 128,
+        "stride_qk": 1,
+        "stride_kz": 16384,
+        "stride_kh": 16384,
+        "stride_kn": 128,
+        "stride_kk": 1,
+        "stride_vz": 16384,
+        "stride_vh": 16384,
+        "stride_vn": 128,
+        "stride_vk": 1,
+        "stride_oz": 16384,
+        "stride_oh": 16384,
+        "stride_om": 128,
+        "stride_on": 1,
+        "Z": 1,
+        "H": 1,
+        "N_CTX": 128,
+        "HEAD_DIM": 128,
+        "BLOCK_M": 32,
+        "BLOCK_N": 128,
+        "STAGE": 1
+      },
+      "hfusion_passes": [
+        "convert-arith-to-hfusion",
+        "convert-math-to-hfusion",
+        "convert-linalg-to-hfusion"
+      ],
+      "hivm_passes": [
+        "canonicalize-ext",
+        "convert-hfusion-to-hivm=mm-map-mode=macro_instr"
+      ],
+      "artifacts": {
+        "_attn_fwd.ttir.mlir": "3a6844840b4ba6433bb330adaf8d18a120dcaf746248d5cf97d58ac6b2eeaeb7",
+        "_attn_fwd.hfusion.mlir": "21fb0f3a0c62a70ea7f100ffd090e12da7de6f84a8e5a64d6632bdcc02e85c9f",
+        "_attn_fwd.hivm.mlir": "7774d92c74fe2312b8bef638dea9a52bed69d4dfdbb36973a990cf87dffdcda2"
+      }
+    }
+  }
+}

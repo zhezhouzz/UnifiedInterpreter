@@ -26,6 +26,27 @@ let () =
    | exception Failure message -> assert (String.length message > 0));
   let file = "../artifacts/flash_attention/ir/attention_hivm_compute.mlir" in
   let p = Parser.parse ~file (read file) in
+  let new_hfusion_file = "../artifacts/kernel_IR/attention/hfusion.mlir" in
+  let new_hivm_file = "../artifacts/kernel_IR/attention/hivm.mlir" in
+  let new_hfusion = Parser.parse ~file:new_hfusion_file (read new_hfusion_file) in
+  let new_hivm = Parser.parse ~file:new_hivm_file (read new_hivm_file) in
+  let old_abi = Validate.attention_abi ~stage:"hivm" p in
+  let hfusion_abi = Validate.attention_abi ~stage:"hfusion" new_hfusion in
+  let hivm_abi = Validate.attention_abi ~stage:"hivm" new_hivm in
+  assert (old_abi.pid_x = "%arg13" && old_abi.lse_type = Runner.E.Float32Type);
+  assert (hfusion_abi.ffts = None && hfusion_abi.pid_x = "%arg12");
+  assert (hivm_abi.ffts = Some "%arg0" && hivm_abi.pid_x = "%arg13");
+  assert (hfusion_abi.lse_type = Runner.E.Float16Type && hfusion_abi.o_type = Runner.E.Float32Type);
+  let names = List.mapi (fun i (name,_) -> name,"%renamed" ^ string_of_int i)
+      new_hfusion.arguments in
+  let rename name = Option.value ~default:name (List.assoc_opt name names) in
+  let rec rename_op (op : Parser.operation) = {op with
+    operands=List.map rename op.operands; inputs=List.map rename op.inputs;
+    outputs=List.map rename op.outputs; region=List.map rename_op op.region} in
+  let renamed = {new_hfusion with arguments=List.map (fun (name,ty) ->
+    rename name,ty) new_hfusion.arguments; body=List.map rename_op new_hfusion.body} in
+  let renamed_abi = Validate.attention_abi ~stage:"hfusion" renamed in
+  assert (renamed_abi.pid_x = "%renamed12");
   let fixture_file = "fixtures/attention_hivm_vadd.mlir" in
   let fixture = Parser.parse ~file:fixture_file (read fixture_file) in
   Validate.program fixture;
@@ -41,6 +62,13 @@ let () =
     | () -> failwith "invalid program accepted"
     | exception Source.Error _ -> ()
     | exception Invalid_argument _ -> () in
+  reject {new_hfusion with arguments=List.tl new_hfusion.arguments};
+  reject {new_hfusion with arguments=new_hfusion.arguments @ ["%extra",Parser.ScalarType (Parser.scalar_type "i32")]};
+  let first_new = List.hd new_hfusion.body in
+  reject {new_hfusion with body={first_new with operands=[hfusion_abi.sync_lock]} :: List.tl new_hfusion.body};
+  reject {new_hfusion with arguments=List.mapi (fun i (name,ty) ->
+    if i = 6 then name,Parser.ShapedType ("memref",[-1],Runner.E.Float16Type) else name,ty)
+    new_hfusion.arguments};
   reject {p with body = {first with opcode="unknown.operation"} :: List.tl p.body};
   reject {p with body = first :: p.body};
   reject {p with body = {first with opcode="arith.addi"; operands=["%missing"]} :: List.tl p.body};

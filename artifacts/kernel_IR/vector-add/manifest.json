@@ -1,0 +1,132 @@
+{
+  "target": "Ascend910B1",
+  "versions": {
+    "triton-ascend": "3.2.0",
+    "ascendnpu-ir": "1.2.0",
+    "pybind11": "3.1.0"
+  },
+  "artifacts": {
+    "ttir-raw": {
+      "path": "ttir-raw.mlir",
+      "bytes": 3135,
+      "sha256": "0c163a7d4d2a14b4d35cd649b14cf260ce587d4c788c50038560c38bf940b86f"
+    },
+    "ttir": {
+      "path": "ttir.mlir",
+      "bytes": 2797,
+      "sha256": "3a41f2cd84c37cbcd1ef0dd28389e5a10a4fe69cd49b6aeb9c6ca26388a1099a"
+    },
+    "linalg": {
+      "path": "linalg.mlir",
+      "bytes": 3021,
+      "sha256": "66ca69b1028da6efb20adbc16ae28cf27c49a87641a04016be4e608bfe748c2f"
+    },
+    "hivm-opt": {
+      "path": "lowered.mlir",
+      "bytes": 9789,
+      "sha256": "d6c96059ef395dac083949f2e3811b22cfcfaddce5527fb19ebd9982040d26d0"
+    },
+    "hfusion": {
+      "path": "hfusion.mlir",
+      "bytes": 3959,
+      "sha256": "517ef50d58383784428cb8c96d4fa4db3a99e42f7faebe15220700b9be14e067"
+    },
+    "hivm": {
+      "path": "hivm.mlir",
+      "bytes": 4116,
+      "sha256": "f43cbfb1a541efe4c443acf438bc9b61cda9ea10afaaf16633d096241bf46cc9"
+    }
+  },
+  "commands": [
+    {
+      "argv": [
+        "/home/lyf/miniconda3/envs/py310/lib/python3.10/site-packages/ascendnpuir/bin/bishengir-opt",
+        "/home/lyf/workspace/export-ir/exports/vector-add/linalg.mlir",
+        "--canonicalize-module",
+        "--hacc-append-device-spec=target=Ascend910B1",
+        "--lower-hfusion-pipeline=enable-triton-kernel-compile=true",
+        "--convert-to-hivm-pipeline=enable-triton-kernel-compile=true",
+        "--optimize-hivm-pipeline=enable-triton-kernel-compile=true",
+        "--mlir-disable-threading",
+        "--mlir-print-ir-module-scope",
+        "--mlir-print-ir-tree-dir=/home/lyf/workspace/export-ir/exports/vector-add/passes",
+        "--mlir-print-ir-after-all",
+        "-o",
+        "/home/lyf/workspace/export-ir/exports/vector-add/lowered.mlir"
+      ],
+      "returncode": 0,
+      "stderr": "lower.stderr.log"
+    }
+  ],
+  "status": "complete",
+  "kernel": "add_kernel",
+  "signature": {
+    "X": "*fp32",
+    "Y": "*fp32",
+    "Z": "*fp32",
+    "n_elements": "i32"
+  },
+  "constants": {
+    "BLOCK_SIZE": 256
+  },
+  "options": {
+    "debug": false,
+    "sanitize_overflow": true,
+    "llvm_version": 15,
+    "kernel_name": "triton_",
+    "cluster_dims": [
+      1,
+      1,
+      1
+    ],
+    "num_warps": 4,
+    "num_ctas": 1,
+    "num_stages": 1,
+    "warp_size": 32,
+    "num_buffers_warp_spec": 0,
+    "num_consumer_groups": 0,
+    "reg_dec_producer": 0,
+    "reg_inc_consumer": 0,
+    "compile_on_910_95": false,
+    "enable_linearize": false,
+    "enable_warp_specialization": false,
+    "enable_nd2nz_on_vector": false,
+    "enable_persistent": false,
+    "optimize_epilogue": false,
+    "enable_fp_fusion": true,
+    "allow_fp8e4nv": false,
+    "allowed_dot_input_precisions": [
+      "ieee",
+      "hf32"
+    ],
+    "max_num_imprecise_acc_default": null,
+    "extern_libs": null,
+    "multibuffer": true,
+    "enable_auto_bind_sub_block": true,
+    "enable_select_analysis": false,
+    "enable_hivm_auto_cv_balance": null,
+    "sync_solver": null,
+    "unit_flag": null,
+    "inject_barrier_all": null,
+    "inject_block_all": null,
+    "limit_auto_multi_buffer_only_for_local_buffer": null,
+    "limit_auto_multi_buffer_of_local_buffer": null,
+    "set_workspace_multibuffer": null,
+    "tile_mix_vector_loop": null,
+    "tile_mix_cube_loop": null,
+    "disable_auto_inject_block_sync": null,
+    "stream": null,
+    "parallel_mode": "simd",
+    "force_simt_only": false,
+    "force_simt_template": false,
+    "compile_mode": "simd"
+  },
+  "requested_levels": [
+    "ttir-raw",
+    "ttir",
+    "linalg",
+    "hfusion",
+    "hivm",
+    "hivm-opt"
+  ]
+}
