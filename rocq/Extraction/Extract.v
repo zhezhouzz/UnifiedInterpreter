@@ -1,4 +1,5 @@
 From Stdlib Require Import Extraction ExtrOcamlBasic ExtrOcamlNatInt.
+From Stdlib Require Import ExtrOCamlInt63 ExtrOCamlPArray.
 From UnifiedInterpreter.Examples Require Import FrameworkSmoke.
 From UnifiedInterpreter.HFusion.Semantics Require Import
   ElemwiseBinary Reduce Cast.
@@ -14,6 +15,10 @@ From UnifiedInterpreter.HFusion.Semantics Require Import Structured.
 From UnifiedInterpreter.Examples Require Import HIVMCompute HIVMMemory HIVMExceptional.
 
 Extraction Language OCaml.
+(* 保留数组类型别名，供官方 Parray 类型映射使用。 *)
+Extraction NoInline PrimArray.array.
+(* 空内存提取为构造器值，满足 OCaml 的多态值限制。 *)
+Extraction Inline base.empty gmap.gmap_empty gmap.gset_empty mapset.mapset_empty.
 Set Extraction Output Directory "Extraction".
 
 Extraction "unified_semantics.ml"

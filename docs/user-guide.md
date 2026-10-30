@@ -22,7 +22,7 @@ export TMPDIR="$PWD/_build/task-tmp"
 ```sh
 opam switch create unified-interpreter ocaml-base-compiler.5.3.0
 opam repository add coq-released https://coq.inria.fr/opam/released --switch=unified-interpreter
-opam install --switch=unified-interpreter dune.3.23.1 rocq-prover rocq-core.9.1.0 rocq-stdlib.9.1.0 rocq-stdpp.1.13.0 zarith.1.14 yojson.2.2.2
+opam install --switch=unified-interpreter dune.3.23.1 rocq-prover rocq-core.9.1.0 rocq-runtime.9.1.0 rocq-stdlib.9.1.0 rocq-stdpp.1.13.0 zarith.1.14 yojson.2.2.2
 ```
 
 这些版本取自本项目已安装的环境；`rocq-prover` 是元包，其版本与 `rocq-core` 的版本编号不同。仓库依赖声明位于 [dune-project](../dune-project)。若 `coq-released` 已经关联此 switch，可跳过添加仓库的命令；使用 `opam repository list --switch=unified-interpreter` 查看关联情况。
@@ -42,7 +42,9 @@ opam exec --switch=unified-interpreter -- dune exec attention -- --help
 .venv-attention/bin/python -m pip show xdsl
 ```
 
-构建会编译 Rocq 文件、导出 OCaml 语义并构建解释器。生成文件位于 `_build/`，无需手动编辑导出的 `.ml` 文件。后续打开新终端时，进入仓库根目录并重新设置 `TMPDIR`，然后使用下面的运行命令。
+构建会编译 Rocq 文件、导出 OCaml 语义并构建解释器。内存 buffer 使用官方 `PArray`，通过 `rocq-runtime.kernel` 链接其 OCaml 实现；设计和验证见 [PArray 内存模型](parray-memory.md)。生成文件位于 `_build/`，无需手动编辑导出的 `.ml` 文件。后续打开新终端时，进入仓库根目录并重新设置 `TMPDIR`，然后使用下面的运行命令。
+
+内存 buffer 使用分页 `PArray`，提取后链接官方 `rocq-runtime.kernel`。数据表示、语义证明和验证方法见 [PArray 内存模型与验证](parray-memory.md)。
 
 ## 2. 运行同一个 attention 的两个 IR 阶段
 

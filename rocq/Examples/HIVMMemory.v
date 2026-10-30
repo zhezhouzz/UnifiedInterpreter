@@ -39,7 +39,7 @@ Example composition_writes_expected_cells :
   match memory_result with
   | Ok (_, memory) =>
       match lookup_buffer 2%nat memory with
-      | Some storage => buffer_cells storage =
+      | Some storage => cells_to_list (buffer_cells storage) =
           [Initialized 11;Initialized 12;Initialized 14;Initialized 15]
       | None => False end
   | Error _ => False end.
@@ -108,7 +108,7 @@ Definition memory_check : bool :=
       match lookup_buffer 2%nat memory with
       | Some storage =>
           Nat.eqb (marker state) 73 &&
-          match buffer_cells storage with
+          match cells_to_list (buffer_cells storage) with
           | [Initialized a;Initialized b;Initialized c;Initialized d] =>
               Z.eqb a 11 && Z.eqb b 12 && Z.eqb c 14 && Z.eqb d 15
           | _ => false end

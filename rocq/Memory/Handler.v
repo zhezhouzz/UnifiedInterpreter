@@ -39,12 +39,8 @@ Definition descriptor_in_bounds {Value} (memory : memory_state Value)
   | None => false
   | Some storage =>
       forallb (fun address =>
-        match address with
-        | Zneg _ => false
-        | Z0 => negb (Nat.eqb (length (buffer_cells storage)) 0)
-        | Zpos positive =>
-            Nat.ltb (Pos.to_nat positive) (length (buffer_cells storage))
-        end) (descriptor_addresses descriptor)
+        (0 <=? address) && (address <? cells_length (buffer_cells storage)))
+        (descriptor_addresses descriptor)
   end.
 
 Definition handle_allocate {Value} (space : address_space)

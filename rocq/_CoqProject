@@ -12,6 +12,7 @@ Value/Scalar.v
 Tensor/Model.v
 Tensor/Matrix.v
 Memory/Model.v
+Memory/ArrayLaws.v
 Memory/Effects.v
 Unified/Events.v
 Unified/Errors.v

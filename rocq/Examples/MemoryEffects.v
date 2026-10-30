@@ -40,7 +40,7 @@ Example artifact_path_copies_strided_view :
   match artifact_memory_result with
   | Ok ((_, _, _), memory, _) =>
       match lookup_buffer 1%nat memory with
-      | Some storage => buffer_cells storage =
+      | Some storage => cells_to_list (buffer_cells storage) =
           [Initialized 1; Initialized 2; Initialized 4; Initialized 5]
       | None => False
       end

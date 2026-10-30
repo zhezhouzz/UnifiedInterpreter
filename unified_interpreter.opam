@@ -5,6 +5,7 @@ depends: [
   "ocaml" {>= "5.0"}
   "dune" {>= "3.11"}
   "rocq-prover"
+  "rocq-runtime"
   "rocq-stdpp"
   "zarith"
   "yojson"

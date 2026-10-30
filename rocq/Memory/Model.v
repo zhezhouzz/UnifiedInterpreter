@@ -1,4 +1,4 @@
-From Stdlib Require Import List ZArith.
+From Stdlib Require Import List ZArith PArray Uint63 Lia.
 From stdpp Require Import gmap.
 From UnifiedInterpreter.Base Require Import Result.
 From UnifiedInterpreter.Tensor Require Import Model.
@@ -18,12 +18,74 @@ Inductive memory_cell (Value : Type) :=
 Arguments Uninitialized {Value}.
 Arguments Initialized {Value} _.
 
+Definition page_size : Z := 4096.
+Definition page_index (address : Z) := address / page_size.
+Definition page_offset (address : Z) := Uint63.of_Z (address mod page_size).
+
+Record cell_page (Value : Type) := {
+  page_data : PArray.array (memory_cell Value);
+  page_length : PArray.length page_data = 4096%uint63
+}.
+
+Definition empty_page {Value} (_ : unit) : cell_page Value.
+Proof.
+  refine {| page_data := PArray.make 4096%uint63 Uninitialized |}.
+  reflexivity.
+Defined.
+
+Definition update_page {Value} (page : cell_page Value) (index : Uint63.int)
+    (value : memory_cell Value) : cell_page Value.
+Proof.
+  refine {| page_data := PArray.set (page_data page) index value |}.
+  rewrite PArray.length_set. apply page_length.
+Defined.
+
+(* 每页使用持久化数组，页表保留任意长度的逻辑地址空间。 *)
+Record cell_storage (Value : Type) := {
+  cells_length : Z;
+  cells_pages : gmap Z (cell_page Value)
+}.
+
+Definition empty_cells {Value} (size : nat) : cell_storage Value :=
+  {| cells_length := Z.of_nat size; cells_pages := ∅ |}.
+
+Definition cells_get {Value} (cells : cell_storage Value) (address : Z)
+    : memory_cell Value :=
+  match cells_pages cells !! page_index address with
+  | None => Uninitialized
+  | Some page => PArray.get (page_data page) (page_offset address)
+  end.
+
+Definition cells_set {Value} (cells : cell_storage Value) (address : Z)
+    (value : memory_cell Value) : cell_storage Value :=
+  let page := match cells_pages cells !! page_index address with
+              | Some page => page | None => empty_page tt end in
+  {| cells_length := cells_length cells;
+     cells_pages := <[page_index address :=
+       update_page page (page_offset address) value]> (cells_pages cells) |}.
+
+Fixpoint initialize_cells {Value} (contents : list Value) (address : Z)
+    (cells : cell_storage Value) : cell_storage Value :=
+  match contents with
+  | [] => cells
+  | value :: rest => initialize_cells rest (address + 1)
+      (cells_set cells address (Initialized value))
+  end.
+
+Definition cells_of_list {Value} (contents : list Value) : cell_storage Value :=
+  initialize_cells contents 0 (empty_cells (List.length contents)).
+
+Definition cells_to_list {Value} (cells : cell_storage Value)
+    : list (memory_cell Value) :=
+  map (fun index => cells_get cells (Z.of_nat index))
+    (seq 0 (Z.to_nat (cells_length cells))).
+
 (* A buffer is mutable linear storage with allocation identity. Unlike a
    tensor, it has no intrinsic n-dimensional shape. *)
 Record buffer (Value : Type) := {
   buffer_address_space : address_space;
   buffer_element_type : mlir_type;
-  buffer_cells : list (memory_cell Value)
+  buffer_cells : cell_storage Value
 }.
 
 (* A descriptor gives an n-dimensional interpretation of a buffer. Creating a
@@ -78,7 +140,7 @@ Definition allocate_buffer {Value} (space : address_space) (element_type : mlir_
    {| memory_buffers :=
         <[id := {| buffer_address_space := space;
                    buffer_element_type := element_type;
-                   buffer_cells := map Initialized contents |}]>
+                   buffer_cells := cells_of_list contents |}]>
           (memory_buffers memory);
       memory_descriptors := memory_descriptors memory;
       memory_restricted_descriptors := memory_restricted_descriptors memory;
@@ -107,56 +169,20 @@ Fixpoint view_cell_offset (offset : Z) (strides : list Z)
 
 Definition read_buffer_cell {Value} (storage : buffer Value) (address : Z)
     : result memory_error Value :=
-  match address with
-  | Zneg _ => Error ViewAddressOutOfBounds
-  | Z0 =>
-      match List.nth_error (buffer_cells storage) 0 with
-      | Some (Initialized value) => Ok value
-      | Some Uninitialized => Error ReadUninitializedCell
-      | None => Error ViewAddressOutOfBounds
-      end
-  | Zpos positive =>
-      match List.nth_error (buffer_cells storage) (Pos.to_nat positive) with
-      | Some (Initialized value) => Ok value
-      | Some Uninitialized => Error ReadUninitializedCell
-      | None => Error ViewAddressOutOfBounds
-      end
-end.
-
-Fixpoint replace_nth {A} (index : nat) (value : A) (values : list A)
-    : option (list A) :=
-  match index, values with
-  | O, _ :: rest => Some (value :: rest)
-  | S index', head :: rest =>
-      match replace_nth index' value rest with
-      | Some rest' => Some (head :: rest')
-      | None => None
-      end
-  | _, _ => None
-  end.
+  if (0 <=? address) && (address <? cells_length (buffer_cells storage)) then
+    match cells_get (buffer_cells storage) address with
+    | Initialized value => Ok value
+    | Uninitialized => Error ReadUninitializedCell
+    end
+  else Error ViewAddressOutOfBounds.
 
 Definition write_buffer_cell {Value} (storage : buffer Value) (address : Z)
     (value : Value) : result memory_error (buffer Value) :=
-  match address with
-  | Zneg _ => Error ViewAddressOutOfBounds
-  | Z0 =>
-      match replace_nth 0 (Initialized value) (buffer_cells storage) with
-      | Some cells =>
-          Ok {| buffer_address_space := buffer_address_space storage;
-                buffer_element_type := buffer_element_type storage;
-                buffer_cells := cells |}
-      | None => Error ViewAddressOutOfBounds
-      end
-  | Zpos positive =>
-      match replace_nth (Pos.to_nat positive) (Initialized value)
-          (buffer_cells storage) with
-      | Some cells =>
-          Ok {| buffer_address_space := buffer_address_space storage;
-                buffer_element_type := buffer_element_type storage;
-                buffer_cells := cells |}
-      | None => Error ViewAddressOutOfBounds
-      end
-  end.
+  if (0 <=? address) && (address <? cells_length (buffer_cells storage)) then
+    Ok {| buffer_address_space := buffer_address_space storage;
+          buffer_element_type := buffer_element_type storage;
+          buffer_cells := cells_set (buffer_cells storage) address (Initialized value) |}
+  else Error ViewAddressOutOfBounds.
 
 Fixpoint row_major_strides (dimensions : list nat) : list Z :=
   match dimensions with
@@ -172,7 +198,7 @@ Definition allocate_memref {Value} (space : address_space)
   let storage :=
     {| buffer_address_space := space;
        buffer_element_type := element_type;
-       buffer_cells := repeat Uninitialized (num_elements dimensions) |} in
+       buffer_cells := empty_cells (num_elements dimensions) |} in
   let view :=
     {| descriptor_allocation := allocation;
        descriptor_offset := 0;
@@ -243,7 +269,7 @@ Lemma allocate_buffer_lookup_new {Value} (space : address_space)
   lookup_buffer id memory' =
     Some {| buffer_address_space := space;
             buffer_element_type := element_type;
-            buffer_cells := map Initialized contents |}.
+            buffer_cells := cells_of_list contents |}.
 Proof.
   unfold allocate_buffer. intro allocated.
   inversion allocated; subst. unfold lookup_buffer. cbn.

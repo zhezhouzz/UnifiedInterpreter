@@ -28,6 +28,11 @@
  (libraries attention_runtime extracted_semantics))
 
 (test
+ (name memory_array_test)
+ (modules memory_array_test)
+ (libraries attention_runtime extracted_semantics zarith))
+
+(test
  (name mixed_test)
  (modules mixed_test)
  (libraries attention_runtime extracted_semantics yojson)

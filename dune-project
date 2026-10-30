@@ -11,6 +11,7 @@
   (ocaml (>= 5.0))
   dune
   rocq-prover
+  rocq-runtime
   rocq-stdpp
   zarith
   yojson))

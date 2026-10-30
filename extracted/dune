@@ -10,4 +10,5 @@
 (library
  (name extracted_semantics)
  (modules unified_semantics)
+ (libraries rocq-runtime.kernel)
  (flags (:standard -w -a)))
