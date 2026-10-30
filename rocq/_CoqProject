@@ -11,6 +11,7 @@ HFusion/Attrs.v
 Value/Scalar.v
 Tensor/Model.v
 Tensor/Matrix.v
+Memory/ListModel.v
 Memory/Model.v
 Memory/ArrayLaws.v
 Memory/Effects.v

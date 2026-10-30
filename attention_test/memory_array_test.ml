@@ -52,6 +52,24 @@ let () =
   let large' = unwrap (E.write_buffer_cell large (z 4999999) 42.) in
   check_cell large' 4999999 (Some 42.);
   check_cell large 4999999 None;
+  (* 批量访问覆盖跨页、负 stride、重复地址与错误发生顺序。 *)
+  let bulk = unwrap (E.write_coordinates initial E.Z0 [z 1]
+    [[4096];[0];[4096];[8194]] [1.;2.;3.;4.]) in
+  assert (E.read_coordinates bulk (z 8194) [z (-1)] [[0];[4098];[8194]]
+    = E.Ok [4.;3.;2.]);
+  assert (E.read_coordinates bulk E.Z0 [z 1] [[4096];[0]] = E.Ok [3.;2.]);
+  assert (E.read_coordinates bulk E.Z0 [z 1] [[1];[0;0]]
+    = E.Error E.ReadUninitializedCell);
+  assert (E.read_coordinates bulk (z (-1)) [z 1] [[0];[0;0]]
+    = E.Error E.ViewAddressOutOfBounds);
+  assert (E.write_coordinates bulk E.Z0 [z 1] [[9000];[0;0]] [1.;2.]
+    = E.Error E.ViewAddressOutOfBounds);
+  assert (E.write_coordinates bulk E.Z0 [z 1] [[9000];[0]] []
+    = E.Error E.InvalidViewRank);
+  assert (E.write_coordinates bulk E.Z0 [z 1] [[0];[9000]] [1.]
+    = E.Error E.InvalidViewRank);
+  check_cell initial 4096 None;
+  check_cell bulk 4096 (Some 3.);
   (* 实际写入后发生错误，重新读取保存的状态和当前状态。 *)
   let state = ref {H.memory=E.empty_memory; marker=73} in
   H.run ~state ~on_call:ignore (fun () ->

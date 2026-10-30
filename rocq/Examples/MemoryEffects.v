@@ -48,9 +48,12 @@ Example artifact_path_copies_strided_view :
   end.
 Proof. vm_compute. auto. Qed.
 
+(* The copy is one read request and one write request, so the trace records
+   one observation per direction instead of one per cell: reinterpret, alloc,
+   read, write, and the allocation/descriptor pair the alloc emits. *)
 Example artifact_path_records_primitive_memory_actions :
   match artifact_memory_result with
-  | Ok (_, _, trace) => length trace = 11%nat
+  | Ok (_, _, trace) => length trace = 5%nat
   | Error _ => False
   end.
 Proof. reflexivity. Qed.

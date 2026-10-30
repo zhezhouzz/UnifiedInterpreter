@@ -11,6 +11,10 @@ Inductive event :=
     (sizes strides : list Z)
 | EMemoryRead (allocation : nat) (indices : list Z)
 | EMemoryWrite (allocation : nat) (indices : list Z)
+(* A range operation is one observation regardless of how many cells it
+   touches: the trace records the operation, not its element count. *)
+| EMemoryReadRange (allocation : nat) (count : nat)
+| EMemoryWriteRange (allocation : nat) (count : nat)
 | ENumericBoundary (operation : string) (input output : mlir_type).
 
 (* Events are an observation vocabulary only. Core instruction semantics do not

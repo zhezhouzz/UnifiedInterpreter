@@ -28,13 +28,13 @@ let attribute op key =
 let dims key op =
   match List.assoc_opt key op.attributes with
   | None -> []
-  | Some json -> Yojson.Basic.Util.(json |> to_list |> List.map to_int)
+  | Some json -> Yojson.Safe.Util.(json |> to_list |> List.map to_int)
 let flag key op = List.assoc_opt key op.attributes = Some (`Bool true)
 let enum op key tag =
   let json = attribute op key in
-  if Yojson.Basic.Util.(json |> member "enum" |> to_string) <> tag
+  if Yojson.Safe.Util.(json |> member "enum" |> to_string) <> tag
   then error op ("unexpected enum for " ^ key);
-  Yojson.Basic.Util.(json |> member "value" |> to_string)
+  Yojson.Safe.Util.(json |> member "value" |> to_string)
 let last_type (op : operation) =
   match op.result_type with
   | Some (ShapedType (_,sh,ty)) -> sh,ty
@@ -193,7 +193,7 @@ and execute_op ctx env op =
   | "tensor.expand_shape" | "tensor.collapse_shape" ->
       let src = tensor op (one ()) in
       let target,_ = last_type op in
-      let groups = Yojson.Basic.Util.(attribute op "reassociation" |> to_list
+      let groups = Yojson.Safe.Util.(attribute op "reassociation" |> to_list
         |> List.map (fun row -> row |> to_list |> List.map to_int)) in
       some (Tensor (common (H.Reshape (op.opcode = "tensor.expand_shape",src,target,groups))))
   | "memref.alloc" ->

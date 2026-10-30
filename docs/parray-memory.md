@@ -10,6 +10,10 @@
 
 页表使用现有 stdpp `gmap`。页内读取和写入使用官方持久化数组，整体访问还包含页表查询以及地址运算的成本。`cells_to_list` 用于示例检查；执行内存读写时直接访问数组页。
 
+[Memory/ListModel.v](../rocq/Memory/ListModel.v) 保留 `origin/main` 的列表模型、排序后单次遍历的批量访问算法及其证明。[Memory/Model.v](../rocq/Memory/Model.v) 的数组批量访问使用其中的 `coordinate_target` 计算地址，随后直接访问数组页。批量访问按照原始坐标顺序执行，因此重复地址由最后一次写入决定，错误也按照坐标顺序报告。
+
+`address_of_nat` 使用 `Nat.div2` 递归构造二进制地址，证明其结果等于 `Z.of_nat`。提取使用现有标准库对 `Nat.div2` 的映射。`coordinate_address_correct` 证明地址计算与 `view_cell_offset` 一致；`read_coordinates_correct` 和 `write_coordinates_correct` 证明数组批量访问与逐点规范一致。这条执行路径直接读取和更新 `PArray`，每次批量操作保留相同的 buffer 表示。
+
 ## 提取和运行时
 
 [Extract.v](../rocq/Extraction/Extract.v) 导入 `ExtrOCamlInt63` 和 `ExtrOCamlPArray`，通过 `Extraction NoInline PrimArray.array` 保留数组类型别名。空 map/set 构造器使用 extraction 的内联指令，使空内存提取为 OCaml 构造器值并保持多态。
@@ -37,6 +41,8 @@
 这些是内存操作层面的表示关系证明。官方数组原语及其规格、标准 extraction、OCaml 编译器与运行时继续属于可信基础。
 
 [memory_array_test.ml](../attention_test/memory_array_test.ml) 使用提取后的接口检查跨页读写、1000 次分支版本更新、完整版本内容、500 万个单元的逻辑 buffer、输入列表初始化和实际写入后失败的状态保留。测试通过 effect handler 检查成功更新、历史状态以及独立的 marker 字段。
+
+批量访问测试还覆盖跨页和负 stride 读取、重复地址写入、未初始化读取与秩错误的优先顺序，以及坐标和值的长度不同所产生的错误。
 
 运行验证：
 
@@ -109,3 +115,24 @@ TMPDIR="$PWD/_build/task-tmp" /usr/bin/time -v \
 ```text
 eae5e7e665ed2590792fafd8eb2c0870360478cfb0b2ff0212d3a7f0a341a5dc
 ```
+
+## 合并远程 main 后的实测结果
+
+2026-10-30，将远程 main 的 `f0f90e35032930cf54ea6b92cdada200017bd672` 合并至 `codex/parray-memory`。远程 main 的前端修复、批量 Memory 请求和 tensor 索引生成优化一起参与构建。列表批量访问算法与证明保存在 [ListModel.v](../rocq/Memory/ListModel.v)，数组执行使用已证明等价的批量接口。
+
+在同一环境分别保存远程 main 与合并后版本的可执行文件，每个版本顺序运行两次默认 attention，参数均为 `--stage both`，同时保存完整结果和事件记录。计时包含参考结果计算与前端处理，不包含构建。两个版本均通过参考结果检查，四次运行均以退出码 0 结束。
+
+| 指标 | 远程 main，列表 buffer | 合并后，PArray buffer |
+| --- | ---: | ---: |
+| 第一次总耗时 | 40.27 秒 | 2.64 秒 |
+| 第二次总耗时 | 40.22 秒 | 2.65 秒 |
+| 第一次 CPU 用户时间 | 40.15 秒 | 2.57 秒 |
+| 第二次 CPU 用户时间 | 40.12 秒 | 2.59 秒 |
+| 第一次峰值常驻内存 | 62,688 KiB | 50,316 KiB |
+| 第二次峰值常驻内存 | 62,780 KiB | 50,196 KiB |
+
+按两次耗时的平均值计算，数组版本加速约 **15.2 倍**。全部结果 JSON 和事件 JSONL 在两个版本及重复运行之间逐字节一致，SHA-256 与本文记录的完整结果相同。HFusion 和 HIVM 的 O、LSE 最大绝对误差均为零。
+
+完整构建、Rocq 证明和 `dune runtest` 通过。验证覆盖随机输入、零 Q/K、常量输入、混合 attention、IR 修改后的输出变化、数组版本保留、跨页访问、批量重复地址和错误顺序。
+
+本次原始数据位于被 Git 忽略的 `reports/parray-main-merge/`：`main.time`、`main-repeat.time`、`merged.time`、`merged-repeat.time` 保存计时，`merged-build.log` 和 `merged-tests.log` 保存构建与测试输出，对应的 JSON/JSONL 保存完整计算结果和原语事件。
