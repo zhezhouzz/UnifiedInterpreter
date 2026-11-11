@@ -1,0 +1,397 @@
+\documentclass[UTF8,a4paper,11pt,fontset=fandol]{ctexart}
+\usepackage[margin=24mm]{geometry}
+\usepackage{amsmath,amssymb,stmaryrd,booktabs,longtable,array}
+\usepackage[unicode,hidelinks]{hyperref}
+\pagestyle{plain}
+\linespread{1.08}
+\setlength{\parskip}{0.2em}
+\setlength{\emergencystretch}{2em}
+\renewcommand{\arraystretch}{1.12}
+\newcommand{\kw}[1]{\mathsf{#1}}
+\newcommand{\seq}[1]{\langle #1\rangle}
+\newcommand{\Eid}{\mathsf{EventId}}
+\newcommand{\Val}{\mathsf{Val}}
+\newcommand{\Pipe}{\mathsf{Pipe}}
+\newcommand{\Bool}{\mathsf{Bool}}
+\newcommand{\Ops}{\mathsf{Op}}
+\newcommand{\Cand}{\mathsf{Cand}}
+\newcommand{\ids}{\mathsf{ids}}
+\newcommand{\head}{\mathsf{head}}
+\newcommand{\pipe}{\mathsf{pipe}}
+\newcommand{\thread}{\mathsf{thread}}
+\newcommand{\kind}{\mathsf{kind}}
+\newcommand{\pay}{\mathsf{pay}}
+\newcommand{\owner}{\mathsf{owner}}
+\newcommand{\before}{\mathrel{\triangleleft_t}}
+\hypersetup{pdftitle={Core Language: Candidate Traces and Synchronization Axioms},pdfauthor={}}
+\begin{document}
+\begin{center}
+\Large\bfseries Core Language：候选 Trace 与同步公理
+\end{center}
+
+\section{程序标注与事件解释}
+
+程序 $P=\kw{run}\{C_1\parallel\cdots\parallel C_m\}$ 采用
+\texttt{core-language-syntax.tex} 的语法，其中 $m\geq1$。
+值域及元变量的范围为
+\[
+\begin{gathered}
+\Bool=\{\kw{true},\kw{false}\},\qquad
+\Val=\mathsf{Int}\uplus\mathsf{Float}\uplus\Bool\uplus\Eid\uplus\Pipe,\\
+\nu,\nu_1,\nu_2,\ell\in\Val,\qquad\bar\nu\in\Val^*,\qquad
+p,q\in\Pipe,\quad b\in\Bool,\quad\varepsilon\in\Eid,\\
+\Ops=\mathbb N_{>0}\times\mathbb N_{>0},\qquad
+\thread(j,r)=j.
+\end{gathered}
+\]
+$\uplus$ 是带类别标记的不交并，注入记号省略。
+地址和锁由值指代；$\ell$ 用作锁标识。
+$\seq{}$ 表示空序列，$uv$ 表示序列连接。
+
+对每个分支 $C_j$，给其产生事件的语法位置分配互异标注
+$o=(j,r)\in\Ops$。用下标 $o$ 表示该标注，例如
+$x:=\kw{read}_o[p](v);C$。
+别名绑定 $\kw{let}\ x=v\ \kw{in}\ C$ 不带事件标注。
+$\head(o)$ 表示位置 $o$ 的命令头，取值为
+\[
+\begin{gathered}
+\kw{read}(p),\ \kw{write}(p),\ \kw{compute}(p),\
+\kw{setflag}(p,q),\ \kw{waitflag}(p,q),\\
+\kw{lock},\ \kw{unlock},\ \kw{if},\ \kw{return}.
+\end{gathered}
+\]
+
+事件解释域定义为
+\[
+K=\{(o,\alpha,\eta)\mid o\in\Ops,\ (\alpha,\eta)\in L\},
+\qquad\boxed{\kappa:\Eid\longrightarrow K.}
+\]
+$L$ 是下表所有模式按上述元变量范围实例化所得二元组的集合。
+$()$ 表示空载荷。
+\begin{longtable}{@{}lll@{}}
+\toprule
+命令 & 发起事件的 $(\alpha,\eta)$ & 完成事件的 $(\alpha,\eta)$ \\
+\midrule
+\endhead
+read & $(\kw{read\_start},(p,\nu))$ & $(\kw{read\_end},\nu)$ \\
+write & $(\kw{write\_start},(p,\nu_1,\nu_2))$ & $(\kw{write\_end},())$ \\
+compute & $(\kw{compute\_start},(p,\bar\nu))$ & $(\kw{compute\_end},\nu)$ \\
+setflag & $(\kw{set\_flag\_start},(p,q,\varepsilon))$ & $(\kw{set\_flag\_end},())$ \\
+waitflag & $(\kw{wait\_flag\_start},(p,q,\varepsilon))$ & $(\kw{wait\_flag\_end},())$ \\
+lock & $(\kw{lock\_start},\ell)$ & $(\kw{lock\_end},())$ \\
+unlock & $(\kw{unlock},\ell)$ & 同一事件 \\
+if & $(\kw{branch},b)$ & 同一事件 \\
+return & $(\kw{return},\bar\nu)$ & 同一事件 \\
+\bottomrule
+\end{longtable}
+对 $e\in\Eid$，定义
+\[
+(\owner(e),\kind(e),\pay(e))=\kappa(e).
+\]
+每次事件发生使用一个独立的 $\Eid$ 符号。
+同步操作数 $\varepsilon$ 保存在载荷中，可以在多次同步中重复使用。
+
+\section{从程序生成候选 Trace}
+
+\subsection{候选事件集合}
+
+令 $\rho:\mathsf{Var}\rightharpoonup\Val$ 为候选取值环境。定义
+\[
+\begin{gathered}
+\rho(c)=c\quad(c\in\Val),\qquad
+\rho(\seq{v_1,\ldots,v_k})=\seq{\rho(v_1),\ldots,\rho(v_k)},\\
+\rho[x\mapsto\nu](y)=
+\begin{cases}\nu,&y=x,\\\rho(y),&y\ne x.\end{cases}
+\end{gathered}
+\]
+纯计算由参数关系 $\mathsf{Comp}_p\subseteq\Val^*\times\Val$ 给出，满足
+\[
+\forall p\in\Pipe.\ \forall\bar\nu\in\Val^*.\
+\exists\nu\in\Val.\ (\bar\nu,\nu)\in\mathsf{Comp}_p.
+\]
+
+$\mathcal E_\rho(C)$ 表示由 $C$ 生成的有限候选事件集合的集合。
+绑定、读取和计算的生成规则为
+\[
+\begin{aligned}
+\mathcal E_\rho(\kw{let}\ x=v\ \kw{in}\ C)
+={}&\mathcal E_{\rho[x\mapsto\rho(v)]}(C),\\[0.4em]
+\mathcal E_\rho(x:=\kw{read}_o[p](v);C)
+={}&\{\varnothing\}\ \cup\\
+&\{\{(o,\kw{read\_start},(p,\rho(v))),
+(o,\kw{read\_end},\nu)\}\cup E\\
+&\qquad\mid\nu\in\Val,\ E\in\mathcal E_{\rho[x\mapsto\nu]}(C)\},\\[0.4em]
+\mathcal E_\rho(\kw{let}\ x=\kw{compute}_o[p](\bar v)\ \kw{in}\ C)
+={}&\{\varnothing\}\ \cup\\
+&\{\{(o,\kw{compute\_start},(p,\rho(\bar v))),
+(o,\kw{compute\_end},\nu)\}\cup E\\
+&\qquad\mid(\rho(\bar v),\nu)\in\mathsf{Comp}_p,
+\ E\in\mathcal E_{\rho[x\mapsto\nu]}(C)\}.
+\end{aligned}
+\]
+读取结果在候选生成中遍历 $\Val$。
+$\rho$ 记录候选中的取值关联；对 $x$ 的绑定不增加事件之间的顺序关系。
+
+用 $J_o;C$ 表示 write、setflag、waitflag、lock 或 unlock 命令及其后续程序。
+单条命令的事件集合 $B_\rho(J_o)$ 定义如下。
+\begin{longtable}{@{}ll@{}}
+\toprule
+$J_o$ & $B_\rho(J_o)$ \\
+\midrule
+\endhead
+$\kw{write}_o[p](v_1,v_2)$ & $\{(o,\kw{write\_start},(p,\rho(v_1),\rho(v_2))),
+(o,\kw{write\_end},())\}$ \\
+$\kw{setflag}_o[p,q](v)$ & $\{(o,\kw{set\_flag\_start},(p,q,\rho(v))),
+(o,\kw{set\_flag\_end},())\}$ \\
+$\kw{waitflag}_o[p,q](v)$ & $\{(o,\kw{wait\_flag\_start},(p,q,\rho(v))),
+(o,\kw{wait\_flag\_end},())\}$ \\
+$\kw{lock}_o(v)$ & $\{(o,\kw{lock\_start},\rho(v)),(o,\kw{lock\_end},())\}$ \\
+$\kw{unlock}_o(v)$ & $\{(o,\kw{unlock},\rho(v))\}$ \\
+\bottomrule
+\end{longtable}
+生成规则为
+\[
+\mathcal E_\rho(J_o;C)=\{\varnothing\}\cup
+\{B_\rho(J_o)\cup E\mid B_\rho(J_o)\subseteq K,\ E\in\mathcal E_\rho(C)\}.
+\]
+条件分支和返回的生成规则为
+\[
+\begin{aligned}
+&\mathcal E_\rho(\kw{if}_o\ v\ \kw{then}\ \{C_1\}\ \kw{else}\ \{C_2\})\\
+&\quad=\{\varnothing\}\cup
+\{\{(o,\kw{branch},b)\}\cup E
+\mid b=\rho(v)\in\Bool,\ E\in\mathcal E_\rho(C_b)\},\\
+&\hspace{2em} C_{\kw{true}}=C_1,\qquad C_{\kw{false}}=C_2,\\[0.4em]
+&\mathcal E_\rho(\kw{return}_o(\bar v))
+=\{\varnothing,\{(o,\kw{return},\rho(\bar v))\}\}.
+\end{aligned}
+\]
+各规则中的 $\varnothing$ 允许在当前位置停止展开。
+整个程序生成的候选事件集合为
+\[
+\mathcal E(P)=
+\left\{\bigcup_{j=1}^{m}E_j\ \middle|\
+\forall j\in\{1,\ldots,m\}.\ E_j\in\mathcal E_\varnothing(C_j)\right\}.
+\]
+
+\subsection{事件排列与候选 Trace}
+
+对有限集合 $X$，定义其全部排列和前缀：
+\[
+\begin{gathered}
+\mathsf{Perm}(X)=\{\seq{a_1,\ldots,a_n}\mid
+n=|X|,\ \{a_1,\ldots,a_n\}=X,\ \forall i\ne j.\ a_i\ne a_j\},\\
+u\sqsubseteq v\ \Longleftrightarrow\ \exists w.\ v=uw,\qquad
+\mathsf{Pref}(L)=\{u\mid\exists v\in L.\ u\sqsubseteq v\}.
+\end{gathered}
+\]
+将 $\kappa$ 按元素扩展到序列：
+\[
+\kappa(e_1\cdots e_n)=\seq{\kappa(e_1),\ldots,\kappa(e_n)}.
+\]
+对 $t\in\Eid^*$ 和 $\kappa:\Eid\to K$，候选 trace 的集合定义为
+\[
+\boxed{
+\Cand(P)=\{(t,\kappa)\mid
+\exists E\in\mathcal E(P).\
+\kappa(t)\in\mathsf{Pref}(\mathsf{Perm}(E))\}.}
+\]
+候选生成保留语法位置、分支选择、操作数和结果的关联。
+排列中的事件记录互异，因而 trace 中的 $\Eid$ 标识也互异。
+排列的前缀包含尚未发起、尚未完成及不同命令交错的情形。
+
+\section{事件顺序与同步公理}
+
+以下固定 $(t,\kappa)\in\Cand(P)$，其中 $t=e_1\cdots e_n$。
+事件集合和顺序定义为
+\[
+\ids(t)=\{e_1,\ldots,e_n\},\qquad
+e_i<_t e_j\ \Longleftrightarrow\ i<j.
+\]
+对 $A,B\subseteq\ids(t)$，定义
+\[
+A\before B\quad\Longleftrightarrow\quad
+\forall b\in B.\ \exists a\in A.\ a<_t b.
+\]
+当 $B$ 非空时，$A\triangleleft_t B$ 要求 $A$ 中具有更早的事件。
+当 $B$ 为空时，该条件成立。
+
+命令 $o$ 的发起、完成种类 $\sigma(o),\delta(o)$ 由第一个事件表的对应列给出。
+unlock、if、return 的两种种类相同。定义
+\[
+\begin{aligned}
+S_t(o)&=\{e\in\ids(t)\mid\owner(e)=o\land\kind(e)=\sigma(o)\},\\
+D_t(o)&=\{e\in\ids(t)\mid\owner(e)=o\land\kind(e)=\delta(o)\}.
+\end{aligned}
+\]
+候选生成保证 $S_t(o),D_t(o)$ 各自至多包含一个事件。
+
+\subsection{程序顺序}
+
+用 $Q_o\cdot C$ 统一表示带后续程序的事件命令，包括 read、compute 和 $J_o;C$。
+命令标识集合和程序顺序关系通过以下递归等式定义：
+\[
+\begin{aligned}
+\Ops(\kw{return}_o(\bar v))&=\{o\},
+&\mathsf{po}(\kw{return}_o(\bar v))&=\varnothing,\\
+\Ops(\kw{let}\ x=v\ \kw{in}\ C)&=\Ops(C),
+&\mathsf{po}(\kw{let}\ x=v\ \kw{in}\ C)&=\mathsf{po}(C),\\
+\Ops(Q_o\cdot C)&=\{o\}\cup\Ops(C),
+&\mathsf{po}(Q_o\cdot C)&=(\{o\}\times\Ops(C))\cup\mathsf{po}(C).
+\end{aligned}
+\]
+对 $I=\kw{if}_o\ v\ \kw{then}\ \{C_1\}\ \kw{else}\ \{C_2\}$，定义
+\[
+\begin{aligned}
+\Ops(I)&=\{o\}\cup\Ops(C_1)\cup\Ops(C_2),\\
+\mathsf{po}(I)&=(\{o\}\times(\Ops(C_1)\cup\Ops(C_2)))
+\cup\mathsf{po}(C_1)\cup\mathsf{po}(C_2),\\
+\Ops(P)&=\bigcup_{j=1}^{m}\Ops(C_j),\qquad
+\mathsf{po}(P)=\bigcup_{j=1}^{m}\mathsf{po}(C_j).
+\end{aligned}
+\]
+继续条件对应的事件集合定义为
+\[
+G_t(o)=
+\begin{cases}
+S_t(o),&\head(o)\in\{\kw{read}(p),\kw{write}(p),\kw{setflag}(p,q)\mid p,q\in\Pipe\},\\
+D_t(o),&\text{其他情形}.
+\end{cases}
+\]
+
+\paragraph{A1：发起先于完成。}
+\[
+\forall o\in\Ops(P).\ \sigma(o)\ne\delta(o)\Rightarrow S_t(o)\before D_t(o).
+\]
+
+\paragraph{A2：程序顺序。}
+\[
+\forall(o,u)\in\mathsf{po}(P).\
+S_t(o)\before S_t(u)\ \land\ G_t(o)\before S_t(u).
+\]
+read、write、setflag 的继续条件对应发起事件；
+compute、waitflag、lock 的继续条件对应完成事件。
+
+\subsection{pipeline 与 flag}
+
+pipeline 归属和同一 pipeline 上的发起顺序定义为
+\[
+\begin{gathered}
+\pipe(o)=
+\begin{cases}
+p,&\head(o)\in\{\kw{read}(p),\kw{write}(p),\kw{compute}(p),\kw{setflag}(p,q)\},\\
+q,&\head(o)=\kw{waitflag}(p,q),\\
+\bot,&\head(o)\in\{\kw{lock},\kw{unlock},\kw{if},\kw{return}\},
+\end{cases}\\
+o\prec_{p,t}u\ \Longleftrightarrow\
+\pipe(o)=\pipe(u)=p\land
+\exists a\in S_t(o),b\in S_t(u).\ a<_t b.
+\end{gathered}
+\]
+$\bot\notin\Pipe$ 表示没有 pipeline 归属。
+
+\paragraph{A3：设置完成等待源 pipeline 的前序操作完成。}
+\[
+\boxed{\forall f,o\in\Ops(P).\ \forall p,q\in\Pipe.\quad
+\head(f)=\kw{setflag}(p,q)\land o\prec_{p,t}f
+\Rightarrow D_t(o)\before D_t(f).}
+\]
+前序范围由 set\_flag\_start 的位置确定，包含该源 pipeline 上此前发起的全部操作。
+
+对 $E\subseteq\ids(t)$ 和字母映射 $\lambda:E\to\Sigma$，定义有序投影
+\[
+\begin{gathered}
+\mathsf{proj}_t(E,\lambda)=\seq{\lambda(e_{i_1}),\ldots,\lambda(e_{i_k})},\\
+i_1<\cdots<i_k,\qquad
+\{i_1,\ldots,i_k\}=\{i\in\{1,\ldots,n\}\mid e_i\in E\}.
+\end{gathered}
+\]
+$\Sigma$ 表示相应投影使用的字母集合；$k=0$ 时投影为空序列。
+对同步键 $h\in\Pipe\times\Pipe\times\Eid$，定义
+\[
+\begin{aligned}
+E_h(t)=\{e\in\ids(t)\mid{}&
+\exists o\in\Ops(P),s\in S_t(o).\ e\in D_t(o)\land\pay(s)=h\\
+&\land\kind(e)\in\{\kw{set\_flag\_end},\kw{wait\_flag\_end}\}\},\\
+\lambda_h(e)={}&
+\begin{cases}S,&\kind(e)=\kw{set\_flag\_end},\\
+W,&\kind(e)=\kw{wait\_flag\_end},\end{cases}\\
+\pi_h(t)={}&\mathsf{proj}_t(E_h(t),\lambda_h).
+\end{aligned}
+\]
+$S,W$ 是表示设置完成、等待完成的两个不同字母。
+
+\paragraph{A4：匹配的设置完成与等待完成交替出现。}
+\[
+\boxed{\forall h\in\Pipe\times\Pipe\times\Eid.\quad
+\pi_h(t)\in\mathsf{Pref}(\{\seq{S,W}\}^*).}
+\]
+这里 $L^*=\bigcup_{r\geq0}L^r$，$L^0=\{\seq{}\}$，
+$L^{r+1}=\{uv\mid u\in L^r,v\in L\}$。
+每个等待完成对应同一同步键下紧邻的前一个设置完成。
+初始 flag 未设置，每次等待完成消费一个通知。
+
+\paragraph{A5：等待完成先于目标 pipeline 的后续发起。}
+\[
+\boxed{\forall w,u\in\Ops(P).\ \forall p,q\in\Pipe.\quad
+\head(w)=\kw{waitflag}(p,q)\land w\prec_{q,t}u
+\Rightarrow D_t(w)\before S_t(u).}
+\]
+该约束包含其他并发分支向相同目标 pipeline 发起的操作。
+
+\subsection{互斥锁}
+
+对锁标识 $\ell\in\Val$，定义
+\[
+\begin{aligned}
+E_\ell(t)=\{e\in\ids(t)\mid{}&
+\exists o\in\Ops(P),s\in S_t(o).\ e\in D_t(o)\land\pay(s)=\ell\\
+&\land\kind(e)\in\{\kw{lock\_end},\kw{unlock}\}\},\\
+\lambda_\ell(e)={}&
+\begin{cases}
+A_{\thread(\owner(e))},&\kind(e)=\kw{lock\_end},\\
+U_{\thread(\owner(e))},&\kind(e)=\kw{unlock},
+\end{cases}\\
+\pi_\ell(t)={}&\mathsf{proj}_t(E_\ell(t),\lambda_\ell).
+\end{aligned}
+\]
+$A_j,U_j$ 是分别表示分支 $j$ 成功获取和释放锁的字母。
+
+\paragraph{A6：独占获取与所属分支释放。}
+\[
+\boxed{\forall\ell\in\Val.\quad
+\pi_\ell(t)\in\mathsf{Pref}
+\left(\left(\bigcup_{j=1}^{m}\{\seq{A_j,U_j}\}\right)^*\right).}
+\]
+获取和释放按所属分支配对，持有区间之间互不重叠。
+锁采用不可重入语义。
+
+\section{允许的 Trace}
+
+令 $\mathcal A_{\rm sync}=\{\mathrm{A1},\ldots,\mathrm{A6}\}$。
+公理满足关系和程序的同步 trace 语义定义为
+\[
+\begin{gathered}
+(t,\kappa)\models\mathcal A_{\rm sync}
+\quad\Longleftrightarrow\quad
+\bigwedge_{i=1}^{6}\mathrm{A}i(P,t,\kappa),\\
+\boxed{\llbracket P\rrbracket_{\rm sync}
+=\{(t,\kappa)\in\Cand(P)\mid
+(t,\kappa)\models\mathcal A_{\rm sync}\}.}
+\end{gathered}
+\]
+$\mathrm{A}i(P,t,\kappa)$ 表示第 $i$ 项公理在给定程序及候选 trace 上成立。
+
+例如，$r$ 是源 pipeline $p$ 上的读取，$f$ 是随后发起的
+setflag$[p,q]$，$w$ 是匹配的 waitflag$[p,q]$，$c$ 是目标 pipeline $q$
+上位于等待之后的计算。对这些操作已出现的单个发起、完成事件，
+分别用 $s_o,d_o$ 表示。公理给出
+\[
+d_r<_t d_f<_t d_w<_t s_c.
+\]
+源 pipeline 在 $s_f$ 之后发起的另一读取 $u$ 可以具有如下顺序：
+\[
+s_r\ s_f\ s_u\ s_w\ d_r\ d_f\ d_w\ s_c\ d_c\ d_u.
+\]
+这条 trace 中 $s_u$ 先于 $d_r,d_f$，而 $d_f$ 先于 $d_u$。
+\end{document}
