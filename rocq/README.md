@@ -1,5 +1,16 @@
 # Rocq Executable Semantics
 
+The concurrent pipeline language is defined in
+[`CoreLanguage/`](CoreLanguage/README.md). It formalizes the syntax, asynchronous
+tasks, labeled small-step relation, synchronization, execution traces and data
+races described in [`../docs/pipeline-core-language.tex`](../docs/pipeline-core-language.tex).
+Each pipeline has one `pipeline_id`, a sequential control state, local values,
+and operation handles. `declared_pipelines` gives the program's finite pipeline
+set, and `pipeline_kind` assigns each pipeline its execution kind. Task owners,
+event endpoints, and lock owners use the same pipeline identifiers.
+Its semantics is an inductive relation in `Prop`; the total-function conventions
+below apply to the HFusion interpreter.
+
 The attention **HIVM compute-stage primitive** milestone is documented in
 [`../docs/hivm-compute-semantics.md`](../docs/hivm-compute-semantics.md), including
 its exact operation inventory, numerical backend contract, lens integration,
@@ -59,6 +70,8 @@ still future work.
   supplied by the chosen `ScalarOps` model rather than duplicated in each
   tensor operation.
 - `Examples`: executable examples and basic proofs.
+- `CoreLanguage`: concurrent pipeline syntax, operational semantics and checked
+  execution derivations, with a separate optional ordered-lock policy.
 - `Extraction`: OCaml extraction boundary.
 
 ## Current semantic choices

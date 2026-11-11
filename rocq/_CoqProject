@@ -43,4 +43,13 @@ Examples/HIVMCompute.v
 Examples/HIVMMemory.v
 Examples/HIVMExceptional.v
 Examples/AttentionStructured.v
+CoreLanguage/Syntax.v
+CoreLanguage/State.v
+CoreLanguage/Events.v
+CoreLanguage/Semantics.v
+CoreLanguage/Traces.v
+CoreLanguage/Properties.v
+CoreLanguage/OrderedLocks.v
+CoreLanguage/Examples.v
+CoreLanguage/MemoryExamples.v
 Extraction/Extract.v
