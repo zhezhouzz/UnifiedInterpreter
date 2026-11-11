@@ -1,0 +1,151 @@
+\documentclass[UTF8,a4paper,11pt,fontset=fandol]{ctexart}
+\usepackage[margin=24mm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,tabularx,array}
+\usepackage[unicode,hidelinks]{hyperref}
+\pagestyle{plain}
+\linespread{1.10}
+\setlength{\parskip}{0.2em}
+\setlength{\emergencystretch}{2em}
+\renewcommand{\arraystretch}{1.12}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcommand{\kw}[1]{\mathsf{#1}}
+\hypersetup{pdftitle={Core Language Syntax},pdfauthor={}}
+\begin{document}
+\begin{center}
+\Large\bfseries Core Language Syntax
+\end{center}
+
+\section{原子类别与记号}
+
+常量具有 \texttt{int}、\texttt{float}、\texttt{bool}、
+\texttt{event\_id} 和 \texttt{pipeline\_id} 五种类别，
+变量通过绑定指代相应的值。
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}llY@{}}
+\toprule
+元变量 & 所属集合 & 含义 \\
+\midrule
+$x$ & $\mathsf{Var}$ & 可数无限的局部变量名称集合 \\
+$k$ & $\mathsf{Int}=\mathbb Z$ & \texttt{int}：整数常量 \\
+$r$ & $\mathsf{Float}$ & \texttt{float}：选定浮点格式的值集合 \\
+$b$ & $\mathsf{Bool}$ & \texttt{bool}：$\{\kw{true},\kw{false}\}$ \\
+$\varepsilon$ & $\mathsf{EventId}$ & \texttt{event\_id}：未解释的事件标识集合 \\
+$p,q$ & $\mathsf{Pipe}$ & \texttt{pipeline\_id}：pipeline 实例标识集合 \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+常量保留其类别标记，变量名称与常量相互区分。
+$c$ 表示常量，$v$ 表示操作数，$C$ 表示命令，$P$ 表示整个程序。
+下标用于区分同一类别的不同实例，例如 $v_1,v_2$ 和 $C_1,C_2$。
+横线记号 $\bar v$ 是有限操作数序列 $v_1,\ldots,v_m$ 的缩写，
+其中 $m$ 为非负整数；$m=0$ 时，括号内为空，例如
+$\kw{return}()$。
+
+操作数在具体命令中可以指代数据、地址、事件标识、pipeline 标识或锁标识。
+地址和锁标识的编码由采用的抽象语义规定。
+
+符号 $::=$ 表示语法定义，$\mid$ 分隔备选构造。
+语法产生式中以直立字体排印的命令名称为固定关键字。
+构造中的圆括号、方括号、花括号、逗号、分号、等号、$\mathrel{:=}$ 和
+$\parallel$ 均为语法符号；$\parallel$ 表示并发分支的分隔。
+
+\section{抽象语法}
+
+\[
+\begin{aligned}
+c &::= k \mid r \mid b \mid \varepsilon \mid p, \\
+v &::= c \mid x, \\[0.4em]
+C &::= \kw{return}(\bar v) \\
+  &\quad\mid \kw{let}\ x=v\ \kw{in}\ C \\
+  &\quad\mid \kw{let}\ x=\kw{compute}[p](\bar v)\ \kw{in}\ C \\
+  &\quad\mid x\mathrel{:=}\kw{read}[p](v);\ C \\
+  &\quad\mid \kw{write}[p](v_1,v_2);\ C \\
+  &\quad\mid \kw{setflag}[p,q](v);\ C \\
+  &\quad\mid \kw{waitflag}[p,q](v);\ C \\
+  &\quad\mid \kw{lock}(v);\ C \\
+  &\quad\mid \kw{unlock}(v);\ C \\
+  &\quad\mid \kw{if}\ v\ \kw{then}\ \{C_1\}
+       \ \kw{else}\ \{C_2\}, \\[0.4em]
+P &::= \kw{run}\ \{C_1\parallel\cdots\parallel C_n\}.
+\end{aligned}
+\]
+
+$n$ 为正整数；程序包含有限且非空的并发分支序列。
+省略号仅表示按所给下标展开的有限序列。
+每条命令中的后续程序 $C$ 本身也是完整命令。
+
+\clearpage
+\section{标注、绑定与良构条件}
+
+$\kw{compute}[p]$、$\kw{read}[p]$ 和 $\kw{write}[p]$ 中，
+$p$ 是 \texttt{pipeline\_id} 常量，标注操作所属的 pipeline 实例。
+$\kw{setflag}[p,q]$ 和 $\kw{waitflag}[p,q]$ 中，
+$p,q$ 均为 \texttt{pipeline\_id} 常量：
+$p$ 标注源 pipeline，$q$ 标注目标 pipeline；两种构造的参数顺序一致。
+方括号中的 pipeline 标注在程序中静态确定。
+
+静态配置声明可用的 pipeline 实例，给出执行单元标识集合 $\mathsf{Unit}$ 和映射
+$\mathsf{unit}:\mathsf{Pipe}\to\mathsf{Unit}$。
+$\mathsf{unit}(p)$ 表示 pipeline $p$ 对应的执行单元；
+不同 pipeline 可以对应同一个执行单元。
+在多核心配置中，pipeline 标识同时区分所属核心。
+
+\begin{enumerate}
+\item 程序中使用的 pipeline 实例均已在静态配置中声明，
+  且具有确定的执行单元映射。
+\item 在 $\kw{let}\ x=v\ \kw{in}\ C$、
+  $\kw{let}\ x=\kw{compute}[p](\bar v)\ \kw{in}\ C$ 和
+  $x\mathrel{:=}\kw{read}[p](v);C$ 中，$x$ 绑定后续程序 $C$ 中对应的变量使用。
+  该绑定的作用域从 $C$ 开始。
+\item 每个并发分支内部的绑定位置使用互不相同的变量名，满足单次赋值
+  （SSA）约定。所有变量使用均位于对应绑定的作用域内。
+  不同并发分支分别具有自己的局部变量作用域。
+\item $\kw{if}$ 的条件具有 \texttt{bool} 类别；
+  $\kw{setflag}$ 和 $\kw{waitflag}$ 的操作数具有
+  \texttt{event\_id} 类别。
+\end{enumerate}
+
+绑定的作用域规定变量名称的可见性；异步结果是否已经可用由执行状态决定。
+良构条件允许表达缺失同步的程序，数据竞争、提前使用异步结果和死锁
+属于执行行为分析的对象。
+
+\section{命令含义}
+
+\begin{description}
+\item[$\kw{return}(\bar v)$]
+  结束当前并发分支的命令执行，并给出输出值序列。
+  $\kw{return}()$ 给出空序列。该命令不增加隐式等待。
+\item[$\kw{let}\ x=v\ \kw{in}\ C$]
+  将操作数绑定到局部变量 $x$，随后执行 $C$。
+\item[{$\kw{let}\ x=\kw{compute}[p](\bar v)\ \kw{in}\ C$}]
+  在 pipeline $p$ 对应的执行单元 $\mathsf{unit}(p)$ 上执行一次同步的
+  抽象纯计算，将结果绑定到 $x$，随后执行 $C$。
+  $\kw{compute}$ 是固定关键字，输入序列记录计算的数据依赖；
+  计算关系由采用的抽象语义给出。
+\item[{$x\mathrel{:=}\kw{read}[p](v);C$}]
+  在 pipeline $p$ 上发起对 $v$ 所指代地址的异步读取，
+  并将 $x$ 作为结果的绑定名称。
+  发起读取后可以继续执行 $C$。使用 $x$ 不触发自动等待。
+\item[{$\kw{write}[p](v_1,v_2);C$}]
+  在 pipeline $p$ 上发起向 $v_1$ 所指代地址写入 $v_2$ 所指代值的
+  异步操作，随后继续执行 $C$。
+\item[{$\kw{setflag}[p,q](v);C$}]
+  在源 pipeline $p$ 上发起面向目标 pipeline $q$、以 $v$ 所指代事件标识
+  标记的非阻塞设置请求，随后继续执行 $C$。
+  设置请求的完成条件由同步语义规定。
+\item[{$\kw{waitflag}[p,q](v);C$}]
+  在目标 pipeline $q$ 上等待来自源 pipeline $p$、以 $v$ 所指代事件标识
+  标记的同步条件满足，随后执行 $C$。
+\item[$\kw{lock}(v);C$ 与 $\kw{unlock}(v);C$]
+  分别获取和释放 $v$ 所指代的互斥锁。获取条件尚未满足时等待；
+  操作成功后执行 $C$。
+\item[$\kw{if}\ v\ \kw{then}\ \{C_1\}\ \kw{else}\ \{C_2\}$]
+  当 $v$ 的值为 $\kw{true}$ 时执行 $C_1$，为 $\kw{false}$ 时执行 $C_2$。
+\item[$\kw{run}\ \{C_1\parallel\cdots\parallel C_n\}$]
+  各个并发分支访问共享内存，执行步骤可以交错。
+  异步读写的发起与完成分别由执行语义描述；程序顺序本身不增加隐式等待。
+\end{description}
+
+\end{document}
