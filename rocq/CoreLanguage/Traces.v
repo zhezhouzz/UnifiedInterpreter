@@ -74,17 +74,10 @@ Definition program_semantics {Numeric} (m : model Numeric)
     initial_well_formed m prog initial_memory initial_locals /\
     behaviors m (Running (initial_machine m prog initial_memory initial_locals)) execution.
 
-Inductive scheduling_entity :=
-| ControlEntity (p : pipeline_id)
-| TaskEntity (j : task_id).
+Definition scheduling_entity := pipeline_id.
 
 Definition scheduled_entity {Numeric} (event : label Numeric) : scheduling_entity :=
-  match event with
-  | LRead _ j _ _ | LWrite _ j _ _ | LFinish _ j => TaskEntity j
-  | LAssign p _ _ | LControl p | LBegin p _ _ | LJoin p _
-  | LSet p _ | LWait p _ | LAcquire p _ | LRelease p _ | LError p =>
-      ControlEntity p
-  end.
+  event_owner event.
 
 Definition entity_enabled {Numeric} (m : model Numeric)
     (entity : scheduling_entity) (state : configuration Numeric) : Prop :=
@@ -110,22 +103,7 @@ Section EventRelations.
   Definition po_edge (trace : list (label Numeric)) (a b : nat) : Prop :=
     a < b /\ exists first second p,
       event_at trace a first /\ event_at trace b second /\
-      control_owner first = Some p /\ control_owner second = Some p.
-
-  Definition task_edge (trace : list (label Numeric)) (a b : nat) : Prop :=
-    a < b /\ exists first second j,
-      event_at trace a first /\ event_at trace b second /\
-      task_event first = Some j /\ task_event second = Some j.
-
-  Definition join_edge (trace : list (label Numeric)) (a b : nat) : Prop :=
-    a < b /\ exists p j,
-      event_at trace a (LFinish p j) /\ event_at trace b (LJoin p j).
-
-  (* 启动历史包含已经由 end 消费并从任务表删除的任务。 *)
-  Definition drain_edge (trace : list (label Numeric)) (a b : nat) : Prop :=
-    a < b /\ exists p j event start operation,
-      start < a /\ event_at trace start (LBegin p j operation) /\
-      event_at trace a (LFinish p j) /\ event_at trace b (LSet p event).
+      event_owner first = p /\ event_owner second = p.
 
   Definition touches_flag (event : event_key) (label : label Numeric) : Prop :=
     match label with
@@ -158,9 +136,6 @@ Section EventRelations.
   Inductive synchronization_edge (trace : list (label Numeric))
       (a b : nat) : Prop :=
   | EdgePo : po_edge trace a b -> synchronization_edge trace a b
-  | EdgeTask : task_edge trace a b -> synchronization_edge trace a b
-  | EdgeJoin : join_edge trace a b -> synchronization_edge trace a b
-  | EdgeDrain : drain_edge trace a b -> synchronization_edge trace a b
   | EdgeFlag : flag_edge trace a b -> synchronization_edge trace a b
   | EdgeMutex : mutex_edge trace a b -> synchronization_edge trace a b.
 
@@ -216,14 +191,24 @@ Section EventRelations.
     end.
   Qed.
 
-  Lemma begin_before_background trace start index p j operation event :
-    start < index -> event_at trace start (LBegin p j operation) ->
-    event_at trace index event -> task_event event = Some j ->
-    happens_before trace start index.
+  Lemma same_pipeline_order trace a b first second :
+    a < b -> event_at trace a first -> event_at trace b second ->
+    event_owner first = event_owner second -> happens_before trace a b.
   Proof.
-    intros order begun background same_task. apply HBEdge, EdgeTask.
-    split; [exact order |]. exists (LBegin p j operation), event, j.
-    repeat split; assumption || reflexivity.
+    intros order at_first at_second owner. apply HBEdge, EdgePo.
+    split; [exact order |]. exists first, second, (event_owner first).
+    repeat split; assumption || reflexivity || symmetry; assumption.
+  Qed.
+
+  Lemma same_pipeline_no_race trace a b first second :
+    event_at trace a first -> event_at trace b second ->
+    event_owner first = event_owner second -> ~ Race trace a b.
+  Proof.
+    intros at_first at_second owner [different [_ [forward backward]]].
+    destruct (Nat.lt_trichotomy a b) as [less | [equal | greater]].
+    - apply forward. eapply same_pipeline_order; eauto.
+    - contradiction.
+    - apply backward. eapply same_pipeline_order; eauto.
   Qed.
 
   Lemma Race_symmetric trace a b : Race trace a b -> Race trace b a.
@@ -264,38 +249,6 @@ Section EventRelations.
     apply uninterrupted. reflexivity.
   Qed.
 
-  (* 两个已经启动的独立任务具有相邻写入，执行先后不会自行添加同步关系。 *)
-  Lemma independent_async_writes_race p j k location
-      (first_op second_op : op Numeric) (first_value second_value : value Numeric) :
-    j <> k ->
-    Race [LBegin p j first_op; LBegin p k second_op;
-          LWrite p j location first_value; LWrite p k location second_value] 2 3.
-  Proof.
-    intros different.
-    split; [lia |]. split.
-    - exists (LWrite p j location first_value),
-        (LWrite p k location second_value), location, true, true.
-      repeat split; simpl; auto.
-    - split.
-      + intros ordering. apply adjacent_happens_before_edge in ordering.
-        destruct ordering as [program | task | joined | drained | flagged | locked].
-        * destruct program as [_ [first [second [owner
-            [at_first [at_second [owner_first owner_second]]]]]]].
-          unfold event_at in *. simpl in *. inversion at_first; subst. discriminate.
-        * destruct task as [_ [first [second [job
-            [at_first [at_second [task_first task_second]]]]]]].
-          unfold event_at in *. simpl in *.
-          inversion at_first; inversion at_second; subst. simpl in *. congruence.
-        * destruct joined as [_ [owner [job [at_first at_second]]]].
-          discriminate at_first.
-        * destruct drained as [_ [owner [job [event [start [operation
-            [order [begun [at_first at_second]]]]]]]]]. discriminate at_first.
-        * destruct flagged as [_ [setter [waiter [event [at_first rest]]]]].
-          discriminate at_first.
-        * destruct locked as [_ [releaser [acquirer [lock [at_first rest]]]]].
-          discriminate at_first.
-      + intros ordering. apply happens_before_forward in ordering. lia.
-  Qed.
 End EventRelations.
 
 Definition race_free_from {Numeric} (m : model Numeric)

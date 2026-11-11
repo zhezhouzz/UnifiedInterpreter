@@ -7,8 +7,6 @@ Set Implicit Arguments.
 Definition pipeline_id := nat.
 Definition address := nat.
 Definition var := nat.
-Definition handle := nat.
-Definition task_id := nat.
 Definition function_id := nat.
 Definition primitive_id := nat.
 Definition lock_id := nat.
@@ -100,8 +98,7 @@ Arguments OCompute {Numeric} _ _ _.
 Inductive command (Numeric : Type) : Type :=
 | CSkip
 | CAssign (name : var) (expression : expr Numeric)
-| CBegin (destination : handle) (operation : op Numeric)
-| CEnd (destination : var) (source : handle)
+| COp (destination : var) (operation : op Numeric)
 | CSetFlag (event : event_key)
 | CWaitFlag (event : event_key)
 | CLock (lock : lock_id)
@@ -112,8 +109,7 @@ Inductive command (Numeric : Type) : Type :=
 
 Arguments CSkip {Numeric}.
 Arguments CAssign {Numeric} _ _.
-Arguments CBegin {Numeric} _ _.
-Arguments CEnd {Numeric} _ _.
+Arguments COp {Numeric} _ _.
 Arguments CSetFlag {Numeric} _.
 Arguments CWaitFlag {Numeric} _.
 Arguments CLock {Numeric} _.
@@ -121,10 +117,6 @@ Arguments CUnlock {Numeric} _.
 Arguments CSeq {Numeric} _ _.
 Arguments CIf {Numeric} _ _ _.
 Arguments CWhile {Numeric} _ _.
-
-Definition synchronous {Numeric} (temporary : handle) (destination : var)
-    (operation : op Numeric) : command Numeric :=
-  CSeq (CBegin temporary operation) (CEnd destination temporary).
 
 Inductive eval_context (Numeric : Type) : Type :=
 | Hole

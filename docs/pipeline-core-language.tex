@@ -1,7 +1,7 @@
 \documentclass[UTF8,a4paper,11pt,fontset=fandol]{ctexart}
 \usepackage[margin=24mm]{geometry}
 \usepackage{amsmath,amssymb,mathtools,stmaryrd}
-\usepackage{booktabs,tabularx,array,longtable}
+\usepackage{booktabs,tabularx,array}
 \usepackage{xcolor,listings,xurl,fancyhdr}
 \usepackage[unicode,colorlinks=true,linkcolor=blue!45!black,citecolor=blue!45!black,urlcolor=blue!45!black]{hyperref}
 \pagestyle{fancy}
@@ -17,23 +17,19 @@
 \newcolumntype{Y}{>{\raggedright\arraybackslash}X}
 \newcommand{\code}{\nolinkurl}
 \newcommand{\sem}[1]{\llbracket #1\rrbracket}
-\newcommand{\kw}[1]{\ensuremath{\mathsf{#1}}}
+\newcommand{\kw}[1]{\mathsf{#1}}
 \newcommand{\dom}{\operatorname{dom}}
 \newcommand{\kind}{\operatorname{kind}}
-\newcommand{\Active}{\operatorname{Active}}
-\newcommand{\Done}{\operatorname{Done}}
-\newcommand{\Reading}{\operatorname{Reading}}
-\newcommand{\Writing}{\operatorname{Writing}}
-\newcommand{\Computing}{\operatorname{Computing}}
 \newcommand{\step}[1]{\xrightarrow{#1}}
-\newcommand{\rulelabel}[1]{\quad\textsc{(#1)}}
+\newcommand{\Read}{\operatorname{Reading}}
+\newcommand{\Write}{\operatorname{Writing}}
+\newcommand{\Compute}{\operatorname{Computing}}
+\newcommand{\Done}{\operatorname{Done}}
 \lstset{basicstyle=\small\ttfamily,columns=fullflexible,keepspaces=true,
   breaklines=true,showstringspaces=false,frame=single,
-  rulecolor=\color{black!20},backgroundcolor=\color{black!2},
-  aboveskip=0.6em,belowskip=0.6em}
-\hypersetup{pdftitle={Pipeline Core Language：执行类别、异步操作与同步语义},pdfauthor={}}
-\title{Pipeline Core Language\\[0.4em]
-\large 执行类别、异步操作与同步语义}
+  rulecolor=\color{black!20},backgroundcolor=\color{black!2}}
+\hypersetup{pdftitle={Pipeline Core Language：执行类别与并发操作语义},pdfauthor={}}
+\title{Pipeline Core Language\\[0.4em]\large 执行类别与并发操作语义}
 \author{}
 \date{}
 
@@ -43,905 +39,381 @@
 
 \section{静态对象与执行类别}
 
-令 $\mathsf{Pipe}$、$\mathsf{Addr}$、$\mathsf{Lock}$
-分别表示 pipeline、存储单元地址和锁的标识集合。
-每个地址标识一个最小原子访问单元；有限地址集合表示一次区域访问。
-共享内存记录为 $\mu:\mathsf{Addr}\rightharpoonup\mathsf{Val}$。
-两个访问使用相同地址时访问同一存储单元。源程序中的不同指针若存在别名，
-翻译时必须保留它们所指向的地址相等关系。
+令 $\mathsf{Pipe}$、$\mathsf{Addr}$、$\mathsf{Lock}$ 分别表示 pipeline、
+存储单元地址和锁的标识集合。一个程序使用有限集合
+$\mathcal P\subseteq\mathsf{Pipe}$。pipeline 标识包含所属设备、core 和执行
+队列的身份。每个 pipeline 具有独立的顺序命令、局部变量和当前操作状态。
+不同 pipeline 的步骤可以交错。
 
-执行类别是静态信息的一部分：
+每个地址标识一个原子访问单元，有限地址集合表示访问区域。
+共享内存 $\mu:\mathsf{Addr}\rightharpoonup\mathsf{Val}$ 保存地址和值。
+源程序中具有别名的地址在翻译后必须保持相等。
+
+执行类别由静态函数指定：
 \[
-\mathsf{ExecKind}
-=\{\mathsf{Cube},\mathsf{Vector},\mathsf{Scalar},\mathsf{MTE}\},
-\qquad
-\kind:\mathsf{Pipe}\to\mathsf{ExecKind}.
+\mathsf{ExecKind}=\{\mathsf{Cube},\mathsf{Vector},\mathsf{Scalar},\mathsf{MTE}\},
+\qquad \kind:\mathsf{Pipe}\to\mathsf{ExecKind}.
 \]
-pipeline 标识包含所属设备、core 和具体执行队列的身份。
-例如 $p_{c,\mathrm{V}}$ 与 $p_{c',\mathrm{V}}$ 在 $c\ne c'$ 时具有不同标识，
-即使它们的执行类别都是 $\mathsf{Vector}$。
-
-一个程序使用有限 pipeline 集合
-\[
-\mathcal P\subseteq\mathsf{Pipe}.
-\]
-每个 $p\in\mathcal P$ 具有自己的顺序控制状态和局部环境。
-程序表示已经完成 pipeline 分配后的代码；源程序向多个 pipeline
-分发指令的控制依赖需要在翻译中保留。
-
-静态环境 $\Gamma$ 包含 $\mathcal P,\kind$、值类型、纯函数签名、事件声明、锁声明，
-以及以下能力谓词：
+例如 $\kind(p_c)=\mathsf{Cube}$、$\kind(p_v)=\mathsf{Vector}$。
+访问权限和函数支持关系由静态环境 $\Gamma$ 给出：
 \[
 \begin{aligned}
-\operatorname{Supports}(p,f,\bar\tau)&\in\mathsf{Bool},\\
+\operatorname{Supports}(p,f,\bar\tau)&\in\mathsf{Bool},&
 \operatorname{CanRead}(p,a)&\in\mathsf{Bool},\\
-\operatorname{CanWrite}(p,a)&\in\mathsf{Bool}.
+\operatorname{CanWrite}(p,a)&\in\mathsf{Bool},&
+\operatorname{TypeOK}(a,v)&\in\mathsf{Bool}.
 \end{aligned}
 \]
-$\operatorname{Supports}$ 描述 pipeline 支持的函数及输入类型，类型可以携带
-向量或矩阵的形状。读写权限独立指定。Cube/Vector 的执行类别由 $\kind$
-确定；地址用于记录存储位置和访问冲突。
+函数签名中的类型可以携带向量和矩阵形状。计算函数 $f$ 是定义在指定输入
+类型上的确定性纯偏函数；其数值精度和舍入规则由具体实例给出。
+计算函数不访问共享内存，也不操作事件和锁。
 
-数学函数 $f$ 具有完整类型
-\[
-f:D_f\longrightarrow\mathsf{Val}_{\tau},
-\qquad
-D_f\subseteq
-\mathsf{Val}_{\tau_1}\times\cdots\times\mathsf{Val}_{\tau_m}.
-\]
-$f$ 在 $D_f$ 上是确定且终止的纯函数。数值精度、舍入方式和形状约束属于
-具体函数的定义。例子使用整数算术。
-同一个数学函数可以由多个执行类别支持；执行类别标注确定当前操作使用的
-执行单元。它的数学结果由 $f$ 确定。
+事件标识为 $\varepsilon=(s,p,q,k)$，分别表示同步域、源 pipeline、
+目标 pipeline 和事件编号。$\Gamma$ 声明事件及每个同步域的参与者；
+事件的两个端点必须属于相应同步域。每把锁 $\ell$ 声明允许参与的
+pipeline 集合 $\operatorname{Participants}(\ell)\subseteq\mathcal P$。
 
-事件具有完整标识
-\[
-\varepsilon=(s,p,q,k)\in\mathsf{Event},
-\]
-其中 $s$ 是同步域，$p$ 是源 pipeline，$q$ 是目标 pipeline，$k$ 是事件编号。
-每个事件声明要求 $p,q\in\operatorname{Participants}(s)$，并定义
+\section{语法}
+
+令 $x$ 为局部变量，$v$ 为值，$g$ 为纯表达式函数，$k$ 为执行类别。
+值包括标量、布尔值、地址、有限地址集合、地址到值的有限映射、向量、
+矩阵和 $\kw{unit}$。语法为：
 \[
 \begin{aligned}
-\operatorname{MaySet}(p',\varepsilon)&\iff p'=p,\\
-\operatorname{MayWait}(p',\varepsilon)&\iff p'=q.
+e &::=v\mid x\mid g(e_1,\ldots,e_n),\\
+o &::=\kw{read}(e_R)
+  \mid\kw{write}(e_R,e_V)
+  \mid\kw{computation}_{k,f}(e_1,\ldots,e_n),\\
+a &::=x:=e\mid x:=o\mid\kw{setflag}(\varepsilon)
+  \mid\kw{waitflag}(\varepsilon)
+  \mid\kw{lock}(\ell)\mid\kw{unlock}(\ell),\\
+C &::=\kw{skip}\mid a\mid C;C
+  \mid\kw{if}\ e\ \kw{then}\ C\ \kw{else}\ C
+  \mid\kw{while}\ e\ \kw{do}\ C,\\
+P &::=\kw{parallel}\{p_1:C_1,\ldots,p_n:C_n\}.
 \end{aligned}
 \]
-事件状态采用二值模型。每把锁 $\ell$ 声明一个允许参与的 pipeline 集合
-$\operatorname{Participants}(\ell)\subseteq\mathcal P$。
-同步域在本模型中限制参与者；内存本身采用共享存储单元上的交错访问语义。
+程序中各个 pipeline 标识互不相同，且
+$\mathcal P=\{p_1,\ldots,p_n\}$。$\sem e_\rho$ 在局部环境 $\rho$ 中求值。
+$e_R$ 求值得到有限地址集合 $R$；$e_V$ 求值得到定义域为 $R$ 的有限映射
+$V$。读取返回地址值映射，写入返回 $\kw{unit}$。
+例如 \code{unit := write(R,V)} 中的 \code{unit} 是接收返回值的局部变量。
 
-\section{语法与局部值}
+同一 pipeline 的命令按程序顺序执行：操作完成、结果写入局部变量之后，
+该 pipeline 才能执行后续命令。一个操作可以经历多个语义步骤，
+这些步骤可以与其他 pipeline 的步骤交错。
 
-普通变量 $x\in\mathsf{Var}$ 与句柄变量 $h\in\mathsf{HVar}$ 属于不相交的集合。
-普通值包括整数、布尔值、地址、有限地址集合、有限地址值映射、向量、矩阵
-和 $\mathsf{unit}$。句柄只能通过专门的句柄变量使用。
+\section{状态与操作初始化}
 
-\begin{align*}
-e\;::={}&v\mid x\mid g(e_1,\ldots,e_m),\\
-o\;::={}&\kw{read}(e_R)
-       \mid\kw{write}(e_R,e_V)
-       \mid\kw{computation}_{k,f}(e_1,\ldots,e_m),\\
-a\;::={}&x:=e
-       \mid h:=\kw{begin}(o)
-       \mid x:=\kw{end}(h)\\
- &\mid\kw{setflag}(\varepsilon)
-       \mid\kw{waitflag}(\varepsilon)
-       \mid\kw{lock}(\ell)
-       \mid\kw{unlock}(\ell),\\
-C\;::={}&\kw{skip}\mid a\mid C;C\\
- &\mid\kw{if}\ e\ \kw{then}\ C\ \kw{else}\ C
-       \mid\kw{while}\ e\ \kw{do}\ C,\\
-P\;::={}&\kw{parallel}\{p_1:C_1,\ldots,p_n:C_n\}.
-\end{align*}
-程序中的 pipeline 标识互不相同，并确定 $\mathcal P=\{p_1,\ldots,p_n\}$。
-语法中的 $k\in\mathsf{ExecKind}$
-是计算操作的执行类别。具体程序写法使用
-\code{computation[Vector, add](...)} 和 \code{computation[Cube, matmul](...)}。
-
-表达式按局部环境求值：
+运行状态和 pipeline 局部状态分别为
 \[
-\sem{e}_{\rho}=v.
+\Sigma=\langle\mu,F,L,T\rangle,\qquad
+T(p)=\langle C_p,\rho_p,d_p\rangle.
 \]
-$g$ 是带有明确定义的纯表达式运算，包含算术、比较、有限映射构造及索引等。
-表达式不执行共享内存访问。$e_R$ 求值得到有限区域 $R$；$e_V$ 求值得到
-$V:R\to\mathsf{Val}$。区域读取返回按地址索引的有限映射 $B$。
-例如 $B[a]$ 是读取结果中地址 $a$ 对应的值。
-
-\kw{computation} 的输入在启动时求值并保存。任务的数学计算满足
+$F$ 将已声明事件映射到二值标志，$L$ 将已声明锁映射到空闲标记 $\bot$
+或持有者 pipeline。$C_p$ 是剩余命令，$\rho_p$ 是局部环境，
+$d_p$ 是空闲标记 $\bot$ 或当前操作的进度：
 \[
-\operatorname{ReadSet}(\kw{computation}_{k,f})=\varnothing,
-\qquad
-\operatorname{WriteSet}(\kw{computation}_{k,f})=\varnothing.
+d::=\Read(U,B)\mid\Write(U,V)\mid\Compute(k,f,\bar v)\mid\Done(v).
 \]
-它也不操作事件与锁。需要从内存取得输入或保存输出时，程序显式使用
-\kw{read} 与 \kw{write}。
+$U$ 表示尚未访问的地址集合；$B$ 保存已经读取的值；$V$ 保存写入值。
+执行计算期间保存执行类别、函数和已求值的参数。
+$\Done(v)$ 表示内部执行已经完成，结果尚待写入局部环境。
 
-\kw{begin} 启动任务并继续执行后续命令；后台规则推进任务；
-\kw{end} 等待任务完成并取得返回值。同步执行形式是以下语法糖：
-\begin{align*}
-x:=\kw{read}(R)
-&\ \triangleq\ h:=\kw{begin}(\kw{read}(R));\ x:=\kw{end}(h),\\
-\kw{write}(R,V)
-&\ \triangleq\ h:=\kw{begin}(\kw{write}(R,V));\ u:=\kw{end}(h),\\
-x:=\kw{computation}_{k,f}(\bar e)
-&\ \triangleq\ h:=\kw{begin}(\kw{computation}_{k,f}(\bar e));\ x:=\kw{end}(h).
-\end{align*}
-这里 $h,u$ 是新鲜局部变量。语法糖中的区域读取仍然返回有限映射。
-
-\section{执行状态与操作句柄}
-
-全局状态定义为
-\[
-\Sigma=\langle\mu,F,L,Q,n,T\rangle,
-\qquad
-T(p)=(C_p,\rho_p,\eta_p),\qquad p\in\mathcal P.
-\]
-各分量的含义和类型如下。
-
-\begin{center}
-\small
-\begin{tabularx}{\linewidth}{@{}lY Y@{}}
-\toprule
-分量 & 类型 & 含义\\
-\midrule
-$\mu$ & $\mathsf{Addr}\rightharpoonup\mathsf{Val}$ & 共享内存中的地址和值\\
-$F$ & $\mathsf{Event}\to\{0,1\}$ & 二值事件标志\\
-$L$ & $\mathsf{Lock}\to(\mathcal P\cup\{\bot\})$ & 锁的持有者；$\bot$ 表示空闲\\
-$Q$ & $\mathbb N\rightharpoonup(\mathcal P\times\mathsf{TaskState})$ & 任务的所属 pipeline、进度或完成结果\\
-$n$ & $\mathbb N$ & 下一次启动使用的新鲜任务编号\\
-$C_p$ & 命令 & pipeline $p$ 的剩余代码\\
-$\rho_p$ & $\mathsf{Var}\rightharpoonup\mathsf{Val}$ & pipeline $p$ 的局部值\\
-$\eta_p$ & $\mathsf{HVar}\rightharpoonup\mathbb N$ & 句柄变量对应的任务编号\\
-\bottomrule
-\end{tabularx}
-\end{center}
-
-任务状态为
+在当前局部环境中初始化操作：
 \[
 \begin{aligned}
-d\in\mathsf{TaskState}\;::={}&\Reading(U,B)\mid\Writing(U,V)\\
-&\mid\Computing(k,f,\bar v)\mid\Done(v).
+\operatorname{init}_\Gamma(\rho,\kw{read}(e_R))
+ &=\Read(R,\varnothing)
+ &&\text{当 }\sem{e_R}_{\rho}=R,\\
+\operatorname{init}_\Gamma(\rho,\kw{write}(e_R,e_V))
+ &=\Write(R,V)
+ &&\text{当 }\sem{e_R}_{\rho}=R,\ \sem{e_V}_{\rho}=V,\\
+\operatorname{init}_\Gamma(\rho,\kw{computation}_{k,f}(\bar e))
+ &=\Compute(k,f,\bar v)
+ &&\text{当 }\sem{\bar e}_{\rho}=\bar v.
 \end{aligned}
 \]
-$U$ 表示尚未访问的地址集合，$B$ 表示已经读取的结果，$V$ 保存启动时确定的
-写入值。计算任务保存执行类别、函数和输入值。
-若 $Q(j)=(p,d)$，则该任务由 pipeline $p$ 启动。
-读写任务和计算任务都显式记录所属 pipeline。
-
-定义尚未完成的任务集合：
+初始化后的状态还必须满足 $\operatorname{Valid}_\Gamma(p,\mu,d)$：
 \[
-\Active_p(Q)=\{j\mid Q(j)=(p,d)\land d\text{ 具有 Reading、Writing 或 Computing 形式}\}.
+\begin{aligned}
+\operatorname{Valid}(p,\mu,\Read(R,\varnothing))
+ &\iff R\subseteq\dom(\mu)\land
+   \forall a\in R.\ \operatorname{CanRead}(p,a),\\
+\operatorname{Valid}(p,\mu,\Write(R,V))
+ &\iff R\subseteq\dom(\mu)\land\dom(V)=R\land\\
+ &\quad\forall a\in R.\ \operatorname{CanWrite}(p,a)\land
+   \operatorname{TypeOK}(a,V(a)),\\
+\operatorname{Valid}(p,\mu,\Compute(k,f,\bar v))
+ &\iff \kind(p)=k\land
+   \operatorname{Supports}(p,f,\operatorname{types}(\bar v))\land
+   f(\bar v)\text{ 有定义}.
+\end{aligned}
 \]
-操作句柄的例子是
-\[
-\eta_p(h)=7,
-\qquad
-Q(7)=(p,\Done(5)).
-\]
-执行 \code{x := end(h)} 时，先通过 $h$ 查到任务编号 $7$，再读取任务结果 $5$，
-最后把 $5$ 保存到 $x$。任务编号和计算结果分别存储。
+表达式求值失败、区域或数值类型错误、权限不足、函数未定义及计算类别
+不匹配均产生错误。
 
-句柄只由 \kw{begin} 产生，由所属 pipeline 的 \kw{end} 消费；普通表达式不能
-复制句柄，也不能把句柄写入共享内存。成功消费后可以重新使用同名句柄变量。
-已完成但尚未消费的任务可以保留在 $Q$ 中；它们不属于 $\Active_p(Q)$。
-
-初始状态满足
-\[
-Q=\varnothing,\quad n=0,\quad
-\eta_p=\varnothing,\quad F(\varepsilon)=0,\quad L(\ell)=\bot.
-\]
-初始内存 $\mu_0$ 与普通局部输入 $\rho_p^0$ 是程序输入的一部分。
-初始程序的声明、类型和 pipeline 集合必须满足 $\Gamma$。
+初始状态中，$T(p)=(C_p,\rho_p,\bot)$，每个事件标志为 $0$，每把锁空闲。
+初始内存符合 $\operatorname{TypeOK}$，初始局部环境只包含已声明的 pipeline；
+$\Gamma$ 的事件、锁和计算函数声明满足上述条件。
 
 \section{带标签的小步操作语义}
 
-执行关系写作 $\Gamma\vdash\Sigma\step{\alpha}\Sigma'$。
-以下规则省略固定的 $\Gamma$。
-更新记号 $\Sigma[z\leftarrow v]$ 仅更新指定分量；更新 $C_p,\rho_p,\eta_p$
-表示更新 $T(p)$ 内对应的字段。顺序执行上下文为
+下列规则使用执行上下文
+$E::=[\,]\mid E;C$。写作 $T[p\mapsto(C,\rho,d)]$ 的更新只改变 $p$
+的局部状态；未列出的全局分量保持原值。标签中的
+$\operatorname{start}$ 和 $\operatorname{complete}$ 记录一个操作的内部
+执行步骤，不属于程序语法。
+
+\subsection{顺序控制与操作}
+
+局部赋值、顺序组合、条件和循环按以下规则执行：
 \[
-E::=[\,]\mid E;C.
+\frac{T(p)=(E[x:=e],\rho,\bot)\quad\sem e_\rho=v}
+ {\Sigma\step{\operatorname{assign}(p,x,v)}
+  \Sigma[T(p)\mapsto(E[\kw{skip}],\rho[x\mapsto v],\bot)]}
 \]
-规则中 $p\in\mathcal P$，当前命令可以处于这样的上下文中。
-
-\subsection{局部计算与控制流}
-
 \[
-\frac{C_p=E[x:=e]\qquad\sem{e}_{\rho_p}=v}
-{\Sigma\step{\operatorname{assign}(p,x,v)}
- \Sigma[C_p\leftarrow E[\kw{skip}],\ \rho_p\leftarrow\rho_p[x\mapsto v]]}
-\rulelabel{Assign}
+\frac{T(p)=(E[\kw{skip};C],\rho,\bot)}
+ {\Sigma\step{\operatorname{control}(p)}
+  \Sigma[T(p)\mapsto(E[C],\rho,\bot)]}
 \]
-
 \[
-\frac{C_p=E[\kw{skip};C]}
-{\Sigma\step{\tau_p}\Sigma[C_p\leftarrow E[C]]}
-\rulelabel{Seq}
+\frac{T(p)=(E[\kw{if}\ e\ \kw{then}\ C_1\ \kw{else}\ C_2],\rho,\bot)
+ \quad\sem e_\rho=b}
+ {\Sigma\step{\operatorname{control}(p)}
+  \Sigma[T(p)\mapsto(E[C_b],\rho,\bot)]}
 \]
+其中 $C_{\kw{true}}=C_1$，$C_{\kw{false}}=C_2$。循环展开为
+$\kw{if}\ e\ \kw{then}\ (C;\kw{while}\ e\ \kw{do}\ C)\
+\kw{else}\ \kw{skip}$，并产生一个 $\operatorname{control}(p)$ 标签。
 
+操作首先求值参数并检查合法性：
 \[
-\frac{C_p=E[\kw{if}\ e\ \kw{then}\ C_1\ \kw{else}\ C_2]
-\qquad\sem{e}_{\rho_p}=\mathsf{true}}
-{\Sigma\step{\tau_p}\Sigma[C_p\leftarrow E[C_1]]}
-\rulelabel{If-True}
+\frac{T(p)=(E[x:=o],\rho,\bot)\quad
+ \operatorname{init}_\Gamma(\rho,o)=d\quad
+ \operatorname{Valid}_\Gamma(p,\mu,d)}
+ {\Sigma\step{\operatorname{start}(p,o)}
+  \Sigma[T(p)\mapsto(E[x:=o],\rho,d)]}.
 \]
-
+当前命令保持为 $x:=o$，直到操作的结果被写入局部环境。
+读取和写入每次访问一个尚未处理的地址：
 \[
-\frac{C_p=E[\kw{if}\ e\ \kw{then}\ C_1\ \kw{else}\ C_2]
-\qquad\sem{e}_{\rho_p}=\mathsf{false}}
-{\Sigma\step{\tau_p}\Sigma[C_p\leftarrow E[C_2]]}
-\rulelabel{If-False}
+\frac{T(p)=(E[x:=o],\rho,\Read(U,B))\quad a\in U\quad\mu(a)=v}
+ {\Sigma\step{\operatorname{read}(p,a,v)}
+  \Sigma[T(p)\mapsto(E[x:=o],\rho,\Read(U\setminus\{a\},B[a\mapsto v]))]}
 \]
-
 \[
-\frac{C_p=E[\kw{while}\ e\ \kw{do}\ C]}
-{\Sigma\step{\tau_p}
- \Sigma[C_p\leftarrow E[\kw{if}\ e\ \kw{then}\ (C;\kw{while}\ e\ \kw{do}\ C)
- \ \kw{else}\ \kw{skip}]]}
-\rulelabel{While}
+\frac{T(p)=(E[x:=o],\rho,\Write(U,V))\quad a\in U\quad V(a)=v}
+ {\Sigma\step{\operatorname{write}(p,a,v)}
+  \Sigma[\mu\mapsto\mu[a\mapsto v]]
+        [T(p)\mapsto(E[x:=o],\rho,\Write(U\setminus\{a\},V))]}.
 \]
-
-\subsection{参数求值与任务启动}
-
-定义任务初始化函数：
-\begin{align*}
-\operatorname{init}_{\rho}(\kw{read}(e_R))
- &=\Reading(R,\varnothing)
- &&\text{当 }\sem{e_R}_{\rho}=R,\\
-\operatorname{init}_{\rho}(\kw{write}(e_R,e_V))
- &=\Writing(R,V)
- &&\text{当 }\sem{e_R}_{\rho}=R,\ \sem{e_V}_{\rho}=V,\\
-\operatorname{init}_{\rho}(\kw{computation}_{k,f}(\bar e))
- &=\Computing(k,f,\bar v)
- &&\text{当 }\sem{\bar e}_{\rho}=\bar v.
-\end{align*}
-初始化只读取局部环境。实际的共享内存读取由后台规则执行。
-
-令 $\operatorname{Valid}_\Gamma(p,d,\mu)$ 按任务种类定义如下：
-\begin{align*}
-\operatorname{Valid}_\Gamma(p,\Reading(R,\varnothing),\mu)
-&\iff R\subseteq\dom(\mu)
- \land\forall a\in R.\ \operatorname{CanRead}(p,a),\\
-\operatorname{Valid}_\Gamma(p,\Writing(R,V),\mu)
-&\iff R\subseteq\dom(\mu)\land\dom(V)=R\\
-&\quad\land\forall a\in R.\
- \operatorname{CanWrite}(p,a)\land\operatorname{TypeOK}(a,V(a)),\\
-\operatorname{Valid}_\Gamma(p,\Computing(k,f,\bar v),\mu)
-&\iff\kind(p)=k
- \land\bar v\in D_f\\
-&\quad\land\operatorname{Supports}(p,f,\operatorname{types}(\bar v)).
-\end{align*}
-这里的区域和值还须具有相应语法要求的类型，$\operatorname{TypeOK}$ 由地址的
-值类型声明决定。
-
+区域内部地址的处理顺序由调度非确定地选择。地址集合为空时，读取状态
+转为 $\Done(B)$，写入状态转为 $\Done(\kw{unit})$；计算状态
+$\Compute(k,f,\bar v)$ 转为 $\Done(f(\bar v))$。这些步骤产生
+$\operatorname{control}(p)$ 标签并保持共享内存。
+随后使用规则
 \[
-\frac{\begin{gathered}
- C_p=E[h:=\kw{begin}(o)]\qquad h\notin\dom(\eta_p)\\
- d=\operatorname{init}_{\rho_p}(o)\qquad
- \operatorname{Valid}_\Gamma(p,d,\mu)
-\end{gathered}}
-{\begin{gathered}
-\Sigma\step{\operatorname{begin}(p,n,o)}\Sigma'\\
-\Sigma'=\Sigma[C_p\leftarrow E[\kw{skip}],\
- \eta_p\leftarrow\eta_p[h\mapsto n],\
- Q\leftarrow Q[n\mapsto(p,d)],\ n\leftarrow n+1]
-\end{gathered}}
-\rulelabel{Begin}
+\frac{T(p)=(E[x:=o],\rho,\Done(v))}
+ {\Sigma\step{\operatorname{complete}(p,x,v)}
+  \Sigma[T(p)\mapsto(E[\kw{skip}],\rho[x\mapsto v],\bot)]}.
 \]
-所有已创建的任务编号都小于 $n$，因此新编号不会复用。
-该规则没有要求 $\Active_p(Q)=\varnothing$，后续操作可以在已有任务完成之前启动。
-输入值在此处保存；之后的局部变量赋值不会改变已经启动的任务参数。
+因此，同一 pipeline 在当前操作完成之前不能执行下一条命令；其他
+pipeline 可以继续执行。
 
-\subsection{后台读写与完成}
+\subsection{事件和锁}
 
+对已声明事件 $\varepsilon=(s,p,q,k)$，源 pipeline 设置事件，目标
+pipeline 消费事件：
 \[
-\frac{Q(j)=(p,\Reading(U,B))\qquad a\in U\qquad\mu(a)=v}
-{\Sigma\step{\operatorname{read}(p,j,a,v)}
- \Sigma[Q\leftarrow Q[j\mapsto(p,\Reading(U\setminus\{a\},B[a\mapsto v]))]]}
-\rulelabel{Read}
+\frac{T(p)=(E[\kw{setflag}(\varepsilon)],\rho,\bot)}
+ {\Sigma\step{\operatorname{set}(p,\varepsilon)}
+  \Sigma[F\mapsto F[\varepsilon\mapsto1]]
+        [T(p)\mapsto(E[\kw{skip}],\rho,\bot)]}
 \]
-
 \[
-\frac{Q(j)=(p,\Writing(U,V))\qquad a\in U}
-{\begin{gathered}
-\Sigma\step{\operatorname{write}(p,j,a,V(a))}\Sigma'\\
-\Sigma'=\Sigma[\mu\leftarrow\mu[a\mapsto V(a)],\
- Q\leftarrow Q[j\mapsto(p,\Writing(U\setminus\{a\},V))]]
-\end{gathered}}
-\rulelabel{Write}
+\frac{T(q)=(E[\kw{waitflag}(\varepsilon)],\rho,\bot)\quad F(\varepsilon)=1}
+ {\Sigma\step{\operatorname{wait}(q,\varepsilon)}
+  \Sigma[F\mapsto F[\varepsilon\mapsto0]]
+        [T(q)\mapsto(E[\kw{skip}],\rho,\bot)]}.
 \]
+重复设置保持标志为 $1$；等待成功时将标志置为 $0$。标志为 $0$ 时等待
+没有可用转移。根据顺序语义，执行设置事件时，源 pipeline 的前序操作
+已经完成。
 
-每个步骤访问一个存储单元。区域内尚未访问的任意地址都可以作为下一步；
-不同任务的访问可以交错。完整区域的读取或写入具有多个步骤，读取结果可以
-包含来自不同写入阶段的值。
+令 $p\in\operatorname{Participants}(\ell)$。获取和释放规则为
+\begin{gather*}
+\frac{T(p)=(E[\kw{lock}(\ell)],\rho,\bot)\quad L(\ell)=\bot}
+ {\Sigma\step{\operatorname{acquire}(p,\ell)}
+  \Sigma[L\mapsto L[\ell\mapsto p]]
+        [T(p)\mapsto(E[\kw{skip}],\rho,\bot)]}\\[1em]
+\frac{T(p)=(E[\kw{unlock}(\ell)],\rho,\bot)\quad L(\ell)=p}
+ {\Sigma\step{\operatorname{release}(p,\ell)}
+  \Sigma[L\mapsto L[\ell\mapsto\bot]]
+        [T(p)\mapsto(E[\kw{skip}],\rho,\bot)]}.
+\end{gather*}
+锁被持有时，其他参与者的获取步骤不可用。事件未声明、事件端点不匹配、
+锁未声明、参与权限不足或者释放者不持有锁时进入错误状态。
 
-\[
-\frac{Q(j)=(p,\Reading(\varnothing,B))}
-{\Sigma\step{\operatorname{finish}(p,j)}
- \Sigma[Q\leftarrow Q[j\mapsto(p,\Done(B))]]}
-\rulelabel{Finish-Read}
-\]
+\subsection{全局调度、错误与终止}
 
-\[
-\frac{Q(j)=(p,\Writing(\varnothing,V))}
-{\Sigma\step{\operatorname{finish}(p,j)}
- \Sigma[Q\leftarrow Q[j\mapsto(p,\Done(\mathsf{unit}))]]}
-\rulelabel{Finish-Write}
-\]
+全局步骤非确定地选择一个 $p\in\mathcal P$，执行上述一个可用步骤。
+局部控制、操作进度、内存访问及同步操作都属于该 pipeline。
+非法命令产生 $\operatorname{error}(p)$ 标签并进入无后继的 $\mathsf{Error}$。
+等待标志和等待锁时条件暂未满足属于阻塞。
 
-\[
-\frac{Q(j)=(p,\Computing(k,f,\bar v))\qquad f(\bar v)=v}
-{\Sigma\step{\operatorname{finish}(p,j)}
- \Sigma[Q\leftarrow Q[j\mapsto(p,\Done(v))]]}
-\rulelabel{Finish-Compute}
-\]
-纯计算从 \kw{begin} 到 \kw{finish} 具有一个可与其他任务重叠的执行区间。
-其内部数值运算由 $f$ 给出；该完成步骤只更新 $Q$。
-本模型不赋予这些步骤具体时长。
+正常终止定义为所有 pipeline 均满足
+$C_p=\kw{skip}$ 且 $d_p=\bot$。未正常终止且没有任何可用步骤的状态是
+全局死锁。部分 pipeline 长期等待而其他 pipeline 持续执行的情形由活性
+性质描述。
 
-\subsection{等待并取得结果}
+程序语义包含所有合法初态出发的最大有限轨迹和无限轨迹。可选的弱公平条件
+要求持续可执行的 pipeline 最终获得调度；基本语义不强制公平。
 
-\[
-\frac{C_p=E[x:=\kw{end}(h)]\qquad\eta_p(h)=j
-\qquad Q(j)=(p,\Done(v))}
-{\begin{gathered}
-\Sigma\step{\operatorname{join}(p,j)}\Sigma'\\
-\Sigma'=\Sigma[C_p\leftarrow E[\kw{skip}],\
- \rho_p\leftarrow\rho_p[x\mapsto v],\
- \eta_p\leftarrow\eta_p\setminus\{h\},\ Q\leftarrow Q\setminus\{j\}]
-\end{gathered}}
-\rulelabel{End}
-\]
-任务尚未完成时，\kw{End} 规则的前提不成立，pipeline 停留在当前命令。
-其他 pipeline 和后台任务仍然可以执行。
-任务可以在 pipeline 到达 \kw{end} 之前完成，此时取得结果的步骤直接可用。
+\section{事件顺序与数据竞争}
 
-\section{事件与锁的同步语义}
-
-\subsection{二值事件}
-
-\[
-\frac{C_p=E[\kw{setflag}(\varepsilon)]\qquad
-\operatorname{MaySet}(p,\varepsilon)\qquad\Active_p(Q)=\varnothing}
-{\Sigma\step{\operatorname{set}(p,\varepsilon)}
- \Sigma[C_p\leftarrow E[\kw{skip}],\ F\leftarrow F[\varepsilon\mapsto1]]}
-\rulelabel{SetFlag}
-\]
-
-\[
-\frac{C_p=E[\kw{waitflag}(\varepsilon)]\qquad
-\operatorname{MayWait}(p,\varepsilon)\qquad F(\varepsilon)=1}
-{\Sigma\step{\operatorname{wait}(p,\varepsilon)}
- \Sigma[C_p\leftarrow E[\kw{skip}],\ F\leftarrow F[\varepsilon\mapsto0]]}
-\rulelabel{WaitFlag}
-\]
-
-\kw{setflag} 等待源 pipeline 的全部前序任务完成。已完成且已经通过
-\kw{end} 消费的任务也满足这一完成要求。
-\kw{waitflag} 在标志为 $0$ 时阻塞后续命令；成功时消费标志并使其恢复为 $0$。
-目标 pipeline 此前已经启动的任务仍然可以执行。
-重复设置尚未消费的标志得到 $1$，因而不会累积通知数量。
-
-\subsection{互斥锁}
-
-\[
-\frac{C_p=E[\kw{lock}(\ell)]\qquad
-p\in\operatorname{Participants}(\ell)\qquad L(\ell)=\bot}
-{\Sigma\step{\operatorname{acquire}(p,\ell)}
- \Sigma[C_p\leftarrow E[\kw{skip}],\ L\leftarrow L[\ell\mapsto p]]}
-\rulelabel{Lock}
-\]
-
-\[
-\frac{C_p=E[\kw{unlock}(\ell)]\qquad
-p\in\operatorname{Participants}(\ell)\qquad L(\ell)=p}
-{\Sigma\step{\operatorname{release}(p,\ell)}
- \Sigma[C_p\leftarrow E[\kw{skip}],\ L\leftarrow L[\ell\mapsto\bot]]}
-\rulelabel{Unlock}
-\]
-
-锁采用非递归互斥语义。锁被持有时，新的获取操作等待；当前持有者再次请求
-同一把锁也等待。释放锁必须由持有者执行。锁的获取和释放建立 acquire/release
-同步关系，具体 happens-before 定义见第~\ref{sec:hb}~节。
-
-\kw{unlock} 的前提仅检查所有权及参与权限。临界区内启动的异步任务需要
-通过 \kw{end} 或已建立的其他完成依赖，保证访问完成后再释放锁。
-例如
-\begin{lstlisting}
-lock(l);
-h := begin(write(R, V));
-unit := end(h);
-unlock(l);
-\end{lstlisting}
-使任务中的全部写入先于锁释放。
-
-\subsection{有序锁的策略实例}
-
-需要按给定参与者顺序放行时，为该锁使用状态
-$L(\ell)=(\mathit{owner},r)$，初值为 $(\bot,0)$，并声明序列
-$w_\ell:\mathbb N\to\operatorname{Participants}(\ell)$。
-锁的声明及参与权限检查继续适用。\kw{Lock} 的所有权前提和更新改为
-\[
-\mathit{owner}=\bot\land p=w_\ell(r),
-\qquad L(\ell)\leftarrow(p,r),
-\]
-\kw{Unlock} 的前提要求当前所有者为 $p$，更新为
-\[
-L(\ell)\leftarrow(\bot,r+1).
-\]
-例如轮转序列满足 $w_\ell(r)=p_{r\bmod m}$。
-这一策略显式保留访问次序带来的等待依赖。具体硬件的 block/subblock 编号、
-跳过临界区时的处理和内存同步要求，需要由其翻译规则给出。
-其余章节和执行例子均使用普通互斥锁的状态类型。
-
-\section{错误、全局执行与并发性质}
-
-\subsection{等待条件与错误状态}
-
-\kw{end} 对未完成任务的等待、\kw{waitflag} 对零标志的等待、
-\kw{lock} 对已持有锁的等待，以及 \kw{setflag} 对前序任务完成的等待，
-都通过相应规则暂时不可用表达。
-
-令 $\operatorname{Bad}_\Gamma(p,a,\Sigma)$ 表示当前命令存在以下错误之一：
-\begin{itemize}
-\item 普通表达式引用未定义变量、违反类型要求，或纯表达式运算未定义；条件表达式的结果必须为布尔值。
-\item \kw{begin} 使用已有活动句柄变量，或初始化任务不满足 $\operatorname{Valid}_\Gamma$。
-\item \kw{end} 使用不存在的句柄、查不到任务，或句柄指向其他 pipeline 的任务。
-\item 事件未声明、事件端点与执行 pipeline 不匹配，或同步域声明不合法。
-\item 锁未声明、pipeline 不属于允许参与者，或执行 \kw{unlock} 的 pipeline 未持有该锁。
-\end{itemize}
-条件求值的错误同样通过以下规则报告；此处 $a$ 也可代表待求值的条件命令。
-\[
-\frac{C_p=E[a]\qquad\operatorname{Bad}_\Gamma(p,a,\Sigma)}
-{\Sigma\step{\operatorname{error}(p,a)}\mathsf{Error}}
-\rulelabel{Error}
-\]
-$\mathsf{Error}$ 没有后继状态。已完成但尚未消费的句柄也占用其句柄变量名。
-用于等待的条件不会单独触发 $\operatorname{Bad}_\Gamma$。
-
-\subsection{全局交错与轨迹}
-
-所有规则直接作用于同一全局状态。全局关系是控制步骤、后台任务步骤和错误
-步骤的并集：
-\[
-\step{}=
-\bigcup_{p\in\mathcal P}\step{}_{\mathrm{control},p}
-\;\cup\!
-\bigcup_{j\in\dom(Q)}\step{}_{\mathrm{task},j}
-\;\cup\;\step{}_{\mathrm{error}}.
-\]
-每一步非确定地选择一个满足前提的规则。同一 pipeline 的控制命令按照
-程序顺序执行，多个未完成任务可以共存；当前抽象允许它们以任意顺序完成。
-不同 pipeline 的任务也可以交错执行。
-
-初始状态集合记为 $\operatorname{Init}_\Gamma(P)$。程序语义是全部最大轨迹：
-\[
-\sem{P}_\Gamma=
-\left\{\Sigma_0\step{\alpha_0}\Sigma_1\step{\alpha_1}\cdots
-\;\middle|\;\Sigma_0\in\operatorname{Init}_\Gamma(P)\right\}_{\mathrm{maximal}}.
-\]
-最大轨迹是无限轨迹，或没有后继步骤的有限轨迹。安全性质对全部轨迹量化。
-活性论证可以进一步要求弱公平：持续可执行的 pipeline 或任务最终获得执行机会。
-互斥锁的无饥饿结论还需要相应仲裁公平性。
-
-\subsection{Happens-before 与数据竞争}\label{sec:hb}
-
-对轨迹中每次转移赋予唯一事件标识。定义以下关系：
+对有限标签轨迹 $\tau$，记 $\tau_i$ 为第 $i$ 个事件，$\operatorname{owner}$
+返回事件所属 pipeline。基本顺序边包括：
 \begin{enumerate}
-\item $\mathit{po}$：同一 pipeline 的相邻控制事件按执行顺序连接，包含
-\kw{begin}、\kw{join}、同步操作、局部赋值和控制流步骤。
-\item $\mathit{task}$：一个任务的 \kw{begin} 连接其第一个后台步骤，
-该任务的相邻后台步骤依次连接，直至 \kw{finish}。
-\item $\mathit{join}$：任务的 \kw{finish} 连接取得该结果的 \kw{join}。
-\item $\mathit{drain}$：源 pipeline 在某次 \kw{setflag} 之前启动的每个任务，
-其 \kw{finish} 连接该次 \kw{setflag}。此关系根据轨迹中的启动历史定义，
-包含已经从 $Q$ 移除的任务。
-\item $\mathit{flag}$：设置事件连接到消费它的成功等待事件，方向为
-$\operatorname{set}(\varepsilon)\to\operatorname{wait}(\varepsilon)$。
-设置时可以在分析记录中保存最近一次设置事件的标识；等待成功时读取并清除它。
-这些分析标识不参与程序求值。
-\item $\mathit{mutex}$：同一把锁的一次释放连接其后第一次成功获取。
+\item 程序顺序：$i<j$ 且 $\operatorname{owner}(\tau_i)=
+  \operatorname{owner}(\tau_j)$。这包括该 pipeline 的读写步骤和同步步骤。
+\item 事件同步：$\tau_i=\operatorname{set}(p,\varepsilon)$、
+  $\tau_j=\operatorname{wait}(q,\varepsilon)$，$i<j$，中间没有对
+  $\varepsilon$ 的设置或等待。
+\item 锁同步：$\tau_i=\operatorname{release}(p,\ell)$、
+  $\tau_j=\operatorname{acquire}(q,\ell)$，$i<j$，中间没有对 $\ell$
+  的获取。
 \end{enumerate}
-定义
+happens-before 是这些边的传递闭包，记为 $\mathit{hb}$。两个不同位置
+$i,j$ 构成冲突，当且仅当它们访问同一地址且至少一个是写入。数据竞争为
 \[
-\mathit{hb}=
-(\mathit{po}\cup\mathit{task}\cup\mathit{join}
- \cup\mathit{drain}\cup\mathit{flag}\cup\mathit{mutex})^+.
+\operatorname{Race}_\tau(i,j)\iff i\ne j\land
+\operatorname{Conflict}_\tau(i,j)\land
+\neg(i\mathrel{\mathit{hb}}j)\land\neg(j\mathrel{\mathit{hb}}i).
 \]
-两个独立后台任务在某条轨迹中先后完成，这一时间先后关系本身不会增加
-$\mathit{hb}$ 边。操作间的同步依赖由上述关系确定。
+同一 pipeline 的任意两个先后访问都由程序顺序连接。区域访问可以与其他
+pipeline 的访问交错，因而可以产生竞争和混合读取结果。
 
-对访问事件 $a,b$，定义
-\[
-\begin{aligned}
-\operatorname{Conflict}(a,b)
-&\iff \operatorname{loc}(a)=\operatorname{loc}(b)\\
-&\quad\land(\operatorname{isWrite}(a)\lor\operatorname{isWrite}(b)),\\
-\operatorname{Race}(a,b)
-&\iff a\ne b\land\operatorname{Conflict}(a,b)\\
-&\quad\land\neg(a\mathrel{\mathit{hb}}b)\land\neg(b\mathrel{\mathit{hb}}a).
-\end{aligned}
-\]
-单个存储单元的原子访问仍然可能与另一任务的数据访问构成数据竞争。
-这一判定也覆盖同一 pipeline 内缺少完成依赖的两个异步任务。
-程序数据竞争自由表示其全部轨迹都不存在这样的事件对。
+\section{可选的顺序锁策略}
 
-\subsection{终止与死锁}
+普通锁语义不指定竞争者的获取次序。可选扩展使用
+$\operatorname{order}:\mathsf{Lock}\times\mathbb N\to\mathsf{Pipe}$，
+以及每把锁的轮次 $\operatorname{turn}(\ell)$。初始轮次为 $0$；
+获取时除了普通规则的前提，还要求
+$\operatorname{order}(\ell,\operatorname{turn}(\ell))=p$；
+成功释放后将轮次加一。每个轮次的选定 pipeline 必须属于该锁的参与者集合。
+忽略轮次状态后，扩展的每个步骤均为普通语义的步骤。无限轮转顺序
+$\operatorname{order}(\ell,n)=n\bmod 2$ 可用于参与者为 $0,1$ 的锁。
 
-\[
-\operatorname{Terminal}(\Sigma)
-\iff(\forall p\in\mathcal P.\ C_p=\kw{skip})
-\land(\forall p\in\mathcal P.\ \Active_p(Q)=\varnothing).
-\]
-未消费的已完成任务允许保留；正常终止只要求全部代码和后台操作完成。
-\[
-\begin{aligned}
-\operatorname{Deadlocked}(\Sigma)
-\iff{}&\Sigma\ne\mathsf{Error}\land\neg\operatorname{Terminal}(\Sigma)\\
-&\land\nexists\alpha,\Sigma'.\ \Sigma\step{\alpha}\Sigma'.
-\end{aligned}
-\]
-这一定义描述全局死锁。存在后台任务可继续执行时，系统仍有后继步骤。
-某些 pipeline 永久等待而其他 pipeline 无限运行，需要通过活性性质另外描述。
+\section{形式化范围与参考}
 
-\section{硬件对应条件与语义依据}
+Rocq 定义位于 \code{rocq/CoreLanguage/}，包含语法、状态、带标签小步关系、
+执行轨迹、happens-before、数据竞争、顺序锁和具体执行推导。
+Rocq 证明覆盖操作启动所需的空闲条件、完成时的结果状态、计算类别检查、
+正常终止状态没有后继、happens-before 的顺序性质和顺序锁性质。
+实际硬件的缓存传播、队列容量、执行时延以及硬件程序翻译到本语言的
+refinement 需要针对具体目标建立。将安全结论传递到硬件时还需证明访存、
+别名、同步作用域、执行类别和事件顺序得到保持。
 
-本语言采用原子存储单元上的顺序一致性交错内存模型，显式描述任务启动、
-完成、事件消费和锁所有权。有限队列容量、实际运算时延、缓存维护及弱内存
-传播需要由具体硬件实例的语义给出。同一 pipeline 的内部阶段顺序也属于
-需要核查的硬件约束。
-
-将具体程序 $P$ 翻译为 core language 程序 $T(P)$ 时，需要保持实际访存、
-地址别名、执行类别、pipeline 控制关系、同步作用域和异步完成依赖。
-若使用本语言证明硬件安全性质，一项需要建立的义务是
-\[
-\alpha(\operatorname{Traces}_{\mathrm{hardware}}(P))
-\subseteq\operatorname{Traces}_{\mathrm{core}}(T(P)),
-\]
-其中 $\alpha$ 投影硬件事件。把数据竞争或无死锁结论传递到硬件时，还分别
-需要冲突与同步关系保持，以及具体执行的进展性质。
-对应的 Rocq 定义位于 \code{rocq/CoreLanguage/}，包含语法、执行状态、
-带标签的小步关系、最大执行轨迹、happens-before、数据竞争和可选顺序锁策略。
-其中给出了任务编号新鲜性、计算类别检查等性质证明及具体执行推导。
-硬件对应定理仍需根据具体目标建立。
-
-核内 \kw{setflag}/\kw{waitflag} 的二值消费行为与源 pipeline 完成条件参照
-Ascend 文档~\cite{ascend-flag,ascend-architecture}。
-HIVM 同步操作携带源 pipeline、目标 pipeline 和事件编号，仓库中可核查的
-定义位于 \code{vendor/ascendnpu-ir/upstream/} 下的
-\code{bishengir/include/bishengir/Dialect/HIVM/IR/HIVMSynchronizationOps.td}；
-运行条件也见 \code{docs/source/zh_cn/developer_guide/features/auto_sync.md}。
-该参考目录记录的上游版本为
-\code{22e3d51df4642fb0f74060af36f5c5c80be80d08}。
-
-锁的 acquire/release 含义参考 Triton 原子操作接口提供的内存语义。
-Triton LayerNorm 示例在临界区释放锁之前执行线程同步，体现了完成依赖的
-要求~\cite{triton-cas,triton-xchg,triton-layernorm}。
-本文的 \kw{lock}/\kw{unlock} 是抽象原语；具体原子指令序列及其作用域由
-目标语言翻译确定。
+事件的二值消费含义参考 Ascend 文档~\cite{ascend-flag,ascend-architecture}；
+HIVM 同步操作的定义可见仓库中的
+\code{vendor/ascendnpu-ir/upstream/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMSynchronizationOps.td}。
+锁的 acquire/release 含义参考 Triton 原子操作接口~\cite{triton-cas,triton-xchg}，
+具体翻译由目标平台给出。
 
 \begin{thebibliography}{9}
-\bibitem{ascend-flag}
-Ascend C，\emph{SetFlag/WaitFlag}。
+\bibitem{ascend-flag} Ascend C，\emph{SetFlag/WaitFlag}。
 \url{https://asc.gitcode.com/api/SIMD-API/basic_api/sync_control/intra_core_sync/SetFlag-WaitFlag.html}。
-\bibitem{ascend-architecture}
-Ascend C，\emph{Basic Architecture}，CANN 9.0。
+\bibitem{ascend-architecture} Ascend C，\emph{Basic Architecture}，CANN 9.0。
 \url{https://www.hiascend.com/document/detail/en/CANNCommunityEdition/900/programug/Ascendcopdevg/atlas_ascendc_10_0008.html}。
-\bibitem{triton-cas}
-Triton，\emph{triton.language.atomic\_cas}。
+\bibitem{triton-cas} Triton，\emph{triton.language.atomic\_cas}。
 \url{https://triton-lang.org/main/python-api/generated/triton.language.atomic_cas.html}。
-\bibitem{triton-xchg}
-Triton，\emph{triton.language.atomic\_xchg}。
+\bibitem{triton-xchg} Triton，\emph{triton.language.atomic\_xchg}。
 \url{https://triton-lang.org/main/python-api/generated/triton.language.atomic_xchg.html}。
-\bibitem{triton-layernorm}
-Triton，\emph{Layer Normalization}。
-\url{https://triton-lang.org/main/getting-started/tutorials/05-layer-norm.html}。
 \end{thebibliography}
 
 \clearpage
 \section{具体执行例子}
 
-例子中的 \code{read} 返回地址值映射，\code{write} 接收这样的映射。
-代码里的 \code{unit} 是普通变量名，用于接收写入任务返回的 $\mathsf{unit}$。
-每个轨迹表列出实际产生状态变化的语义步骤；控制位置的 \kw{skip} 消除步骤
-不逐项列出。等待条件不满足时没有成功转移，表格会直接注明等待位置。
-各例子的执行类别和函数支持关系由各自声明确定。
-
-\subsection{操作句柄：启动、后台完成与取得结果}
-
-取 $\mathcal P=\{p_v\}$、$\kind(p_v)=\mathsf{Vector}$，并声明 $p_v$ 支持整数加法
-$\operatorname{add}(a,b)=a+b$。初始局部映射和任务表为空，$n=0$。
+\subsection{同一 pipeline 的操作顺序}
 
 \begin{lstlisting}
 parallel {
   pv:
-    h := begin(computation[Vector, add](2, 3));
-    y := 10;
-    x := end(h);
-    z := x + y;
+    x := computation[Vector, add](2, 3);
+    y := computation[Vector, add](x, 10);
 }
 \end{lstlisting}
+第一条计算执行期间，$d_{p_v}$ 依次为
+$\Compute(\mathsf{Vector},\mathrm{add},[2,3])$ 和 $\Done(5)$。
+结果写入 $x$ 后，第一条命令变成 $\kw{skip}$；消除顺序组合中的
+$\kw{skip}$ 后，第二条计算才能求值 $x$ 并得到 $y=15$。
 
-记启动时的任务内容为
-\[
-d_0=\Computing(\mathsf{Vector},\mathrm{add},[2,3]).
-\]
-\begin{center}
-\small
-\begin{tabularx}{\linewidth}{@{}lY Y Y@{}}
-\toprule
-步骤 & 执行动作 & 局部值与句柄 & 任务状态\\
-\midrule
-1 & 启动加法，分配编号 $0$ & $\eta_{p_v}(h)=0$ & $Q(0)=(p_v,d_0)$\\
-2 & 执行 $y:=10$ & $\rho_{p_v}(y)=10$，$\eta_{p_v}(h)=0$ & 任务 $0$ 尚未完成\\
-3 & 后台完成加法 & pipeline 位于 $x:=\kw{end}(h)$ & $Q(0)=(p_v,\Done(5))$\\
-4 & 取得任务结果 & $\rho_{p_v}(x)=5$，移除句柄 $h$ & 移除 $Q(0)$\\
-5 & 执行 $z:=x+y$ & $\rho_{p_v}(z)=15$ & $Q=\varnothing$\\
-\bottomrule
-\end{tabularx}
-\end{center}
+\subsection{Cube 和 Vector pipeline 的并行计算}
 
-步骤 2 之后，若控制步骤尝试执行 \kw{end}，其完成前提尚未满足。
-后台步骤 3 可以执行并使 \kw{end} 可用。步骤 4 的查询过程是
-\[
-\eta_{p_v}(h)=0,\qquad Q(0)=(p_v,\Done(5)),\qquad\rho_{p_v}'(x)=5.
-\]
-编号 $0$ 标识这一次任务；值 $5$ 是任务计算结果。整个例子的共享内存保持原值。
-
-\subsection{同一 pipeline 的两个在途任务}
-
-取 $\mathcal P=\{p_m\}$、$\kind(p_m)=\mathsf{MTE}$，允许访问地址 $a,b$，初始
-$\mu(a)=\mu(b)=0$。两个写入区域不相交。
-
+设 $\kind(p_c)=\mathsf{Cube}$、$\kind(p_v)=\mathsf{Vector}$，
+$A=\bigl(\begin{smallmatrix}1&2\\3&4\end{smallmatrix}\bigr)$，
+$B=\bigl(\begin{smallmatrix}5&6\\7&8\end{smallmatrix}\bigr)$。
 \begin{lstlisting}
 parallel {
-  pm:
-    h1 := begin(write({a}, {a: 11}));
-    h2 := begin(write({b}, {b: 22}));
-    unit := end(h1);
-    unit := end(h2);
+  pv: z := computation[Vector, vadd]([1, 2], [10, 20]);
+  pc: c := computation[Cube, matmul](A, B);
 }
 \end{lstlisting}
+一条合法执行依次启动 Vector 计算、启动 Cube 计算、完成 Vector 计算并
+写入 $z=[11,22]$，再完成 Cube 计算并写入
+$c=\bigl(\begin{smallmatrix}19&22\\43&50\end{smallmatrix}\bigr)$。
+两次计算分别保存在所属 pipeline 的当前操作状态中。
+将 Cube 计算放在 $p_v$ 中会因执行类别不匹配进入错误状态。
 
-\begin{center}
-\small
-\begin{tabularx}{\linewidth}{@{}lY c c Y@{}}
-\toprule
-步骤 & 动作 & $\mu(a)$ & $\mu(b)$ & 任务与控制状态\\
-\midrule
-1 & $\operatorname{begin}(p_m,0)$ & 0 & 0 & $h_1\mapsto0$，任务 $0$ 写入 $a$\\
-2 & $\operatorname{begin}(p_m,1)$ & 0 & 0 & $h_2\mapsto1$，两个任务均未完成\\
-3 & 任务 $1$ 写入 $b$ & 0 & 22 & 任务 $1$ 的剩余地址集合为空\\
-4 & 任务 $1$ 完成 & 0 & 22 & $Q(1)=(p_m,\Done(\mathsf{unit}))$\\
-5 & 任务 $0$ 写入 $a$ & 11 & 22 & pipeline 仍在等待 $h_1$\\
-6 & 任务 $0$ 完成 & 11 & 22 & 两个任务都已完成\\
-7 & $\operatorname{join}(p_m,0)$ & 11 & 22 & 消费 $h_1$\\
-8 & $\operatorname{join}(p_m,1)$ & 11 & 22 & 消费 $h_2$，程序终止\\
-\bottomrule
-\end{tabularx}
-\end{center}
+\subsection{区域读取与写入交错}
 
-这条轨迹满足同一 pipeline 的启动顺序，同时允许任务 $1$ 先完成。
-任务 $0$ 的执行区间包含任务 $1$ 的启动与完成。
-这是本语言允许的抽象调度；具体 pipeline 对完成顺序的限制需要通过硬件对应条件核查。
-
-\subsection{Cube 与 Vector 的类别检查和并行计算}
-
-声明
-\[
-\mathcal P=\{p_c,p_v\},\qquad
-\kind(p_c)=\mathsf{Cube},\qquad\kind(p_v)=\mathsf{Vector}.
-\]
-$p_c$ 支持 $2\times2$ 整数矩阵乘法，$p_v$ 支持长度为 $2$ 的整数向量加法。
-初始局部值为
-\[
-A=\begin{pmatrix}1&2\\3&4\end{pmatrix},\qquad
-B=\begin{pmatrix}5&6\\7&8\end{pmatrix},\qquad
-X=(10,20),\quad Y=(1,2).
-\]
-$A,B$ 位于 $\rho_{p_c}$，$X,Y$ 位于 $\rho_{p_v}$。
-
+初始内存满足 $\mu(0)=\mu(1)=0$，两个 pipeline 均具有相应访问权限：
 \begin{lstlisting}
 parallel {
-  pc:
-    hc := begin(computation[Cube, matmul](A, B));
-    C := end(hc);
-
-  pv:
-    hv := begin(computation[Vector, vadd](X, Y));
-    Z := end(hv);
+  p0: result := read({0, 1});
+  p1: unit := write({0, 1}, {0: 41, 1: 42});
 }
 \end{lstlisting}
+一条合法执行先由 $p_0$ 读取地址 $0$ 的值 $0$，再由 $p_1$ 写入地址
+$0,1$，最后由 $p_0$ 读取地址 $1$ 的值 $42$。返回的映射为
+$\{0\mapsto0,1\mapsto42\}$，最终内存为 $\{0\mapsto41,1\mapsto42\}$。
+这些逐地址步骤对应 \code{MemoryExamples.v} 中经过证明的执行轨迹。
 
-一次允许的执行是：
-\begin{center}
-\small
-\begin{tabularx}{\linewidth}{@{}lY Y@{}}
-\toprule
-步骤 & 动作 & 结果状态\\
-\midrule
-1 & Cube pipeline 启动任务 $0$ & $Q(0)=(p_c,\Computing(\mathsf{Cube},\mathrm{matmul},[A,B]))$\\
-2 & Vector pipeline 启动任务 $1$ & $Q(1)=(p_v,\Computing(\mathsf{Vector},\mathrm{vadd},[X,Y]))$\\
-3 & Vector 任务完成 & $Q(1)=(p_v,\Done((11,22)))$\\
-4 & Vector pipeline 取得结果 & $\rho_{p_v}(Z)=(11,22)$\\
-5 & Cube 任务完成 & $Q(0)=(p_c,\Done(AB))$\\
-6 & Cube pipeline 取得结果 & $\rho_{p_c}(C)=AB$\\
-\bottomrule
-\end{tabularx}
-\end{center}
-其中
-\[
-AB=\begin{pmatrix}
-1\cdot5+2\cdot7&1\cdot6+2\cdot8\\
-3\cdot5+4\cdot7&3\cdot6+4\cdot8
-\end{pmatrix}
-=\begin{pmatrix}19&22\\43&50\end{pmatrix}.
-\]
-步骤 2 之后，Cube 和 Vector 任务同时处于未完成状态。
-各任务分别检查
-\[
-\kind(p_c)=\mathsf{Cube},\qquad\kind(p_v)=\mathsf{Vector},
-\]
-以及对应的 $\operatorname{Supports}$ 条件。
-在另一个输入状态中，令 $\rho_{p_v}$ 也包含上述矩阵 $A,B$，并声明
-$p_v$ 支持该数学函数。在 $p_v$ 上启动
-\code{computation[Cube, matmul](A, B)} 仍然使
-$\kind(p_v)=\mathsf{Cube}$ 这一类别前提失败，进入 $\mathsf{Error}$，且不会创建任务。
-本例全部计算使用局部值，$\mu$ 保持不变。
+\subsection{事件与临界区}
 
-\subsection{事件等待前序异步写入完成}
-
-声明 $\kind(p_m)=\mathsf{MTE}$、$\kind(p_v)=\mathsf{Vector}$，事件
-$\varepsilon=(s,p_m,p_v,0)$ 初值为 $0$，两个 pipeline 均有访问 $a$ 的相应权限，
-初始 $\mu(a)=0$。Vector pipeline 支持整数加法。
-
+设 $\varepsilon$ 的源为 $p_0$、目标为 $p_1$，初始标志为 $0$：
 \begin{lstlisting}
 parallel {
-  pm:
-    hw := begin(write({a}, {a: 41}));
-    setflag(s, pm, pv, 0);
-
-  pv:
-    waitflag(s, pm, pv, 0);
-    hr := begin(read({a}));
-    B := end(hr);
-    hc := begin(computation[Vector, add](B[a], 1));
-    result := end(hc);
+  p0: unit := write({a}, {a: 41}); setflag(epsilon);
+  p1: waitflag(epsilon); result := read({a});
 }
 \end{lstlisting}
+$p_0$ 完成写入后才能设置事件；$p_1$ 消费事件后读取地址 $a$。
+当没有其他写入时，读取结果为 $41$。
 
-\begin{center}
-\small
-\begin{tabularx}{\linewidth}{@{}lY c c@{}}
-\toprule
-步骤 & 动作 & $\mu(a)$ & $F(\varepsilon)$\\
-\midrule
-1 & MTE 启动写入任务 $0$ & 0 & 0\\
-2 & 任务 $0$ 写入 $a$ & 41 & 0\\
-3 & 任务 $0$ 完成 & 41 & 0\\
-4 & MTE 执行 \kw{setflag} & 41 & 1\\
-5 & Vector 执行 \kw{waitflag}，消费标志 & 41 & 0\\
-6 & Vector 启动读取任务 $1$ & 41 & 0\\
-7 & 任务 $1$ 读取 $a$，得到 $41$ & 41 & 0\\
-8 & 任务 $1$ 完成 & 41 & 0\\
-9 & Vector 取得 $B=\{a\mapsto41\}$ & 41 & 0\\
-10 & Vector 启动加法任务 $2$ & 41 & 0\\
-11 & 任务 $2$ 完成，得到 $42$ & 41 & 0\\
-12 & Vector 取得 $\mathit{result}=42$ & 41 & 0\\
-\bottomrule
-\end{tabularx}
-\end{center}
-
-步骤 1 之后，MTE 位于 \kw{setflag}，但 $\Active_{p_m}(Q)=\{0\}$，
-因此必须等待步骤 3 完成。Vector 的 \kw{waitflag} 在步骤 4 之前也不可用。
-写入任务 $0$ 的句柄可以保持未消费：它已完成，因而不妨碍事件设置或程序终止。
-对应的 happens-before 链为
-\[
-\operatorname{write}(0,a,41)
-\mathrel{\mathit{hb}}\operatorname{finish}(0)
-\mathrel{\mathit{hb}}\operatorname{set}(\varepsilon)
-\mathrel{\mathit{hb}}\operatorname{wait}(\varepsilon)
-\mathrel{\mathit{hb}}\operatorname{read}(1,a,41).
-\]
-此处省略标签中的 pipeline 标识，仅用于缩短公式。
-
-\subsection{临界区中的异步写入}
-
-两个 pipeline 共享锁 $\ell$ 和地址 $a$，拥有相应读写权限。初始
-$L(\ell)=\bot$、$\mu(a)=0$。
-
+两个 pipeline 也可以使用同一把锁保护地址 $a$：
 \begin{lstlisting}
 parallel {
-  p1:
-    lock(l);
-    h := begin(write({a}, {a: 5}));
-    unit := end(h);
-    unlock(l);
-
-  p2:
-    lock(l);
-    h := begin(read({a}));
-    B := end(h);
-    unlock(l);
+  p0: lock(l); unit := write({a}, {a: 5}); unlock(l);
+  p1: lock(l); result := read({a}); unlock(l);
 }
 \end{lstlisting}
+每个 pipeline 的访存操作完成后才执行释放锁。锁的获取顺序决定两个
+临界区的先后顺序。
 
-选择 $p_1$ 首先获得锁的执行：
-\begin{center}
-\small
-\begin{tabularx}{\linewidth}{@{}lY l@{}}
-\toprule
-步骤 & 动作 & 锁状态\\
-\midrule
-1 & $p_1$ 获取锁 & $L(\ell)=p_1$\\
-2 & $p_1$ 启动写入任务 $0$ & $L(\ell)=p_1$\\
-3 & 任务 $0$ 写入 $a$，$\mu(a)=5$ & $L(\ell)=p_1$\\
-4 & 任务 $0$ 完成 & $L(\ell)=p_1$\\
-5 & $p_1$ 取得完成结果 & $L(\ell)=p_1$\\
-6 & $p_1$ 释放锁 & $L(\ell)=\bot$\\
-7 & $p_2$ 获取锁 & $L(\ell)=p_2$\\
-8 & $p_2$ 启动读取任务 $1$ & $L(\ell)=p_2$\\
-9 & 任务 $1$ 读取 $a$，得到 $5$ & $L(\ell)=p_2$\\
-10 & 任务 $1$ 完成 & $L(\ell)=p_2$\\
-11 & $p_2$ 取得 $B=\{a\mapsto5\}$ & $L(\ell)=p_2$\\
-12 & $p_2$ 释放锁 & $L(\ell)=\bot$\\
-\bottomrule
-\end{tabularx}
-\end{center}
+\subsection{循环等待}
 
-在步骤 1--5 期间，$p_2$ 的获取规则不可用。写入访问经由任务完成、
-\kw{join}、锁释放与再次获取，先于读取访问。
-该程序也允许 $p_2$ 首先获得锁，此时它读取初值 $0$；两种顺序都受到互斥保护。
-
-若某程序在启动写入后立即释放锁，再等待该写入，则其允许的事件前缀为
-\[
-\begin{aligned}
-&\operatorname{acquire}(p_1,\ell),\
-\operatorname{begin}(p_1,0),\
-\operatorname{release}(p_1,\ell),\\
-&\operatorname{acquire}(p_2,\ell),\
-\operatorname{begin}(p_2,1),\
-\operatorname{read}(p_2,1,a,0),\
-\operatorname{write}(p_1,0,a,5).
-\end{aligned}
-\]
-任务 $0$ 的写入缺少通向第一次锁释放的完成依赖，两个访问构成数据竞争。
-
-\clearpage
-\subsection{二值事件复用与循环等待}
-
-对于同一个事件 $\varepsilon$，存在如下执行顺序：
-\[
-\begin{array}{c|ccccc}
-\text{动作}&\text{初始}&\operatorname{set}&\operatorname{set}&\operatorname{wait}&\text{再次等待}\\
-\hline
-F(\varepsilon)&0&1&1&0&0
-\end{array}
-\]
-两次设置之间没有消费时，第二次等待仍需要后续设置才能成功。
-若采用设置、消费、设置、消费的顺序，两次等待均可完成。
-
-下面的程序声明两个独立事件
-$\varepsilon_{pq}=(s,p,q,0)$ 与 $\varepsilon_{qp}=(s,q,p,0)$，
-它们初始均为 $0$：
+设事件 $\varepsilon_{01}$ 从 $p_0$ 发往 $p_1$，$\varepsilon_{10}$
+从 $p_1$ 发往 $p_0$，初始标志均为 $0$：
 \begin{lstlisting}
 parallel {
-  p:
-    waitflag(s, q, p, 0);
-    setflag(s, p, q, 0);
-
-  q:
-    waitflag(s, p, q, 0);
-    setflag(s, q, p, 0);
+  p0: waitflag(e10); setflag(e01);
+  p1: waitflag(e01); setflag(e10);
 }
 \end{lstlisting}
-初始状态满足
-\[
-Q=\varnothing,\qquad
-F(\varepsilon_{pq})=F(\varepsilon_{qp})=0.
-\]
-两个 pipeline 的当前命令都是等待，两个等待前提均不成立，后台任务集合为空，
-也不存在错误步骤。剩余代码尚未完成，因此该初始状态满足
-$\operatorname{Deadlocked}(\Sigma_0)$。
+两个 pipeline 的当前等待都无法执行，程序未终止且不存在其他可用步骤，
+因此初始状态满足全局死锁定义。
 
 \end{document}

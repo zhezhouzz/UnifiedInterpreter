@@ -214,16 +214,17 @@ Section Properties.
   Lemma sequence_lock_obeys_order s p t lock following turn :
     p ∈ declared_pipelines m -> pipelines (base_machine s) !! p = Some t ->
     pipeline_code t = CSeq (CLock lock) following ->
+    pipeline_operation t = None ->
     lock_member m p lock -> locks (base_machine s) !! lock = Some None ->
     lock_turns s !! lock = Some turn -> order lock turn = p ->
     exists next, ordered_step m order (OrderedRunning s) (LAcquire p lock)
       (OrderedRunning next).
   Proof.
-    intros declared at_pipeline code member free at_turn selected.
+    intros declared at_pipeline code idle member free at_turn selected.
     eexists. eapply OrderedAcquire; [|exact at_turn |exact selected].
     eapply StepControl; [exact declared |exact at_pipeline |].
     eapply PipelineSeq; [exact code |].
-    eapply PipelineLock; [reflexivity |exact member |exact free].
+    eapply PipelineLock; [reflexivity |exact idle |exact member |exact free].
   Qed.
 End Properties.
 

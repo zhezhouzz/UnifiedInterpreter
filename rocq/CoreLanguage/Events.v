@@ -3,11 +3,10 @@ From UnifiedInterpreter.CoreLanguage Require Import Syntax State.
 Inductive label (Numeric : Type) : Type :=
 | LAssign (p : pipeline_id) (x : var) (v : value Numeric)
 | LControl (p : pipeline_id)
-| LBegin (p : pipeline_id) (j : task_id) (operation : op Numeric)
-| LRead (p : pipeline_id) (j : task_id) (a : address) (v : value Numeric)
-| LWrite (p : pipeline_id) (j : task_id) (a : address) (v : value Numeric)
-| LFinish (p : pipeline_id) (j : task_id)
-| LJoin (p : pipeline_id) (j : task_id)
+| LStart (p : pipeline_id) (operation : op Numeric)
+| LRead (p : pipeline_id) (a : address) (v : value Numeric)
+| LWrite (p : pipeline_id) (a : address) (v : value Numeric)
+| LComplete (p : pipeline_id) (x : var) (v : value Numeric)
 | LSet (p : pipeline_id) (event : event_key)
 | LWait (p : pipeline_id) (event : event_key)
 | LAcquire (p : pipeline_id) (lock : lock_id)
@@ -16,11 +15,10 @@ Inductive label (Numeric : Type) : Type :=
 
 Arguments LAssign {Numeric} _ _ _.
 Arguments LControl {Numeric} _.
-Arguments LBegin {Numeric} _ _ _.
-Arguments LRead {Numeric} _ _ _ _.
-Arguments LWrite {Numeric} _ _ _ _.
-Arguments LFinish {Numeric} _ _.
-Arguments LJoin {Numeric} _ _.
+Arguments LStart {Numeric} _ _.
+Arguments LRead {Numeric} _ _ _.
+Arguments LWrite {Numeric} _ _ _.
+Arguments LComplete {Numeric} _ _ _.
 Arguments LSet {Numeric} _ _.
 Arguments LWait {Numeric} _ _.
 Arguments LAcquire {Numeric} _ _.
@@ -34,22 +32,16 @@ Inductive configuration (Numeric : Type) : Type :=
 Arguments Running {Numeric} _.
 Arguments Error {Numeric}.
 
-Definition control_owner {Numeric} (event : label Numeric) : option pipeline_id :=
+Definition event_owner {Numeric} (event : label Numeric) : pipeline_id :=
   match event with
-  | LAssign p _ _ | LControl p | LBegin p _ _ | LJoin p _
-  | LSet p _ | LWait p _ | LAcquire p _ | LRelease p _ | LError p => Some p
-  | LRead _ _ _ _ | LWrite _ _ _ _ | LFinish _ _ => None
-  end.
-
-Definition task_event {Numeric} (event : label Numeric) : option task_id :=
-  match event with
-  | LBegin _ j _ | LRead _ j _ _ | LWrite _ j _ _ | LFinish _ j => Some j
-  | _ => None
+  | LAssign p _ _ | LControl p | LStart p _ | LRead p _ _ | LWrite p _ _
+  | LComplete p _ _ | LSet p _ | LWait p _ | LAcquire p _ | LRelease p _
+  | LError p => p
   end.
 
 Definition access {Numeric} (event : label Numeric) : option (address * bool) :=
   match event with
-  | LRead _ _ a _ => Some (a, false)
-  | LWrite _ _ a _ => Some (a, true)
+  | LRead _ a _ => Some (a, false)
+  | LWrite _ a _ => Some (a, true)
   | _ => None
   end.

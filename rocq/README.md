@@ -1,11 +1,11 @@
 # Rocq Executable Semantics
 
 The concurrent pipeline language is defined in
-[`CoreLanguage/`](CoreLanguage/README.md). It formalizes the syntax, asynchronous
-tasks, labeled small-step relation, synchronization, execution traces and data
+[`CoreLanguage/`](CoreLanguage/README.md). It formalizes the syntax, sequential
+pipeline operations, labeled small-step relation, synchronization, execution traces and data
 races described in [`../docs/pipeline-core-language.tex`](../docs/pipeline-core-language.tex).
 Each pipeline has one `pipeline_id`, a sequential control state, local values,
-and operation handles. `declared_pipelines` gives the program's finite pipeline
+and current operation progress. `declared_pipelines` gives the program's finite pipeline
 set, and `pipeline_kind` assigns each pipeline its execution kind. Task owners,
 event endpoints, and lock owners use the same pipeline identifiers.
 Its semantics is an inductive relation in `Prop`; the total-function conventions
