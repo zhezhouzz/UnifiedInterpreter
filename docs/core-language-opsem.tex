@@ -193,38 +193,19 @@ P ::={}
   其中 $R$ 是读取的单元，$W$ 是写入的单元。$\mathsf{Loc}$ 只出现在操作语义里。
 \end{itemize}
 
+\litao{We may further abstract the event semantics, using a more general event
+identifier, while for Ascend instantiate it to $(p,q,\varepsilon)$.}
 
-\litao{Below are work in progress.}
 
-\clearpage
+% \clearpage
 \section{良构与基本类型检查}
 \label{sec:wf}
 本节检查基本类别、变量作用域、计算单元与管道的归属，以及配置允许的操作和同步关系；不检查 memory space。
-固定配置 $\mathcal H$ 与活动流 $\kappa\subseteq\mathsf{Stream}$。
+固定合法配置 $\mathcal H$ 与有限活动流集合 $\kappa\subseteq\mathsf{Stream}$。
+判断 $\mathcal H;\Gamma\vdash_s C$ 检查指令流 $s$ 中命令 $C$ 的类别与作用域；
+程序规则另检查命令的结构限制。规则使用的配置参数及同步条件在下表中解释。
 \begingroup\small
 \setlength{\abovedisplayskip}{5pt}\setlength{\belowdisplayskip}{5pt}
-\[
-\begin{gathered}
-\Gamma:\mathsf{Var}\rightharpoonup\mathsf{Type},\quad \mathsf{lit}_{\mathcal H}(c)=\tau,
-\quad\Delta_{\mathcal H}(g)=(\bar\tau,\tau),\quad\Sigma_{\mathcal H}(d,p,f)=\bar\tau,\\
-\mathsf{Type}=\{\mathsf{int},\mathsf{float},\mathsf{bool},\mathsf{event},\mathsf{view}\},\\
-L_{\mathcal H}\subseteq\mathsf{CoreKind}\times\mathsf{Pipe}\times\mathsf{Pipe},\quad
-B_{\mathcal H}\subseteq\mathsf{Stream}\times\mathsf{Pipe}\times\mathsf{Stream}\times\mathsf{Pipe},\\
-\mathsf{Barrier}_{\mathcal H}\subseteq\mathsf{CoreKind}\times\mathsf{Pipe}.
-\end{gathered}
-\]
-\noindent 配置分别给出流内同步对 $L$、流间同步边 $B$、屏障支持表；同步的管道条件为：
-\[
-\begin{array}{@{}ll@{}}
-a & \mathsf{ok}_{\mathcal H,s}(a)\\\hline
-\kw{setflag}[p,q](v),\ \kw{waitflag}[p,q](v)
- & (\mathsf{kind}(s),p,q)\in L_{\mathcal H}\\
-\kw{syncblockset}[p,q](v)
- & \exists t\in\kappa.\ (s,p,t,q)\in B_{\mathcal H}\\
-\kw{syncblockwait}[p,q](v)
- & \exists t\in\kappa.\ (t,p,s,q)\in B_{\mathcal H}
-\end{array}
-\]
 \begin{equation*}
 \begin{gathered}
 \infer{\Gamma(x)=\tau}{\mathcal H;\Gamma\vdash x:\tau}\;\hypertarget{wf-var}{\textsc{Var}}
@@ -257,45 +238,138 @@ a & \mathsf{ok}_{\mathcal H,s}(a)\\\hline
  \;\hypertarget{wf-return}{\textsc{Return}}
 \qquad
 \infer{}{\mathcal H;\Gamma\vdash_s\kw{end}}\;\hypertarget{wf-end}{\textsc{End}}\\[1em]
-\infer{\forall s\in\kappa.\ \mathcal H;\varnothing\vdash_s C_s}
+\infer{\forall s\in\kappa.\ \mathcal H;\varnothing\vdash_s C_s\ \land\ \mathsf{Shape}_{\mathsf{top}}(C_s)}
  {\mathcal H\vdash_\kappa\mathop{\Big\|}_{s\in\kappa}s\{C_s\}}
  \;\hypertarget{wf-program}{\textsc{Program}}
 \end{gathered}
 \end{equation*}
-\noindent \textsc{Sync} 中 $a$ 是上表四种命令之一，$v$ 是它的事件操作数。
-循环仍采用原有结构限制：循环体不含嵌套 \kw{for}，每条非 \kw{return} 路径以 \kw{end} 结束；程序顶层不使用 \kw{end}。
 \endgroup
-\clearpage
-\paragraph{基本类别与检查边界。}
-\hyperlink{wf-lit}{\textsc{Lit}} 的 $\mathsf{lit}_{\mathcal H}$ 由配置给出且单值：普通整数常量的类别是
-$\mathsf{int}$，事件标识常量（如 $\varepsilon_0$）的类别是 $\mathsf{event}$，
-视图描述符常量的类别是 $\mathsf{view}$，不因底层编码为整数而混同。
-$\mathsf{view}$ 表示可寻址区域的描述符，不是该区域里的数据值；具体布局与足迹仍由
-已有的 $\mathsf{foot}$ 解释。\hyperlink{wf-tuple}{\textsc{Tuple}} 同时检查参数个数与逐项类别。
-例如配置可以声明
-$\Delta_{\mathcal H}(\mathsf{makeView})=(\mathsf{int}^3,\mathsf{view})$，
-$\Sigma_{\mathcal H}(\mathsf{AIV},\mathsf{MTE2},\mathsf{Copy})=(\mathsf{view},\mathsf{view})$，
-其中 $\mathsf{int}^3$ 表示三个整数参数；实际算子签名以所选 IR 实例为准。
-因此在要求 view 的位置传整数、在同步位置传 view、或使用未绑定变量都会被拒绝。
 
-\hyperlink{wf-let}{\textsc{Let}} 仅通过 $\Delta_{\mathcal H}$ 绑定标量结果；
-\hyperlink{wf-issue}{\textsc{Issue}} 仅检查 $\Sigma_{\mathcal H}$ 与可用管道，不引入数据结果变量。
-\hyperlink{wf-sync}{\textsc{Sync}} 检查 event 类别与配置许可；不再把某一代硬件的同步端点硬编码进规则。
-配置本身须满足端点归属：$(d,p,q)\in L_{\mathcal H}$ 要求 $p,q\in\mathsf{Pipe}_d$；
-$(s,p,t,q)\in B_{\mathcal H}$ 要求 $s\ne t$、$p\in\mathsf{Pipe}_{\mathsf{kind}(s)}$、
-$q\in\mathsf{Pipe}_{\mathsf{kind}(t)}\cup\{\mathsf S\}$；
-$(d,p)\in\mathsf{Barrier}_{\mathcal H}$ 要求 $p\in\mathsf{Pipe}_d\cup\{\mathsf{ALL}\}$。
-这些条件不声称任意满足归属的 pair 都受硬件支持，实际成员须由配置提供。
-$\Sigma_{\mathcal H}(d,p,f)$ 是部分签名表，其定义域指定允许发射的操作/管道组合。
-这里不把 $\mathsf{Space}_d$、view 的地址范围或存储布局加入静态类型。
-\hyperlink{wf-for}{\textsc{For}} 的循环变量只在循环体内可见；
-\hyperlink{wf-return}{\textsc{Return}} 不规定返回签名，但每个返回操作数必须可定型。
-\hyperlink{wf-program}{\textsc{Program}} 中各条流的变量环境互不共享。
+\noindent 规则中的环境与配置参数如下。$\mathsf{Type}$ 是语法给出的五种类别
+$\{\mathsf{int},\mathsf{float},\mathsf{bool},\mathsf{event},\mathsf{view}\}$，
+$\bar\tau$ 是有限类别序列。
+\begin{center}\small
+\begin{tabularx}{\linewidth}{@{}lY@{}}
+\toprule
+定义 & 含义 \\
+\midrule
+$\Gamma:\mathsf{Var}\rightharpoonup\mathsf{Type}$
+ & 当前作用域中已绑定变量的类别；$\Gamma,x:\tau$ 扩展一个新绑定。\\
+$\mathsf{lit}_{\mathcal H}(c)=\tau$
+ & 常量 $c$ 的唯一类别；不支持的常量无定义。\\
+$\Delta_{\mathcal H}(g)=(\bar\tau,\tau)$
+ & 标量算子 $g$ 的参数类别序列与结果类别；是部分签名表。\\
+$\Sigma_{\mathcal H}(d,p,f)=\bar\tau$
+ & 种类 $d$ 的管道 $p$ 可执行算子 $f$ 时的参数类别序列；无定义表示不支持该组合。\\
+$L_{\mathcal H}\subseteq\mathsf{CoreKind}\times\mathsf{Pipe}\times\mathsf{Pipe}$
+ & 允许的流内同步对 $(d,p,q)$，分别指定种类、源管道与目标管道。\\
+$B_{\mathcal H}\subseteq\mathsf{Stream}\times\mathsf{Pipe}\times\mathsf{Stream}\times\mathsf{Pipe}$
+ & 允许的流间同步边 $(s,p,t,q)$，从流 $s$ 的管道 $p$ 到流 $t$ 的管道 $q$。\\
+$\mathsf{Barrier}_{\mathcal H}\subseteq\mathsf{CoreKind}\times\mathsf{Pipe}$
+ & 各种类支持的屏障目标，包括配置允许的 $\mathsf{ALL}$。\\
+\bottomrule
+\end{tabularx}
+\end{center}
 
-这是一项可按语法递归执行的基本 type check，不是同步正确性证明。
-它不要求 flag 已置位、存储已初始化或 view 互不重叠，也不证明地址边界、实际内存空间可访问性、
-循环步长非零、无竞争或无死锁；这些属于后续动态语义、配置约束或验证目标。
-缺少同步的程序仍可通过基本类型检查，从而让语义暴露其错误执行。
+在 \hyperlink{wf-sync}{\textsc{Sync}} 规则中，$a$ 仅取下表四种同步命令，
+$v$ 必须是该命令自身的事件操作数。
+$\mathsf{ok}_{\mathcal H,s}(a)$ 表示当前活动流中存在配置允许的同步端点：
+\begin{center}\small
+\begin{tabularx}{\linewidth}{@{}l l Y@{}}
+\toprule
+命令 $a$ & $\mathsf{ok}_{\mathcal H,s}(a)$ & 含义 \\
+\midrule
+$\kw{setflag}[p,q](v)$、$\kw{waitflag}[p,q](v)$
+ & $(\mathsf{kind}(s),p,q)\in L_{\mathcal H}$ & 本流支持该同步对。\\
+$\kw{syncblockset}[p,q](v)$
+ & $\exists t\in\kappa.\ (s,p,t,q)\in B_{\mathcal H}$ & 至少有一条活动接收流。\\
+$\kw{syncblockwait}[p,q](v)$
+ & $\exists t\in\kappa.\ (t,p,s,q)\in B_{\mathcal H}$ & 至少有一条活动发送流。\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+% \paragraph{命令结构检查。}
+% $\mathsf{Shape}_m(C)$ 是独立的递归检查，模式 $m\in\{\mathsf{top},\mathsf{body}\}$
+% 区分顶层与循环体。设 $A;C$ 表示 issue、四种同步命令或 pipebarrier 及其后续命令，则
+% \[
+% \begin{aligned}
+% \mathsf{Shape}_m(\kw{return}(\bar v))&=\mathsf{true},\\
+% \mathsf{Shape}_m(\kw{end})&=(m=\mathsf{body}),\\
+% \mathsf{Shape}_m(\kw{let}\ x=\kw{scalar}[g](\bar v)\ \kw{in}\ C)&=\mathsf{Shape}_m(C),\\
+% \mathsf{Shape}_m(A;C)&=\mathsf{Shape}_m(C),\\
+% \mathsf{Shape}_m(\kw{if}\ v\ \kw{then}\ \{C_1\}\ \kw{else}\ \{C_2\})
+%  &=\mathsf{Shape}_m(C_1)\land\mathsf{Shape}_m(C_2),\\
+% \mathsf{Shape}_m(\kw{for}\ x=v_1\ \kw{to}\ v_2\ \kw{step}\ v_3\ \kw{do}\ \{C_1\};C_2)
+%  &=\mathsf{Shape}_{\mathsf{body}}(C_1)\land\mathsf{Shape}_m(C_2).
+% \end{aligned}
+% \]
+% 因此顶层不允许 \kw{end}，循环体允许嵌套 \kw{for}；每条非 \kw{return} 路径以
+% 属于当前循环体的 \kw{end} 结束。嵌套循环后的继续程序仍处在外层循环体中。
+% \textsc{End} 只是类别规则，其使用位置由 \textsc{Program} 中的结构前提约束。
+
+% \paragraph{基本类别与检查边界。}
+% \hyperlink{wf-lit}{\textsc{Lit}} 的 $\mathsf{lit}_{\mathcal H}$ 由配置给出且单值：普通整数常量的类别是
+% $\mathsf{int}$，事件标识常量（如 $\varepsilon_0$）的类别是 $\mathsf{event}$，
+% 视图描述符常量的类别是 $\mathsf{view}$，不因底层编码为整数而混同。
+% $\mathsf{view}$ 表示可寻址区域的描述符，不是该区域里的数据值；具体布局与足迹仍由
+% 已有的 $\mathsf{foot}$ 解释。\hyperlink{wf-tuple}{\textsc{Tuple}} 同时检查参数个数与逐项类别。
+% 例如配置可以声明
+% $\Delta_{\mathcal H}(\mathsf{makeView})=(\mathsf{int}^3,\mathsf{view})$，
+% $\Sigma_{\mathcal H}(\mathsf{AIV},\mathsf{MTE2},\mathsf{Copy})=(\mathsf{view},\mathsf{view})$，
+% 其中 $\mathsf{int}^3$ 表示三个整数参数；实际算子签名以所选 IR 实例为准。
+% 因此在要求 view 的位置传整数、在同步位置传 view、或使用未绑定变量都会被拒绝。
+
+% \hyperlink{wf-let}{\textsc{Let}} 仅通过 $\Delta_{\mathcal H}$ 绑定标量结果；
+% \hyperlink{wf-issue}{\textsc{Issue}} 仅检查 $\Sigma_{\mathcal H}$ 与可用管道，不引入数据结果变量。
+% \hyperlink{wf-sync}{\textsc{Sync}} 检查 event 类别与配置许可；不再把某一代硬件的同步端点硬编码进规则。
+% 以下规则以配置合法为前提：签名表单值且只使用 $\mathsf{Type}$ 中的类别，
+% 签名与同步表的归属必须有效。具体而言，
+% $\Sigma_{\mathcal H}(d,p,f)$ 有定义要求 $d\in\mathsf{CoreKind}$、
+% $p\in\mathsf{Pipe}_d$、$f\in\mathsf{Operator}_d$。同步端点须满足：$(d,p,q)\in L_{\mathcal H}$ 要求 $p,q\in\mathsf{Pipe}_d$；
+% $(s,p,t,q)\in B_{\mathcal H}$ 要求 $s\ne t$、$p\in\mathsf{Pipe}_{\mathsf{kind}(s)}$、
+% $q\in\mathsf{Pipe}_{\mathsf{kind}(t)}\cup\{\mathsf S\}$；
+% $(d,p)\in\mathsf{Barrier}_{\mathcal H}$ 要求 $p\in\mathsf{Pipe}_d\cup\{\mathsf{ALL}\}$。
+% 这些条件不声称任意满足归属的 pair 都受硬件支持，实际成员须由配置提供。
+% $\Sigma_{\mathcal H}(d,p,f)$ 是部分签名表，其定义域指定允许发射的操作/管道组合。
+% 这里不把 $\mathsf{Space}_d$、view 的地址范围或存储布局加入静态类型。
+% \hyperlink{wf-for}{\textsc{For}} 的循环变量只在循环体内可见；
+% \hyperlink{wf-return}{\textsc{Return}} 不规定返回签名，但每个返回操作数必须可定型。
+% \hyperlink{wf-program}{\textsc{Program}} 中各条流的变量环境互不共享。
+
+% 当配置提供可判定的签名查询、常量分类及同步表成员检查，且活动流集合有限时，
+% 上述类别与结构检查可按语法递归执行。它不是同步正确性证明。
+% 它不要求 flag 已置位、存储已初始化或 view 互不重叠，也不证明地址边界、实际内存空间可访问性、
+% 循环步长非零、无竞争或无死锁；这些属于后续动态语义、配置约束或验证目标。
+% 缺少同步的程序仍可通过基本类型检查，从而让语义暴露其错误执行。
+
+% \paragraph{规则检查实例。}
+% 采用上述 Copy 签名，并假定相应管道与同步对已获配置许可，可逐项得到下列结论。
+% 这些是静态规则的推导检查，不是动态安全性结论。
+% \begin{center}\small
+% \begin{tabularx}{\linewidth}{@{}lY@{}}
+% \toprule
+% 检查情形 & 规则给出的结果 \\
+% \midrule
+% Copy 接收两个 view；或接收一个 view / 一个整数
+%  & 前者通过；少一个参数由 \textsc{Tuple} 拒绝，类别错误由操作数定型拒绝。\\
+% 在 AIV 上发射仅属于 AIC 的算子
+%  & \textsc{Issue} 的算子归属前提不成立。\\
+% 同步操作使用普通整数常量
+%  & 即使编码与事件编号相同，也不能推出其类别为 event。\\
+% 跨流同步仅有非活动端点
+%  & \textsc{Sync} 要求的 $t\in\kappa$ 不存在，拒绝。\\
+% 循环后使用循环变量或循环体内新绑定的变量
+%  & 循环后的环境仍为 $\Gamma$，未绑定的名字被拒绝。\\
+% 顶层 end（包括顶层循环之后的 end）
+%  & 类别规则可能通过，但 \textsc{Program} 的结构检查拒绝。\\
+% 循环体以 end 或 return 结束；顺序循环或嵌套循环
+%  & 满足结构检查；仍须分别通过类别检查。\\
+% 缺失同步、零步长、无匹配 set 的 wait
+%  & 基本类别与结构正确时仍可通过，留给动态语义分析。\\
+% \bottomrule
+% \end{tabularx}
+% \end{center}
 
 \paragraph{TODO：跨核同步与同步标识符（待仔细考虑）。}
 双 AIV 到 AIC 的汇聚、AIC 到双 AIV 的通知，以及不同硬件代际的
@@ -304,11 +378,45 @@ $\Sigma_{\mathcal H}(d,p,f)$ 是部分签名表，其定义域指定允许发射
 不据此认定这些情形在各代硬件上具有相同行为。
 另待考虑：是否把 set/wait 的源端、目标端和 event 合并抽象为一个同步 identifier，
 由配置解释其参与者与匹配关系，而非直接使用 $(p,q,\varepsilon)$。
-本 TODO 不改变下述既有语法、状态或转移规则，留待 Litao 决定。
 
 \section{状态与参数}
 
-一个指令流 $s\in\kappa$ 的队列 $Q_s$ 把 $\mathsf{Pipe}_{\mathsf{kind}(s)}$ 中每条数据管道映到有限序列。队列项是
+固定配置 $\mathcal H$ 与活动流集合 $\kappa$。运行时状态及动态解释如下，
+其中 $\mathsf{Val}$ 为值域，$\mathsf{Cell}=\mathsf{Val}\uplus\{\mathsf{Uninit}\}$。
+
+\begin{center}\small
+\begin{tabularx}{\linewidth}{@{}lY@{}}
+\toprule
+状态分量 & 含义 \\
+\midrule
+$\mu:\mathsf{Loc}\rightharpoonup\mathsf{Cell}$
+ & 共享内存；已分配单元保存值或未初始化标记。\\
+$\rho_s:\mathsf{Var}\rightharpoonup\mathsf{Val}$
+ & 指令流 $s$ 的局部变量环境；操作数求值时常量映到自身。\\
+$Q_s:\mathsf{Pipe}_{\mathsf{kind}(s)}\to\mathsf{Item}^{*}$
+ & 指令流 $s$ 各数据管道的有限队列；队列项见下式。\\
+$\varphi_s(p,q,\varepsilon)\in\{0,1\}$
+ & 流内同步令牌，记录源管道 $p$ 到目标管道 $q$ 的通知。\\
+$\beta_t(p,q,\varepsilon)\in\{0,1\}$
+ & 块同步令牌，按接收流 $t$ 分开记录；与流内令牌独立。\\
+\midrule
+动态参数与记号 & 含义 \\
+\midrule
+$\mathsf{eval}_{\mathcal H}(s,g,\bar\nu)=\nu$
+ & 标量与视图构造的部分求值函数；成功结果符合签名 $\Delta_{\mathcal H}$。\\
+$\mathsf{foot}_{\mathcal H}(s,p,f,\bar\nu)=(R,W)$
+ & 将实际 view 解释为有限读区 $R$ 与写区 $W$，包含寻址、布局及别名信息。\\
+$F_{\mathcal H}(s,p,f,\bar\nu,\mu|_R,\delta)$
+ & 根据操作数及完成时的读区内容产生写入更新 $\delta$ 的关系；允许多个结果。\\
+$\delta:\mathsf{Loc}\rightharpoonup\mathsf{Cell}$，$\mathrm{dom}(\delta)\subseteq W$
+ & 有限内存更新；$\mu\oplus\delta$ 仅覆盖 $\delta$ 定义的单元。\\
+$\mathsf{Targets}_{\mathcal H}(s,p,q)$
+ & 由同步边 $B_{\mathcal H}$ 导出的活动接收流集合，定义见下式。\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+队列项 $\iota\in\mathsf{Item}$ 与接收流集合定义为
 \[
 \begin{aligned}
 \iota ::={}
@@ -317,123 +425,165 @@ $\Sigma_{\mathcal H}(d,p,f)$ 是部分签名表，其定义域指定允许发射
    \mid \kw{wait}(p,\varepsilon)\\
   &\mid \kw{bar}
    \mid \kw{bset}(q,\varepsilon)
-   \mid \kw{bwait}(p,\varepsilon).
+   \mid \kw{bwait}(p,\varepsilon),\\[0.4em]
+\mathsf{Targets}_{\mathcal H}(s,p,q)
+  & =\{t\in\kappa\mid(s,p,t,q)\in B_{\mathcal H}\}.
 \end{aligned}
 \]
-$R,W$ 是有限的 $\mathsf{Loc}$ 集合。存储 $\mu$ 把 $\mathsf{Loc}$ 部分映到 $\mathsf{Uninit}$ 或值。每条指令流有自己的核内 flag 表 $\varphi_s$。块同步不使用这张表。共用的块同步状态是
-\[
-\beta_t(p,q,\varepsilon)\in\{0,1\},
-\]
-其中 $t$ 是被通知的指令流，初值为 $0$。一次置位按下面的规则写入配置指定的接收流；一次等待只清除本流的那一位。
+队列保留实际操作数 $\bar\nu$，以保留足迹集合无法表达的复制对应、步幅和标量参数。
+块同步令牌初值为 $0$；置位通知各接收流，等待只消费本流的令牌。
 
-运行状态含共享的 $\mu$ 与 $\beta$，以及各流的 $\varphi_s,Q_s,\rho_s,C_s$；它与固定配置 $\mathcal H$ 区分。
-$\rho_s$ 把变量映到值，常量映到自身。配置提供如下动态解释：
+执行配置与小步关系为
 \[
 \begin{gathered}
-\mathsf{eval}_{\mathcal H}(s,g,\bar\nu)=\nu,
-\qquad \mathsf{foot}_{\mathcal H}(s,p,f,\bar\nu)=(R,W),\\
-F_{\mathcal H}(s,p,f,\bar\nu,\mu|_R,\delta),\qquad
-\mathrm{dom}(\delta)\subseteq W,\qquad \mu'=\mu\oplus\delta,\\
-\mathsf{Targets}_{\mathcal H}(s,p,q)
- =\{t\in\kappa\mid(s,p,t,q)\in B_{\mathcal H}\}.
+\langle P,\sigma\rangle,\qquad
+P=\mathop{\Big\|}_{s\in\kappa}s\{C_s\},\qquad
+\sigma=\langle\mu,\beta,(\rho_s,Q_s,\varphi_s)_{s\in\kappa}\rangle,\\
+\langle P,\sigma\rangle\longrightarrow_{\mathcal H}\langle P',\sigma'\rangle.
 \end{gathered}
 \]
-$\mathsf{eval}$ 给出标量运算与视图构造的含义；在其有定义时，结果类别应符合 $\Delta_{\mathcal H}$。
-$\mathsf{foot}$ 在给定指令流和实际操作数下解释 view，得到有限读写足迹；具体 memory space、
-寻址、布局、别名与重叠由这一动态解释处理，不由基本类型检查决定。
-$F$ 使用实际操作数和完成时的读区内容产生写入更新 $\delta$；$\mu\oplus\delta$ 只覆盖这些单元。
-$F$ 可有多个结果，具体算术和内存效果由配置给出。
-队列保留 $\bar\nu$，不能只保留集合 $R,W$，否则会丢失复制的顺序对应、步幅或标量参数。
-$\mathsf{Targets}$ 从同一个配置的流间同步边导出本次通知对象；目标表只包含活动流。
+$C_s$ 直接表示当前待执行的命令，$\sigma$ 不另存剩余程序。
+控制步改写程序项；管道操作完成时可以只更新状态。$\mathcal H$ 不随执行改变。
 
 队列中位于等待项或屏障项之后的项尚未打开。$\kw{op}$ 在自身已经打开时可以完成，不要求位于队首。$\kw{set}$、$\kw{bset}$ 与 $\kw{bar}$ 只有在前面的项都已离开队列时才能完成。
 
+\clearpage
 \section{小步规则}
 
-一步只前进一条指令流，可以改写共享的 $\mu$ 与 $\beta$。下面省去未改变的分量。控制规则使用当前指令流的环境，规则中记作 $\rho$。
-
-标量求值后继续。$\kw{if}$ 按布尔值进入一支。$\kw{return}$ 没有控制后继；这条指令流的队列仍可完成。
+以 $\langle C,\sigma\rangle\xrightarrow{s}_{\mathcal H}\langle C',\sigma'\rangle$
+表示流 $s$ 的一步；$\sigma$ 仍是全局状态。记 $\rho=\rho_s$，
+$\sigma[X\mapsto a]$ 仅更新分量 $X$，未列出的分量保持不变。
+以下规则归纳定义小步关系（取满足规则的最小关系）；全局执行交错各流的步骤：
 \[
-\infer{
-  \bar\nu=\rho(\bar v)
-  \quad
-  \mathsf{eval}_{\mathcal H}(s,g,\bar\nu)=\nu
-}{
-  \kw{let}\ x=\kw{scalar}[g](\bar v)\ \kw{in}\ C
-  \longrightarrow_{\mathcal H}
-  \rho[x\mapsto\nu],\ C
-}
+\infer{\langle C_s,\sigma\rangle\xrightarrow{s}_{\mathcal H}\langle C_s',\sigma'\rangle}
+ {\langle s\{C_s\}\parallel P_{\rm rest},\sigma\rangle
+ \longrightarrow_{\mathcal H}
+ \langle s\{C_s'\}\parallel P_{\rm rest},\sigma'\rangle}
+ \;\textsc{Step}
 \]
 
-发射把一项加到目标管道的队尾，控制立即继续。足迹在发射时确定。$\mathsf{foot}$ 或 $\mathsf{eval}$ 没有结果时，相应的控制规则不启用。
+\begin{figure}[!htbp]
+\centering\small
 \[
-\infer{
-  \bar\nu=\rho(\bar v)
-  \quad
-  \mathsf{foot}_{\mathcal H}(s,p,f,\bar\nu)=(R,W)
-}{
-  Q(p),\ 
-  \kw{issue}[p](f,\bar v);\ C
-  \longrightarrow_{\mathcal H}
-  Q(p){\cdot}\kw{op}(f,\bar\nu,R,W),\
-  C
-}
+\begin{gathered}
+\infer{\rho(\bar v)=\bar\nu\quad\mathsf{eval}_{\mathcal H}(s,g,\bar\nu)=\nu}
+ {\langle\kw{let}\ x=\kw{scalar}[g](\bar v)\ \kw{in}\ C,\sigma\rangle
+ \xrightarrow{s}_{\mathcal H}\langle C,\sigma[\rho_s\mapsto\rho[x\mapsto\nu]]\rangle}
+ \;\textsc{Scalar}\\[1em]
+\infer{\rho(v)=b\quad b\in\{\kw{true},\kw{false}\}}
+ {\langle\kw{if}\ v\ \kw{then}\ \{C_{\kw{true}}\}\ \kw{else}\ \{C_{\kw{false}}\},\sigma\rangle
+ \xrightarrow{s}_{\mathcal H}\langle C_b,\sigma\rangle}
+ \;\textsc{Branch}\\[1em]
+\infer{\rho(v_i)=k_i\ (i=1,2,3)\quad\mathsf{more}(k_1,k_2,k_3)}
+ {\langle\mathsf{Loop}(x,\bar v,B,C),\sigma\rangle
+ \xrightarrow{s}_{\mathcal H}\langle B[k_1/x]\triangleright
+ \mathsf{Loop}(x,(k_1+k_3,k_2,k_3),B,C),\sigma\rangle}
+ \;\textsc{For-Step}\\[1em]
+\infer{\rho(v_i)=k_i\ (i=1,2,3)\quad k_3\ne0\quad\neg\mathsf{more}(k_1,k_2,k_3)}
+ {\langle\mathsf{Loop}(x,\bar v,B,C),\sigma\rangle
+ \xrightarrow{s}_{\mathcal H}\langle C,\sigma\rangle}
+ \;\textsc{For-Done}
+\end{gathered}
 \]
-$\kw{setflag}[p,q](v)$ 把 $\kw{set}(q,\varepsilon)$ 放入 $p$。$\kw{waitflag}[p,q](v)$ 把 $\kw{wait}(p,\varepsilon)$ 放入 $q$，不挡住发射流。这里 $\varepsilon=\rho(v)$。$\kw{pipebarrier}[p]$ 在 $p$ 放入 $\kw{bar}$；$p=\mathsf{ALL}$ 时在本指令流每条数据管道放入 $\kw{bar}$。$\kw{syncblockset}[p,q](v)$ 把 $\kw{bset}(q,\varepsilon)$ 放入 $p$。等待管道不是 $\mathsf{S}$ 的 $\kw{syncblockwait}$ 把 $\kw{bwait}$ 放入本指令流的等待管道。$\varepsilon$ 同样取 $\rho(v)$。
+\caption{标量控制与循环}
+\begin{itemize}
+\item $\mathsf{Loop}(x,\bar v,B,C)$ 缩写
+$\kw{for}\ x=v_1\ \kw{to}\ v_2\ \kw{step}\ v_3\ \kw{do}\ \{B\};C$；
+$\mathsf{more}(a,b,h)\iff(h>0\land a<b)\lor(h<0\land a>b)$。
+\item \textsc{For-Step} 在进入循环时取定边界和步长，以无捕获代换绑定本轮变量。
+$B\triangleright D$ 将本层的 \kw{end} 替换为 $D$；保留 \kw{return}，递归处理条件分支及后续命令，遇到嵌套循环只处理其后续命令，不进入其循环体。代换与拼接均避免变量捕获。
+\item \kw{return} 没有控制步骤，但已入队操作仍可完成。零步长或未定义的标量求值没有对应控制步骤。
+\end{itemize}
+\end{figure}
 
-$\kw{bset}(q,\varepsilon)$ 位于 $s$ 的管道 $p$ 的队首，并且每个
-$t\in\mathsf{Targets}_{\mathcal H}(s,p,q)$ 都有 $\beta_t(p,q,\varepsilon)=0$ 时，
-该项离开队列，并把这些位写成 $1$。其中某一位仍为 $1$ 时，这条规则不启用。
-各接收流独立等待并清除自己的位。通知哪些流由配置的 $B_{\mathcal H}$ 决定，
-不在通用规则中固定为所有异类流。
-
-等待管道为 $\mathsf{S}$ 时，块等待留在控制位置，该指令流不能再发射。本流的令牌为 $1$ 时只清除这一位并继续。其他指令流，以及本流已经入队的完成，不受这条约制。
+\clearpage
+\begin{figure}[!htbp]
+\centering\small
 \[
-\infer{
-  \varepsilon=\rho(v)
-  \quad
-  \beta_s(p,\mathsf{S},\varepsilon)=1
-}{
-  \beta,\ 
-  \kw{syncblockwait}[p,\mathsf{S}](v);\ C
-  \longrightarrow_{\mathcal H}
-  \beta[(s,p,\mathsf{S},\varepsilon)\mapsto 0],\ 
-  C
-}
+\begin{gathered}
+\infer{\rho(\bar v)=\bar\nu\quad\mathsf{foot}_{\mathcal H}(s,p,f,\bar\nu)=(R,W)}
+ {\langle\kw{issue}[p](f,\bar v);C,\sigma\rangle\xrightarrow{s}_{\mathcal H}
+ \langle C,\sigma[Q_s(p)\mapsto Q_s(p)\cdot\kw{op}(f,\bar\nu,R,W)]\rangle}
+ \;\textsc{Issue}\\[1em]
+\infer{\rho(v)=\varepsilon\quad(a,r,\iota)\in\mathsf{Enqueue}(p,q,v,\varepsilon)}
+ {\langle a;C,\sigma\rangle\xrightarrow{s}_{\mathcal H}
+ \langle C,\sigma[Q_s(r)\mapsto Q_s(r)\cdot\iota]\rangle}
+ \;\textsc{Sync-Issue}\\[1em]
+\infer{D=\begin{cases}\mathsf{Pipe}_{\mathsf{kind}(s)},&p=\mathsf{ALL},\\\{p\},&p\in\mathsf{Pipe}_{\mathsf{kind}(s)}\end{cases}}
+ {\langle\kw{pipebarrier}[p];C,\sigma\rangle\xrightarrow{s}_{\mathcal H}
+ \langle C,\sigma[Q_s(r)\mapsto Q_s(r)\cdot\kw{bar}]_{r\in D}\rangle}
+ \;\textsc{Barrier-Issue}\\[1em]
+\infer{\rho(v)=\varepsilon\quad\beta_s(p,\mathsf S,\varepsilon)=1}
+ {\langle\kw{syncblockwait}[p,\mathsf S](v);C,\sigma\rangle\xrightarrow{s}_{\mathcal H}
+ \langle C,\sigma[\beta_s(p,\mathsf S,\varepsilon)\mapsto0]\rangle}
+ \;\textsc{Scalar-Wait}
+\end{gathered}
 \]
+\medskip
+\begin{tabular}{@{}lll@{}}
+\toprule
+$a$ & $r$ & $\iota$\\
+\midrule
+$\kw{setflag}[p,q](v)$ & $p$ & $\kw{set}(q,\varepsilon)$\\
+$\kw{waitflag}[p,q](v)$ & $q$ & $\kw{wait}(p,\varepsilon)$\\
+$\kw{syncblockset}[p,q](v)$ & $p$ & $\kw{bset}(q,\varepsilon)$\\
+$\kw{syncblockwait}[p,q](v)$，$q\ne\mathsf S$ & $q$ & $\kw{bwait}(p,\varepsilon)$\\
+\bottomrule
+\end{tabular}
+\caption{操作与同步指令的发射；表格定义 $\mathsf{Enqueue}$}
+\begin{itemize}
+\item \textsc{Issue} 在发射时确定操作数与足迹；内存内容在操作完成时读取。
+\item \textsc{Sync-Issue} 与 \textsc{Barrier-Issue} 只入队，控制立即继续；$\mathsf{ALL}$ 同时向本流各数据管道加入屏障。
+\item \textsc{Scalar-Wait} 等待本流的块同步令牌，成功后只清除本流对应位；等待期间其他流及已入队操作仍可执行。
+\end{itemize}
+\end{figure}
 
-数据项完成时读取当时的 $\mu|_R$。其中可以有 $\mathsf{Uninit}$，也可以有更早写入的值。规则不检查其他在途指令。
+\clearpage
+\begin{figure}[!htbp]
+\centering\small
 \[
-\infer{
-  \kw{op}(f,\bar\nu,R,W)\ \text{已打开}
-  \quad
-  F_{\mathcal H}(s,p,f,\bar\nu,\mu|_R,\delta)
-}{
-  \mu,\ Q
-  \longrightarrow_{\mathcal H}
-  \mu\oplus\delta,\ Q\setminus\kw{op}(f,\bar\nu,R,W)
-}
+\begin{gathered}
+\infer{Q_s(p)=U\cdot\kw{op}(f,\bar\nu,R,W)\cdot V\quad\mathsf{open}(U)
+ \quad F_{\mathcal H}(s,p,f,\bar\nu,\mu|_R,\delta)}
+ {\langle C,\sigma\rangle\xrightarrow{s}_{\mathcal H}
+ \langle C,\sigma[\mu\mapsto\mu\oplus\delta,\ Q_s(p)\mapsto U\cdot V]\rangle}
+ \;\textsc{Op-Done}\\[1em]
+\infer{Q_s(p)=\kw{set}(q,\varepsilon)\cdot V\quad\varphi_s(p,q,\varepsilon)=0}
+ {\langle C,\sigma\rangle\xrightarrow{s}_{\mathcal H}
+ \langle C,\sigma[Q_s(p)\mapsto V,\ \varphi_s(p,q,\varepsilon)\mapsto1]\rangle}
+ \;\textsc{Set-Done}\\[1em]
+\infer{Q_s(q)=U\cdot\kw{wait}(p,\varepsilon)\cdot V\quad\mathsf{open}(U)
+ \quad\varphi_s(p,q,\varepsilon)=1}
+ {\langle C,\sigma\rangle\xrightarrow{s}_{\mathcal H}
+ \langle C,\sigma[Q_s(q)\mapsto U\cdot V,\ \varphi_s(p,q,\varepsilon)\mapsto0]\rangle}
+ \;\textsc{Wait-Done}\\[1em]
+\infer{Q_s(p)=\kw{bar}\cdot V}
+ {\langle C,\sigma\rangle\xrightarrow{s}_{\mathcal H}
+ \langle C,\sigma[Q_s(p)\mapsto V]\rangle}
+ \;\textsc{Barrier-Done}\\[1em]
+\infer{Q_s(p)=\kw{bset}(q,\varepsilon)\cdot V\quad T=\mathsf{Targets}_{\mathcal H}(s,p,q)
+ \quad\forall t\in T.\ \beta_t(p,q,\varepsilon)=0}
+ {\langle C,\sigma\rangle\xrightarrow{s}_{\mathcal H}
+ \langle C,\sigma[Q_s(p)\mapsto V,\ (\beta_t(p,q,\varepsilon)\mapsto1)_{t\in T}]\rangle}
+ \;\textsc{Block-Set}\\[1em]
+\infer{Q_s(q)=U\cdot\kw{bwait}(p,\varepsilon)\cdot V\quad\mathsf{open}(U)
+ \quad\beta_s(p,q,\varepsilon)=1}
+ {\langle C,\sigma\rangle\xrightarrow{s}_{\mathcal H}
+ \langle C,\sigma[Q_s(q)\mapsto U\cdot V,\ \beta_s(p,q,\varepsilon)\mapsto0]\rangle}
+ \;\textsc{Block-Wait}
+\end{gathered}
 \]
-$\kw{set}(q,\varepsilon)$ 位于 $p$ 的队首且 $\varphi_s(p,q,\varepsilon)=0$ 时，该项离开队列，令牌改为 $1$。$\varphi_s$ 已为 $1$ 时这条规则不启用。$\kw{wait}(p,\varepsilon)$ 在 $q$ 上已经打开且令牌为 $1$ 时离开队列，令牌改回 $0$；令牌为 $0$ 时不启用。打开条件使排在等待后面的同管道项不能先完成。$\kw{bar}$ 只在位于队首时离开。$\kw{bwait}(p,\varepsilon)$ 在本指令流上已经打开且 $\beta_s(p,q,\varepsilon)=1$ 时离开队列，并且只把 $\beta_s(p,q,\varepsilon)$ 改回 $0$。核内表 $\varphi_s$ 与块同步状态 $\beta$ 不混用。下一次同一 $(p,q,\varepsilon)$ 的置位要等上次通知到的每一条流都已把自己的那一位清回 $0$。某一条被通知的流没有执行对应的等待时，这一位保持为 $1$，下一次置位不启用。
-
-循环按整数范围展开。$k_3>0$ 且 $k_1<k_2$ 时，把循环体中的 $\kw{end}$ 换成下一次迭代，并绑定本轮的 $x$。范围为空时进入循环后的命令。$C\triangleright D$ 表示这个替换；$\kw{return}$ 保持不变，$\kw{if}$ 的两支分别替换。
-\[
-\infer{
-  \rho(v_i)=k_i
-  \quad
-  k_3>0
-  \quad
-  k_1<k_2
-}{
-  \kw{for}\ x=v_1\ \kw{to}\ v_2\ \kw{step}\ v_3\ \kw{do}\ \{C_1\};\ C_2
-  \longrightarrow_{\mathcal H}
-  \kw{let}\ x=k_1\ \kw{in}\ 
-  C_1\triangleright C_{+}
-}
-\]
-其中 $C_{+}$ 是下界改为 $k_1+k_3$ 的同一个 \kw{for}。负步长与范围为空的规则方向相反，写法相同。
-
-这些规则不产生名为竞争或死锁的结论。令牌仍为 $0$ 的等待没有完成步骤；该指令流上排在这次等待后面的同管道项保持关闭。其他指令流可以继续。
+\caption{管道操作完成与令牌更新}
+\begin{itemize}
+\item $U,V$ 为队列序列；$\mathsf{open}(U)$ 表示 $U$ 中不含 \kw{wait}、\kw{bwait} 或 \kw{bar}。
+队列分解指定本次移除的一个位置，即使存在相同队列项也不会一并删除。
+\item \textsc{Op-Done} 原子读取当前读区并提交更新，不检查其他在途操作；普通操作不必位于队首。
+\item \textsc{Set-Done}、\textsc{Block-Set} 与 \textsc{Barrier-Done} 必须在队首。
+块通知要求所有接收位均已清零；各接收流独立消费自己的位。
+\item 条件不满足时相应规则不启用；这些规则本身不将等待或数据竞争变成错误步骤。
+\end{itemize}
+\end{figure}
+\clearpage
 
 \section{与 HIVM 的对应}
 
