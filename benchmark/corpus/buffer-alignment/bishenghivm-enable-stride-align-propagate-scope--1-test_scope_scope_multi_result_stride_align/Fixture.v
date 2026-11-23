@@ -1,0 +1,18 @@
+From Stdlib Require Import List String ZArith.
+From UnifiedInterpreter.CoreLanguage.Axiomatic Require Import Syntax.
+Import ListNotations.
+Open Scope string_scope.
+Local Notation Cmd := (@command unit nat string string unit).
+Definition expected : @shared_program unit nat string string :=
+  Run [(SetFlag tt (Literal (VPipe "PIPE_V")) (Literal (VPipe "PIPE_MTE3")) (Literal (VEvent 0%nat))
+    (CCompute tt 0%nat (Dispatch "unit_store" (Some (Literal (VPipe "PIPE_MTE3")))) []
+    (WaitFlag tt (Literal (VPipe "PIPE_V")) (Literal (VPipe "PIPE_MTE3")) (Literal (VEvent 0%nat))
+    (CCompute tt 1%nat (Dispatch "unit_store" (Some (Literal (VPipe "PIPE_MTE3")))) []
+    (Return tt [])))) : Cmd)].
+
+Definition slice_actual : @shared_program unit nat string string :=
+  Run [(SetFlag tt (Literal (VPipe "PIPE_V")) (Literal (VPipe "PIPE_MTE3")) (Literal (VEvent 0%nat))
+    (CCompute tt 0%nat (Dispatch "unit_store" (Some (Literal (VPipe "PIPE_MTE3")))) []
+    (WaitFlag tt (Literal (VPipe "PIPE_V")) (Literal (VPipe "PIPE_MTE3")) (Literal (VEvent 0%nat))
+    (CCompute tt 1%nat (Dispatch "unit_store" (Some (Literal (VPipe "PIPE_MTE3")))) []
+    (Return tt [])))) : Cmd)].

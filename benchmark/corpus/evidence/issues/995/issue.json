@@ -1,0 +1,8 @@
+{
+  "title": "[canonicalize-ext] FoldRedundantCopy 误删写入真实数据的 memref.copy，SIMD kernel 首个 64 lane 结果变成 0",
+  "iid": 995,
+  "updated_at": "2026-11-19T20:09:14.506+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/995",
+  "linked_mrs": []
+}

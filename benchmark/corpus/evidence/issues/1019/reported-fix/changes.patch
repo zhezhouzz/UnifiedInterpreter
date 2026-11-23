@@ -1,0 +1,281 @@
+diff --git a/bishengir/lib/Dialect/HIVM/TransformOps/BackendCompatibility.cpp b/bishengir/lib/Dialect/HIVM/TransformOps/BackendCompatibility.cpp
+index 4298d26b06..de6273ffbb 100644
+--- a/bishengir/lib/Dialect/HIVM/TransformOps/BackendCompatibility.cpp
++++ b/bishengir/lib/Dialect/HIVM/TransformOps/BackendCompatibility.cpp
+@@ -20,6 +20,7 @@
+ #include "bishengir/Dialect/HIVM/TransformOps/VectorizeResult.h"
+ #include "bishengir/Dialect/HIVMAVE/IR/HIVMAVE.h"
+ #include "mlir/Dialect/Arith/IR/Arith.h"
++#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+ #include "mlir/Dialect/Vector/IR/VectorOps.h"
+ #include "mlir/Dialect/Vector/Transforms/VectorRewritePatterns.h"
+ #include "mlir/IR/PatternMatch.h"
+@@ -28,6 +29,29 @@
+ using namespace mlir;
+ 
+ namespace {
++struct ScalarI64Select : OpRewritePattern<arith::SelectOp> {
++  using OpRewritePattern::OpRewritePattern;
++
++  LogicalResult matchAndRewrite(arith::SelectOp op,
++                                PatternRewriter &rewriter) const override {
++    if (!op.getType().isSignlessInteger(64))
++      return failure();
++
++    // A6 SIMD scalar registers have no i64 select. Use the condition once
++    // so an undef condition chooses one arm for the entire value. Freeze the
++    // arms because the bitwise operations also evaluate the unselected arm.
++    auto loc = op.getLoc();
++    auto left = rewriter.create<LLVM::FreezeOp>(loc, op.getTrueValue());
++    auto right = rewriter.create<LLVM::FreezeOp>(loc, op.getFalseValue());
++    auto mask = rewriter.createOrFold<arith::ExtSIOp>(loc, op.getType(),
++                                                      op.getCondition());
++    auto diff = rewriter.createOrFold<arith::XOrIOp>(loc, left, right);
++    auto selected = rewriter.createOrFold<arith::AndIOp>(loc, mask, diff);
++    rewriter.replaceOpWithNewOp<arith::XOrIOp>(op, right, selected);
++    return success();
++  }
++};
++
+ struct PredicateExtension : RewritePattern {
+   explicit PredicateExtension(MLIRContext *context)
+       : RewritePattern(MatchAnyOpTypeTag(), 1, context) {}
+@@ -312,10 +336,13 @@ struct UnitBroadcastTransferRead : OpRewritePattern<vector::TransferReadOp> {
+ 
+ LogicalResult
+ mlir::hivm::normalizeVectorizerBackendForms(func::FuncOp function) {
+-  if (!hacc::utils::isRegBasedArch(function->getParentOfType<ModuleOp>()))
++  auto module = function->getParentOfType<ModuleOp>();
++  if (!hacc::utils::isRegBasedArch(module))
+     return success();
+   function.getContext()->getOrLoadDialect<hivmave::AVEDialect>();
+   RewritePatternSet patterns(function.getContext());
++  if (hacc::utils::isAscend960(module))
++    patterns.add<ScalarI64Select>(function.getContext());
+   patterns.add<PredicateExtension, OrderPredicate, NativeReduction,
+                SingletonBroadcast, SingletonExtractPattern,
+                SingletonExtractElementPattern, SingletonInsertElementPattern,
+diff --git a/bishengir/lib/Dialect/HIVM/TransformOps/CMakeLists.txt b/bishengir/lib/Dialect/HIVM/TransformOps/CMakeLists.txt
+index f6372d37d5..22d2649103 100644
+--- a/bishengir/lib/Dialect/HIVM/TransformOps/CMakeLists.txt
++++ b/bishengir/lib/Dialect/HIVM/TransformOps/CMakeLists.txt
+@@ -59,6 +59,7 @@ add_bishengir_dialect_library(BiShengIRHIVMVectorizeTransformOps
+   MLIRLinalgDialect
+   MLIRLinalgTransformOps
+   MLIRLinalgTransforms
++  MLIRLLVMDialect
+   MLIRMathDialect
+   MLIRMemRefDialect
+   MLIRParser
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/HIVMVectorize.cpp b/bishengir/lib/Dialect/HIVM/Transforms/HIVMVectorize.cpp
+index 90e8545974..8f8e209f92 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/HIVMVectorize.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/HIVMVectorize.cpp
+@@ -31,6 +31,7 @@
+ #include "bishengir/Dialect/Vector/Transforms/Passes.h"
+ #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+ #include "mlir/Dialect/Bufferization/Transforms/Passes.h"
++#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+ #include "mlir/Dialect/Linalg/TransformOps/DialectExtension.h"
+ #include "mlir/Dialect/Linalg/Transforms/TilingInterfaceImpl.h"
+ #include "mlir/Dialect/SCF/TransformOps/SCFTransformOps.h"
+@@ -268,7 +269,8 @@ struct HIVMVectorizePass
+ 
+   void getDependentDialects(DialectRegistry &registry) const override {
+     HIVMVectorizeBase::getDependentDialects(registry);
+-    registry.insert<mlir::hfusion::HFusionDialect, mlir::hivmave::AVEDialect>();
++    registry.insert<mlir::hfusion::HFusionDialect, mlir::hivmave::AVEDialect,
++                    mlir::LLVM::LLVMDialect>();
+     mlir::hivm::registerVectorizeTransformDialectExtension(registry);
+     mlir::linalg::registerTransformDialectExtension(registry);
+     mlir::linalg::registerTilingInterfaceExternalModels(registry);
+diff --git a/bishengir/lib/Tools/hivmc/A5/HIVMCMainA5.cpp b/bishengir/lib/Tools/hivmc/A5/HIVMCMainA5.cpp
+index fb43152d5c..2db73c365f 100644
+--- a/bishengir/lib/Tools/hivmc/A5/HIVMCMainA5.cpp
++++ b/bishengir/lib/Tools/hivmc/A5/HIVMCMainA5.cpp
+@@ -915,9 +915,8 @@ translateDeviceKernelToLLVM(const SmallVector<ModuleOp, 2> &modulesToLower,
+     if (!llvmModule) {
+       m->emitError(
+           "Failed to translate module from LLVM Dialect IR to BiShengLIR\n");
+-    }
+-    if (config.shouldEnableSanitizer() &&
+-        failed(setSanitizerAddrArgName(m, llvmModule))) {
++    } else if (config.shouldEnableSanitizer() &&
++               failed(setSanitizerAddrArgName(m, llvmModule))) {
+       m->emitError("Sanitizer arg rename failed \n");
+     }
+     result.push_back(std::make_pair(std::move(llvmModule), target));
+diff --git a/bishengir/lib/Tools/hivmc/Utility.cpp b/bishengir/lib/Tools/hivmc/Utility.cpp
+index 0a7fcfc87c..acfdcdfaf7 100644
+--- a/bishengir/lib/Tools/hivmc/Utility.cpp
++++ b/bishengir/lib/Tools/hivmc/Utility.cpp
+@@ -7,10 +7,12 @@
+ //===----------------------------------------------------------------------===//
+ 
+ #include "bishengir/Tools/hivmc/Utility.h"
++#include "bishengir/Dialect/HIVMRegbaseIntrins/IR/HIVMRegbaseIntrins.h"
+ #include "mlir/Parser/Parser.h"
+ #include "mlir/Target/LLVMIR/Export.h"
+ #include "llvm/ADT/SmallVector.h"
+ #include "llvm/ADT/StringRef.h"
++#include "llvm/IR/IntrinsicsHIVM.h"
+ #include "llvm/IR/Module.h"
+ #include "llvm/Support/CommandLine.h"
+ #include "llvm/Support/FileSystem.h"
+@@ -288,8 +290,51 @@ std::unique_ptr<llvm::Module>
+ translateModuleToLegacyLLVMIR(mlir::Operation *module,
+                               llvm::LLVMContext &context) {
+   auto llvmModule = mlir::translateModuleToLLVMIR(module, context);
+-  if (llvmModule)
+-    llvmModule->setIsNewDbgInfoFormat(false);
++  if (!llvmModule)
++    return nullptr;
++  llvmModule->setIsNewDbgInfoFormat(false);
++  if (module->hasAttr(
++          mlir::hivm_regbaseintrins::kDavinciV2IntrinsicsModuleAttrName)) {
++    // CANN names integer shuffles by signedness. The lane permutation is
++    // identical for signed and unsigned data.
++    SmallVector<llvm::Function *> replacedDeclarations;
++    for (llvm::Function &function : *llvmModule) {
++      auto id = function.getIntrinsicID();
++      if (id != llvm::Intrinsic::hivm_vintlvv2 &&
++          id != llvm::Intrinsic::hivm_vdintlvv2)
++        continue;
++      auto *type = dyn_cast<llvm::FixedVectorType>(function.getReturnType());
++      if (!type || function.getName() !=
++                       llvm::Intrinsic::getName(id, {type}, llvmModule.get()))
++        continue;
++      auto *element = type->getElementType();
++      if (!element->isIntegerTy(8) && !element->isIntegerTy(16) &&
++          !element->isIntegerTy(32))
++        continue;
++      std::string name = (llvm::Intrinsic::getBaseName(id) + ".v" +
++                          Twine(type->getNumElements()) + "s" +
++                          Twine(element->getIntegerBitWidth()))
++                             .str();
++      if (auto *symbol = llvmModule->getNamedValue(name)) {
++        auto *decl = dyn_cast<llvm::Function>(symbol);
++        if (!decl || !decl->isDeclaration() ||
++            decl->getFunctionType() != function.getFunctionType() ||
++            decl->getAddressSpace() != function.getAddressSpace() ||
++            decl->getCallingConv() != function.getCallingConv()) {
++          module->emitError("incompatible declaration of CANN intrinsic ")
++              << name;
++          return nullptr;
++        }
++        // Retain the attributes set by LLVM on the intrinsic declaration.
++        decl->replaceAllUsesWith(&function);
++        decl->setName("");
++        replacedDeclarations.push_back(decl);
++      }
++      function.setName(name);
++    }
++    for (llvm::Function *decl : replacedDeclarations)
++      decl->eraseFromParent();
++  }
+   return llvmModule;
+ }
+ 
+diff --git a/bishengir/test/Conversion/HIVMToLLVM/v2-integer-interleave-abi.mlir b/bishengir/test/Conversion/HIVMToLLVM/v2-integer-interleave-abi.mlir
+new file mode 100644
+index 0000000000..eb0c61f0ac
+--- /dev/null
++++ b/bishengir/test/Conversion/HIVMToLLVM/v2-integer-interleave-abi.mlir
+@@ -0,0 +1,51 @@
++// REQUIRES: hivmc, enable-lir-compile
++// RUN: split-file %s %t
++// RUN: hivmc %t/input.mlir --target=Ascend960DT_968B7 --enable-hivm-compile=false --link-aicore-bitcode=%t/support.ll --save-temps=%t -o %t/kernel
++// RUN: FileCheck %s --check-prefix=A6 --implicit-check-not=@llvm.hivm.vintlvv2.v256s8. --input-file=%t/kernel.ll
++// RUN: sed '/^  llvm.func @llvm.hivm.vintlvv2.v256s8(/s/i32) ->/i64) ->/' %t/input.mlir > %t/conflict.mlir
++// RUN: not hivmc %t/conflict.mlir --target=Ascend960DT_968B7 --enable-hivm-compile=false --link-aicore-bitcode=%t/support.ll -o %t/conflict 2>&1 | FileCheck %s --check-prefix=CONFLICT
++
++// CONFLICT: incompatible declaration of CANN intrinsic llvm.hivm.vintlvv2.v256s8
++
++//--- support.ll
++source_filename = "support"
++
++//--- input.mlir
++module attributes {hacc.target = #hacc.target<"Ascend960DT_968B7">, hivm.module_core_type = #hivm.module_core_type<AIV>} {
++  // A declaration from linked MLIR may already have the CANN spelling.
++  llvm.func @llvm.hivm.vintlvv2.v256s8(vector<256xi8>, vector<256xi8>, i32) -> vector<256xi8>
++
++  llvm.func @shuffle(%src: !llvm.ptr<6>, %dst: !llvm.ptr<6>) attributes {hacc.function_kind = #hacc.function_kind<DEVICE>, hivm_regbaseintrins.target = #hivm_regbaseintrins.target<"dav-920r1">, hivm.func_core_type = #hivm.func_core_type<AIV>, hivm.vector_function} {
++    %lo = llvm.mlir.constant(0 : i32) : i32
++    %hi = llvm.mlir.constant(1 : i32) : i32
++    %dist = llvm.mlir.constant(3 : i32) : i32
++    %a = "hivm_regbaseintrins.intr.hivm.vldsx1.v256s8"(%src, %lo, %lo, %lo) : (!llvm.ptr<6>, i32, i32, i32) -> vector<256xi8>
++    // A6: call <256 x i8> @llvm.hivm.vintlvv2.v256s8({{.*}}i32 0)
++    %b = "hivm_regbaseintrins.intr.hivm.vintlvv2"(%a, %a, %lo) : (vector<256xi8>, vector<256xi8>, i32) -> vector<256xi8>
++    %h = llvm.bitcast %b : vector<256xi8> to vector<128xi16>
++    // A6: call <128 x i16> @llvm.hivm.vdintlvv2.v128s16({{.*}}i32 1)
++    %half = "hivm_regbaseintrins.intr.hivm.vdintlvv2"(%h, %h, %hi) : (vector<128xi16>, vector<128xi16>, i32) -> vector<128xi16>
++    %i = llvm.bitcast %half : vector<128xi16> to vector<64xi32>
++    // A6: call <64 x i32> @llvm.hivm.vdintlvv2.v64s32({{.*}}i32 0)
++    // A6: call <64 x i32> @llvm.hivm.vdintlvv2.v64s32({{.*}}i32 1)
++    %pair = "hivm_regbaseintrins.intr.hivm.vdintlv"(%i, %i) : (vector<64xi32>, vector<64xi32>) -> !llvm.struct<(vector<64xi32>, vector<64xi32>)>
++    %w = llvm.extractvalue %pair[1] : !llvm.struct<(vector<64xi32>, vector<64xi32>)>
++    %f = llvm.bitcast %w : vector<64xi32> to vector<64xf32>
++    // A6: call <64 x float> @llvm.hivm.vintlvv2.v64f32({{.*}}i32 1)
++    %res = "hivm_regbaseintrins.intr.hivm.vintlvv2"(%f, %f, %hi) : (vector<64xf32>, vector<64xf32>, i32) -> vector<64xf32>
++    %out = llvm.bitcast %res : vector<64xf32> to vector<256xi8>
++    %mask = "hivm_regbaseintrins.intr.hivm.pge.b8"(%lo, %lo) {mask_bit_width = 8 : i32} : (i32, i32) -> vector<256xi1>
++    "hivm_regbaseintrins.intr.hivm.vstsx1.v256s8"(%out, %dst, %lo, %dist, %lo, %mask) : (vector<256xi8>, !llvm.ptr<6>, i32, i32, i32, vector<256xi1>) -> ()
++    llvm.return
++  }
++
++  llvm.func @kernel(%in: i64, %out: i64) attributes {hacc.entry, hacc.function_kind = #hacc.function_kind<DEVICE>, hivm_regbaseintrins.target = #hivm_regbaseintrins.target<"dav-920r1">, hivm.func_core_type = #hivm.func_core_type<AIV>} {
++    %src = llvm.inttoptr %in : i64 to !llvm.ptr<6>
++    %dst = llvm.inttoptr %out : i64 to !llvm.ptr<6>
++    llvm.call @shuffle(%src, %dst) {hivm.vector_function} : (!llvm.ptr<6>, !llvm.ptr<6>) -> ()
++    llvm.return
++  }
++}
++
++// A6: ; Function Attrs: nounwind readnone
++// A6-NEXT: declare <256 x i8> @llvm.hivm.vintlvv2.v256s8(
+diff --git a/bishengir/test/Dialect/HIVM/Vectorize/phase-backend-i64-select.mlir b/bishengir/test/Dialect/HIVM/Vectorize/phase-backend-i64-select.mlir
+new file mode 100644
+index 0000000000..acb86ebeaa
+--- /dev/null
++++ b/bishengir/test/Dialect/HIVM/Vectorize/phase-backend-i64-select.mlir
+@@ -0,0 +1,40 @@
++// RUN: bishengir-opt %s --hacc-append-device-spec=target=Ascend960DT_968B7 --hivm-vectorize=phase=backend --verify-each | FileCheck %s --check-prefixes=A6,COMMON
++// RUN: bishengir-opt %s --hacc-append-device-spec=target=Ascend950PR_9579 --hivm-vectorize=phase=backend --verify-each | FileCheck %s --check-prefixes=A5,COMMON
++
++// The single use of the condition selects one full-width arm, including for
++// an undef condition. A poison value in the unselected arm cannot escape.
++// A6-LABEL: func.func @choose_i64(
++// A6-DAG: %[[T:.*]] = llvm.freeze %arg1 : i64
++// A6-DAG: %[[F:.*]] = llvm.freeze %arg2 : i64
++// A6-DAG: %[[MASK:.*]] = arith.extsi %arg0 : i1 to i64
++// A6: %[[DIFF:.*]] = arith.xori %[[T]], %[[F]] : i64
++// A6: %[[CHOSEN:.*]] = arith.andi %[[MASK]], %[[DIFF]] : i64
++// A6: %[[RESULT:.*]] = arith.xori %[[F]], %[[CHOSEN]] : i64
++// A6: return %[[RESULT]] : i64
++// A5-LABEL: func.func @choose_i64(
++// A5: arith.select %arg0, %arg1, %arg2 : i64
++func.func @choose_i64(%p: i1, %t: i64, %f: i64) -> i64 attributes {hivm.vector_function} {
++  %r = arith.select %p, %t, %f : i64
++  return %r : i64
++}
++
++// COMMON-LABEL: func.func @choose_i32(
++// COMMON: arith.select %arg0, %arg1, %arg2 : i32
++func.func @choose_i32(%p: i1, %t: i32, %f: i32) -> i32 attributes {hivm.vector_function} {
++  %r = arith.select %p, %t, %f : i32
++  return %r : i32
++}
++
++// COMMON-LABEL: func.func @choose_si64(
++// COMMON: arith.select %arg0, %arg1, %arg2 : si64
++func.func @choose_si64(%p: i1, %t: si64, %f: si64) -> si64 attributes {hivm.vector_function} {
++  %r = arith.select %p, %t, %f : si64
++  return %r : si64
++}
++
++// COMMON-LABEL: func.func @scalar_caller(
++// COMMON: arith.select %arg0, %arg1, %arg2 : i64
++func.func @scalar_caller(%p: i1, %t: i64, %f: i64) -> i64 {
++  %r = arith.select %p, %t, %f : i64
++  return %r : i64
++}

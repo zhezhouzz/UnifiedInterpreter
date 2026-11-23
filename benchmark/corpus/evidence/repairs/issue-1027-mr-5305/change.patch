@@ -1,0 +1,484 @@
+diff --git a/bishengir/include/bishengir/Dialect/HIVM/Utils/Utils.h b/bishengir/include/bishengir/Dialect/HIVM/Utils/Utils.h
+index 003762a00..c01029a42 100644
+--- a/bishengir/include/bishengir/Dialect/HIVM/Utils/Utils.h
++++ b/bishengir/include/bishengir/Dialect/HIVM/Utils/Utils.h
+@@ -160,6 +160,10 @@ bool isResultInL0C(OpResult result);
+ 
+ bool isResultRemainInL0C(OpResult result);
+ 
++/// Record L0C residency for a bound conditional result and the local matmul
++/// result yielded by each branch.
++void markL0CBoundMatmulResults(annotation::MarkOp mark);
++
+ /// Set the input type's memory scope to the input HIVM Address Space.
+ void setBaseMemRefTypeScope(Value val, AddressSpaceAttr targetMemScope);
+ 
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/InsertFixpipe.cpp b/bishengir/lib/Dialect/HIVM/Transforms/InsertFixpipe.cpp
+index a6e2287b9..ab714ac6a 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/InsertFixpipe.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/InsertFixpipe.cpp
+@@ -21,6 +21,7 @@
+ 
+ #include "bishengir/Config/bishengir-config.h"
+ #include "bishengir/Conversion/Passes.h"
++#include "bishengir/Dialect/Annotation/IR/Annotation.h"
+ #include "bishengir/Dialect/HACC/Utils/Utils.h"
+ #include "bishengir/Dialect/HIVM/IR/Capability/DMA/Fixpipe/FixpipeCapabilityBinding.h"
+ #include "bishengir/Dialect/HIVM/IR/Contracts/FixpipePreQuantContract.h"
+@@ -515,6 +516,41 @@ static bool isExclusiveLocalMatmulInit(Operation *op, Value v) {
+   return usesOnOp == 1;
+ }
+ 
++/// A resident accumulator can initialize a loop when its only use in the
++/// body is the C operand of the matmul that yields the next accumulator.
++static bool isLoopCarriedMatmulInit(scf::ForOp loop, OpOperand &init) {
++  BlockArgument iterArg = loop.getTiedLoopRegionIterArg(&init);
++  if (!iterArg || !iterArg.hasOneUse() ||
++      !isResultRemainInL0C(loop.getTiedLoopResult(iterArg)))
++    return false;
++  Value yielded = loop.getTiedLoopYieldedValue(iterArg)->get();
++  return isLocalMatmulInit(yielded.getDefiningOp(), iterArg);
++}
++
++static bool allUsersReachFixpipe(Value value);
++
++static bool needsFixpipe(OpOperand &use) {
++  Operation *user = use.getOwner();
++  if (isa<DebugOp, FixpipeOp, annotation::MarkOp, tensor::DimOp>(user))
++    return false;
++  // Sub-block tiling can slice the accumulator before an existing transfer.
++  if (auto slice = dyn_cast<tensor::ExtractSliceOp>(user))
++    return !allUsersReachFixpipe(slice.getResult());
++
++  auto source = cast<OpResult>(use.get());
++  bool residentIf =
++      isa<scf::IfOp>(source.getOwner()) && isResultRemainInL0C(source);
++  if (auto loop = dyn_cast<scf::ForOp>(user); loop && residentIf)
++    return !isLoopCarriedMatmulInit(loop, use);
++
++  // Only C can reuse the raw accumulator. A/B on the same op need a copy.
++  if (isa<LocalMatmulLikeOpInterface>(user) &&
++      cast<DestinationStyleOpInterface>(user).isDpsInit(&use) &&
++      (residentIf || source.getOwner()->getName() == user->getName()))
++    return false;
++  return !(shouldKeepYieldInL0C(use) && isRemainInL0c(use));
++}
++
+ static FixpipeOp insertFixpipe(PatternRewriter &rewriter, Operation *point,
+                                Value src) {
+   rewriter.setInsertionPointAfter(point);
+@@ -524,33 +560,7 @@ static FixpipeOp insertFixpipe(PatternRewriter &rewriter, Operation *point,
+   auto fixpipe = (isMovingToL1 ? insertFixpipeToL1
+                                : insertFixpipeToLocal)(rewriter, point, src);
+ 
+-  rewriter.replaceUsesWithIf(
+-      src, fixpipe.getResultTensor(), [](OpOperand &use) {
+-        auto *op = use.getOwner();
+-        if (isa<DebugOp>(op) || isa<FixpipeOp>(op) ||
+-            isa<annotation::MarkOp>(op)) {
+-          return false;
+-        }
+-        // mmadL1 and mmadmxL1 both implement LocalMatmulLikeOpInterface, and
+-        // their C operand is the DPS init. Keep that init on a raw result of
+-        // the same op so the L0C accumulator is not replaced by a fixpipe.
+-        // batchMmadL1 is the other implementer; a direct same-op C chain is
+-        // treated the same way. A/B uses still take the fixpipe.
+-        if (isa<hivm::LocalMatmulLikeOpInterface>(op)) {
+-          auto dpsOp = cast<DestinationStyleOpInterface>(op);
+-          return !llvm::any_of(
+-              dpsOp.getDpsInitsMutable(), [&](OpOperand &init) {
+-                Operation *def = init.get().getDefiningOp();
+-                return &use == &init && def && def->getName() == op->getName();
+-              });
+-        }
+-        // handle normalized_in_l0c and remain_in_l0c, including nested
+-        // scf.for yields whose enclosing loop (or the mmad itself) keeps
+-        // the value in L0C.
+-        if (isRemainInL0c(use) && shouldKeepYieldInL0C(use))
+-          return false;
+-        return true;
+-      });
++  rewriter.replaceUsesWithIf(src, fixpipe.getResultTensor(), needsFixpipe);
+ 
+   auto dst = fixpipe.getDst();
+   // in MemBased Architecture, there is fixpipe that goes to
+@@ -792,7 +802,8 @@ public:
+ 
+       LDBG("Replacing fix pipe for " << op);
+       Value result = insertAfterOp->getResult(resultIndx);
+-      if (!tryInsertFractalOutputFixpipe(rewriter, insertAfterOp, result)) {
++      if (!tryInsertFractalOutputFixpipe(rewriter, insertAfterOp, result) &&
++          llvm::any_of(result.getUses(), needsFixpipe)) {
+         LDBG("Inserting fractal output fixpipe after " << *insertAfterOp);
+         insertFixpipe(rewriter, insertAfterOp, result);
+         op->setAttr(mmadFixpipeForResultAlreadyInserted,
+@@ -1005,9 +1016,25 @@ public:
+   }
+ };
+ 
+-void populateInsertFixpipeForIterArgPatterns(RewritePatternSet &patterns) {
+-  patterns.add<InsertFixpipeForIterArgMMAD>(patterns.getContext());
+-}
++// Serve uses of resident results before inserting transfers inside the
++// branches.
++struct InsertFixpipeForResidentIf : OpRewritePattern<scf::IfOp> {
++  using OpRewritePattern::OpRewritePattern;
++
++  LogicalResult matchAndRewrite(scf::IfOp ifOp,
++                                PatternRewriter &rewriter) const override {
++    bool changed = false;
++    for (OpResult result : ifOp->getOpResults()) {
++      if (isa<RankedTensorType>(result.getType()) &&
++          isResultRemainInL0C(result) &&
++          llvm::any_of(result.getUses(), needsFixpipe)) {
++        insertFixpipe(rewriter, ifOp, result);
++        changed = true;
++      }
++    }
++    return success(changed);
++  }
++};
+ 
+ void populateInsertFixpipePatterns(RewritePatternSet &patterns) {
+   MLIRContext *ctx = patterns.getContext();
+@@ -1099,10 +1126,13 @@ void populateMoveFixpipePatterns(RewritePatternSet &patterns) {
+ void InsertFixpipe::runOnOperation() {
+   ModuleTargetAnalysis &targets = getAnalysis<ModuleTargetAnalysis>();
+   ModuleTargetAnalysisScope targetScope(targets);
+-  RewritePatternSet iterArgPatterns(&getContext());
+-  populateInsertFixpipeForIterArgPatterns(iterArgPatterns);
++  // Standalone insertion also accepts explicit bindings on unnormalized IR.
++  getOperation()->walk(markL0CBoundMatmulResults);
++  RewritePatternSet regionPatterns(&getContext());
++  regionPatterns.add<InsertFixpipeForIterArgMMAD, InsertFixpipeForResidentIf>(
++      &getContext());
+   if (failed(
+-          applyPatternsGreedily(getOperation(), std::move(iterArgPatterns)))) {
++          applyPatternsGreedily(getOperation(), std::move(regionPatterns)))) {
+     signalPassFailure();
+     return;
+   }
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/NormalizeMatmul.cpp b/bishengir/lib/Dialect/HIVM/Transforms/NormalizeMatmul.cpp
+index d0ec35348..335bfb8c8 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/NormalizeMatmul.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/NormalizeMatmul.cpp
+@@ -2726,8 +2726,8 @@ LogicalResult runNormalizeMatmul(func::FuncOp funcOp, MLIRContext *context) {
+   removeDotPadOnlyKMarks(rewriter, funcOp);
+   // runRegionDCE reports whether anything was erased, not success/failure.
+   (void)runRegionDCE(rewriter, funcOp->getRegions());
+-  // normalized_in_L0C names the carried results. Copy remain_in_l0c onto the
+-  // yield path when one of those results comes from a remain-marked cube op.
++  // An explicit cube scope can bind a result without running the CCF rewrite.
++  funcOp.walk(markL0CBoundMatmulResults);
+   return success();
+ }
+ 
+diff --git a/bishengir/lib/Dialect/HIVM/Utils/Utils.cpp b/bishengir/lib/Dialect/HIVM/Utils/Utils.cpp
+index 1219daff1..45281f15c 100644
+--- a/bishengir/lib/Dialect/HIVM/Utils/Utils.cpp
++++ b/bishengir/lib/Dialect/HIVM/Utils/Utils.cpp
+@@ -25,6 +25,7 @@
+ #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+ #include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
+ #include "bishengir/Dialect/HIVM/Utils/MultiBufferLoopAdapter.h"
++#include "bishengir/Dialect/MemRef/IR/MemRefImpl.h"
+ #include "bishengir/Dialect/MemRefExt/IR/MemRefExt.h"
+ #include "bishengir/Dialect/Scope/IR/Scope.h"
+ #include "bishengir/Dialect/Utils/Util.h"
+@@ -282,6 +283,37 @@ bool isResultRemainInL0C(OpResult result) {
+   return false;
+ }
+ 
++void markL0CBoundMatmulResults(annotation::MarkOp mark) {
++  auto ifOp = mark.getSrc().getDefiningOp<scf::IfOp>();
++  if (!ifOp || !mark.isAnnotatedByDynamicAttr(memref::kBindBufferAttrName))
++    return;
++  Value buffer = mark.getDynamicAttrValue(memref::kBindBufferAttrName);
++  if (!buffer.getDefiningOp<memref::AllocOp>() ||
++      getOptionalHIVMAddressSpace(buffer.getType()) != AddressSpace::L0C)
++    return;
++
++  auto result = cast<OpResult>(mark.getSrc());
++  auto getMatmulResult = [&](scf::YieldOp yield) -> OpResult {
++    Value value = yield.getOperand(result.getResultNumber());
++    auto matmul = value.getDefiningOp<LocalMatmulLikeOpInterface>();
++    if (!matmul || matmul->getBlock() != yield->getBlock())
++      return {};
++    return cast<OpResult>(value);
++  };
++  OpResult thenResult = getMatmulResult(ifOp.thenYield());
++  OpResult elseResult = getMatmulResult(ifOp.elseYield());
++  if (!thenResult || !elseResult)
++    return;
++
++  Builder builder(mark.getContext());
++  for (OpResult resident : {thenResult, elseResult, result}) {
++    if (!isResultRemainInL0C(resident))
++      utils::insertIntegerAttrToArrayAttr(resident.getOwner(),
++                                          RemainInL0CAttr::name,
++                                          resident.getResultNumber(), builder);
++  }
++}
++
+ FailureOr<memref::AllocOp> getMemRefAlloc(Value operand) {
+   if (auto bbArg = dyn_cast<BlockArgument>(operand)) {
+     return getMemRefForBlockArgument(bbArg);
+diff --git a/bishengir/test/Dialect/HIVM/insert-fixpipe-for-scf-if-mmad.mlir b/bishengir/test/Dialect/HIVM/insert-fixpipe-for-scf-if-mmad.mlir
+index f0708db1f..1fa465811 100644
+--- a/bishengir/test/Dialect/HIVM/insert-fixpipe-for-scf-if-mmad.mlir
++++ b/bishengir/test/Dialect/HIVM/insert-fixpipe-for-scf-if-mmad.mlir
+@@ -1,4 +1,8 @@
+-// RUN: bishengir-opt -hivm-insert-fixpipe %s -split-input-file | FileCheck %s
++// RUN: bishengir-opt -hivm-insert-fixpipe %s -split-input-file | FileCheck %s --check-prefixes=CHECK,LOOP
++// RUN: bishengir-opt -hivm-insert-fixpipe -hivm-insert-fixpipe %s -split-input-file | FileCheck %s --check-prefixes=CHECK,LOOP
++// RUN: bishengir-opt -hivm-normalize-matmul %s | FileCheck %s --check-prefix=NORM
++// RUN: bishengir-opt -pass-pipeline='builtin.module(func.func(hivm-normalize-matmul))' %s | FileCheck %s --check-prefix=NORM
++// RUN: bishengir-opt -hivm-normalize-matmul -hivm-insert-fixpipe %s | FileCheck %s --check-prefix=LOOP
+ 
+ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+ // A mmad in each branch of an scf.if yields a single merged result. The fixpipe
+@@ -6,17 +10,15 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+ // pointing at the L0C buffer for annotation.mark bind_buffer.
+ // CHECK-LABEL: func.func @single_fixpipe_after_scf_if
+ // CHECK: %[[IF:.*]] = scf.if
+-// CHECK: hivm.hir.mmadL1
+-// CHECK-NOT: hivm.hir.fixpipe
+-// CHECK: scf.yield
++// CHECK: %[[THEN:.*]] = hivm.hir.mmadL1
++// CHECK-NEXT: scf.yield %[[THEN]]
+ // CHECK: } else {
+-// CHECK: hivm.hir.mmadL1
+-// CHECK-NOT: hivm.hir.fixpipe
+-// CHECK: scf.yield
++// CHECK: %[[ELSE:.*]] = hivm.hir.mmadL1
++// CHECK-NEXT: scf.yield %[[ELSE]]
+ // CHECK: }
+ // CHECK: %[[FIX:.*]] = hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>} ins(%[[IF]]
+ // CHECK: hivm.hir.store ins(%[[FIX]]
+-// CHECK: annotation.mark %[[IF]]
++// CHECK-NEXT: annotation.mark %[[IF]] keys = ["bind_buffer"]
+ func.func @single_fixpipe_after_scf_if(
+     %cond: i1,
+     %arg0: memref<128x128xf16>,
+@@ -31,19 +33,181 @@ func.func @single_fixpipe_after_scf_if(
+   %res = scf.if %cond -> (tensor<128x128xf32>) {
+     %memspacecast = memref.memory_space_cast %alloc : memref<128x128xf32, #hivm.address_space<cc>> to memref<128x128xf32>
+     %acc = bufferization.to_tensor %memspacecast restrict writable : memref<128x128xf32>
+-    %mmad = hivm.hir.mmadL1 {already_set_real_mkn, hivm.remain_in_l0c = [0 : i32], normalized_in_L0C}
++    %mmad = hivm.hir.mmadL1 {already_set_real_mkn}
+         ins(%a, %b, %false, %c128, %c128, %c128 : tensor<128x128xf16>, tensor<128x128xf16>, i1, index, index, index)
+         outs(%acc : tensor<128x128xf32>) -> tensor<128x128xf32>
+     scf.yield %mmad : tensor<128x128xf32>
+   } else {
+     %init = tensor.empty() : tensor<128x128xf32>
+-    %mmad = hivm.hir.mmadL1 {already_set_real_mkn, hivm.remain_in_l0c = [0 : i32], normalized_in_L0C}
++    %mmad = hivm.hir.mmadL1 {already_set_real_mkn}
+         ins(%a, %b, %true, %c128, %c128, %c128 : tensor<128x128xf16>, tensor<128x128xf16>, i1, index, index, index)
+         outs(%init : tensor<128x128xf32>) -> tensor<128x128xf32>
+     scf.yield %mmad : tensor<128x128xf32>
+-  } {hivm.remain_in_l0c = [0 : i32], normalized_in_L0C = [0 : i32]}
++  }
+   hivm.hir.store ins(%res : tensor<128x128xf32>) outs(%arg3 : memref<128x128xf32>) atomic = <add>
+   annotation.mark %res keys = ["bind_buffer"] values = [%alloc : memref<128x128xf32, #hivm.address_space<cc>>] : tensor<128x128xf32>
+   return
+ }
++
++// Both arms also store their result. The bound result stays raw for the
++// next matmul's C operand, while each store needs its own transfer.
++// CHECK-LABEL: func.func @bound_accumulator_with_branch_users
++// CHECK: %[[IF:.*]]:2 = scf.if
++// CHECK: %[[THEN:.*]] = hivm.hir.mmadL1
++// CHECK: %[[COPY:.*]] = hivm.hir.fixpipe {{.*}}ins(%[[THEN]] :
++// CHECK: hivm.hir.store ins(%[[COPY]] :
++// CHECK-NEXT: scf.yield {{.*}}, %[[THEN]] :
++// CHECK: } else {
++// CHECK: %[[ELSE:.*]] = hivm.hir.mmadL1
++// CHECK: %[[ELSECOPY:.*]] = hivm.hir.fixpipe {{.*}}ins(%[[ELSE]] :
++// CHECK: hivm.hir.store ins(%[[ELSECOPY]] :
++// CHECK-NEXT: scf.yield {{.*}}, %[[ELSE]] :
++// CHECK-NEXT: } {hivm.remain_in_l0c = [1 : i32]}
++// CHECK: %[[OUTCOPY:.*]] = hivm.hir.fixpipe {{.*}}ins(%[[IF]]#1 :
++// CHECK: annotation.mark %[[IF]]#1 keys = ["bind_buffer"]
++// CHECK-NEXT: hivm.hir.store ins(%[[OUTCOPY]] :
++// CHECK-NEXT: hivm.hir.mmadL1 {{.*}}outs(%[[IF]]#1 :
++func.func @bound_accumulator_with_branch_users(
++    %cond: i1, %a: tensor<128x128xf16>, %b: tensor<128x128xf16>,
++    %left: tensor<128x128xf32>, %right: tensor<128x128xf32>,
++    %out: memref<128x128xf32>) -> (tensor<128x128xf32>, tensor<128x128xf32>) {
++  %true = arith.constant true
++  %false = arith.constant false
++  %c128 = arith.constant 128 : index
++  %buf = memref.alloc() : memref<128x128xf32, #hivm.address_space<cc>>
++  %res:2 = scf.if %cond -> (tensor<128x128xf32>, tensor<128x128xf32>) {
++    %init = tensor.empty() : tensor<128x128xf32>
++    %acc = hivm.hir.mmadL1 ins(%a, %b, %true, %c128, %c128, %c128 : tensor<128x128xf16>, tensor<128x128xf16>, i1, index, index, index)
++        outs(%init : tensor<128x128xf32>) -> tensor<128x128xf32>
++    hivm.hir.store ins(%acc : tensor<128x128xf32>) outs(%out : memref<128x128xf32>)
++    scf.yield %left, %acc : tensor<128x128xf32>, tensor<128x128xf32>
++  } else {
++    %init = tensor.empty() : tensor<128x128xf32>
++    %acc = hivm.hir.mmadL1 {b_transpose} ins(%a, %b, %true, %c128, %c128, %c128 : tensor<128x128xf16>, tensor<128x128xf16>, i1, index, index, index)
++        outs(%init : tensor<128x128xf32>) -> tensor<128x128xf32>
++    hivm.hir.store ins(%acc : tensor<128x128xf32>) outs(%out : memref<128x128xf32>)
++    scf.yield %right, %acc : tensor<128x128xf32>, tensor<128x128xf32>
++  }
++  annotation.mark %res#1 keys = ["bind_buffer"] values = [%buf : memref<128x128xf32, #hivm.address_space<cc>>] : tensor<128x128xf32>
++  hivm.hir.store ins(%res#1 : tensor<128x128xf32>) outs(%out : memref<128x128xf32>)
++  %next = hivm.hir.mmadL1 ins(%a, %b, %false, %c128, %c128, %c128 : tensor<128x128xf16>, tensor<128x128xf16>, i1, index, index, index)
++      outs(%res#1 : tensor<128x128xf32>) -> tensor<128x128xf32>
++  return %res#0, %next : tensor<128x128xf32>, tensor<128x128xf32>
++}
++
++// An explicit cube scope binds the join before it initializes a loop-carried C.
++// NORM-LABEL: func.func @bound_if_initializes_loop
++// NORM: scf.if
++// NORM: %[[THEN:.*]] = hivm.hir.mmadL1 {{.*}}hivm.remain_in_l0c = [0 : i32]
++// NORM-NEXT: scf.yield %[[THEN]]
++// NORM: %[[ELSE:.*]] = hivm.hir.mmadL1 {{.*}}hivm.remain_in_l0c = [0 : i32]
++// NORM-NEXT: scf.yield %[[ELSE]]
++// NORM-NEXT: } {hivm.remain_in_l0c = [0 : i32]}
++// LOOP-LABEL: func.func @bound_if_initializes_loop
++// LOOP: %[[IF:.*]] = scf.if
++// LOOP: %[[LOOP:.*]] = scf.for {{.*}} iter_args(%[[C:.*]] = %[[IF]])
++// LOOP: hivm.hir.mmadL1 {{.*}}outs(%[[C]] :
++// LOOP: %[[COPY:.*]] = hivm.hir.fixpipe {{.*}}ins(%[[LOOP]] :
++// LOOP: hivm.hir.store ins(%[[COPY]] :
++func.func @bound_if_initializes_loop(%cond: i1, %trips: index,
++    %a: tensor<128x128xf16>, %b: tensor<128x128xf16>, %out: memref<128x128xf32>) {
++  %true = arith.constant true
++  %false = arith.constant false
++  %c128 = arith.constant 128 : index
++  %zero = arith.constant 0 : index
++  %one = arith.constant 1 : index
++  %buf = memref.alloc() : memref<128x128xf32, #hivm.address_space<cc>>
++  scope.scope : () -> () {
++    %init = tensor.empty() : tensor<128x128xf32>
++    %res = scf.if %cond -> (tensor<128x128xf32>) {
++      %then = hivm.hir.mmadL1 ins(%a, %b, %true, %c128, %c128, %c128 : tensor<128x128xf16>, tensor<128x128xf16>, i1, index, index, index)
++          outs(%init : tensor<128x128xf32>) -> tensor<128x128xf32>
++      scf.yield %then : tensor<128x128xf32>
++    } else {
++      %else = hivm.hir.mmadL1 {b_transpose} ins(%a, %b, %true, %c128, %c128, %c128 : tensor<128x128xf16>, tensor<128x128xf16>, i1, index, index, index)
++          outs(%init : tensor<128x128xf32>) -> tensor<128x128xf32>
++      scf.yield %else : tensor<128x128xf32>
++    }
++    annotation.mark %res keys = ["bind_buffer"] values = [%buf : memref<128x128xf32, #hivm.address_space<cc>>] : tensor<128x128xf32>
++    %loop = scf.for %i = %zero to %trips step %one iter_args(%c = %res) -> (tensor<128x128xf32>) {
++      %step = hivm.hir.mmadL1 ins(%a, %b, %false, %c128, %c128, %c128 : tensor<128x128xf16>, tensor<128x128xf16>, i1, index, index, index)
++          outs(%c : tensor<128x128xf32>) -> tensor<128x128xf32>
++      scf.yield %step : tensor<128x128xf32>
++    } {hivm.remain_in_l0c = [0 : i32]}
++    hivm.hir.store ins(%loop : tensor<128x128xf32>) outs(%out : memref<128x128xf32>)
++    scope.return
++  } {hivm.tcore_type = #hivm.tcore_type<CUBE>, noinline}
++  return
++}
++
++// Residency can be inferred without a binding. Each store needs its own copy.
++// The unit residency attribute also covers the scalar result on older IR.
++// CHECK-LABEL: func.func @resident_if_with_branch_stores
++// CHECK: %[[IF:.*]]:2 = scf.if
++// CHECK: %[[THEN:.*]] = hivm.hir.mmadL1
++// CHECK: %[[TCOPY:.*]] = hivm.hir.fixpipe {{.*}}ins(%[[THEN]] :
++// CHECK: hivm.hir.store ins(%[[TCOPY]] :
++// CHECK-NEXT: scf.yield %[[THEN]]
++// CHECK: %[[ELSE:.*]] = hivm.hir.mmadL1
++// CHECK: %[[ECOPY:.*]] = hivm.hir.fixpipe {{.*}}ins(%[[ELSE]] :
++// CHECK: hivm.hir.store ins(%[[ECOPY]] :
++// CHECK-NEXT: scf.yield %[[ELSE]]
++// CHECK: %[[COPY:.*]] = hivm.hir.fixpipe {{.*}}ins(%[[IF]]#0 :
++// CHECK: hivm.hir.store ins(%[[COPY]] :
++func.func @resident_if_with_branch_stores(%cond: i1,
++    %a: tensor<128x128xf16>, %b: tensor<128x128xf16>, %out: memref<128x128xf32>, %left: index, %right: index) -> index {
++  %true = arith.constant true
++  %c128 = arith.constant 128 : index
++  %init = tensor.empty() : tensor<128x128xf32>
++  %res:2 = scf.if %cond -> (tensor<128x128xf32>, index) {
++    %then = hivm.hir.mmadL1 {hivm.remain_in_l0c = [0 : i32]} ins(%a, %b, %true, %c128, %c128, %c128 : tensor<128x128xf16>, tensor<128x128xf16>, i1, index, index, index)
++        outs(%init : tensor<128x128xf32>) -> tensor<128x128xf32>
++    hivm.hir.store ins(%then : tensor<128x128xf32>) outs(%out : memref<128x128xf32>)
++    scf.yield %then, %left : tensor<128x128xf32>, index
++  } else {
++    %else = hivm.hir.mmadL1 {b_transpose, hivm.remain_in_l0c = [0 : i32]} ins(%a, %b, %true, %c128, %c128, %c128 : tensor<128x128xf16>, tensor<128x128xf16>, i1, index, index, index)
++        outs(%init : tensor<128x128xf32>) -> tensor<128x128xf32>
++    hivm.hir.store ins(%else : tensor<128x128xf32>) outs(%out : memref<128x128xf32>)
++    scf.yield %else, %right : tensor<128x128xf32>, index
++  } {hivm.remain_in_l0c}
++  hivm.hir.store ins(%res#0 : tensor<128x128xf32>) outs(%out : memref<128x128xf32>)
++  return %res#1 : index
++}
++
++// A live shape query and two C users preserve the raw dynamic result.
++// Neither branch needs a fixpipe or its insertion marker.
++// CHECK-LABEL: func.func @bound_if_with_c_only_users
++// CHECK: %[[IF:.*]] = scf.if
++// CHECK: hivm.hir.mmadL1 {hivm.remain_in_l0c = [0 : i32]}
++// CHECK: hivm.hir.mmadL1 {b_transpose, hivm.remain_in_l0c = [0 : i32]}
++// CHECK: annotation.mark %[[IF]] keys = ["bind_buffer"]
++// CHECK-NEXT: %[[DIM:.*]] = tensor.dim %[[IF]],
++// CHECK: hivm.hir.mmadL1 {{.*}}outs(%[[IF]] :
++// CHECK: hivm.hir.mmadL1 {{.*}}outs(%[[IF]] :
++// CHECK: return {{.*}}, %[[DIM]]
++func.func @bound_if_with_c_only_users(%cond: i1, %a: tensor<?x?xf16>, %b: tensor<?x?xf16>, %n: index)
++    -> (tensor<?x?xf32>, tensor<?x?xf32>, index) {
++  %zero = arith.constant 0 : index
++  %new = arith.constant true
++  %reuse = arith.constant false
++  %l0c = memref.alloc(%n, %n) : memref<?x?xf32, #hivm.address_space<cc>>
++  %join = scf.if %cond -> (tensor<?x?xf32>) {
++    %init = tensor.empty(%n, %n) : tensor<?x?xf32>
++    %then = hivm.hir.mmadL1 ins(%a, %b, %new, %n, %n, %n : tensor<?x?xf16>, tensor<?x?xf16>, i1, index, index, index)
++        outs(%init : tensor<?x?xf32>) -> tensor<?x?xf32>
++    scf.yield %then : tensor<?x?xf32>
++  } else {
++    %init = tensor.empty(%n, %n) : tensor<?x?xf32>
++    %else = hivm.hir.mmadL1 {b_transpose} ins(%a, %b, %new, %n, %n, %n : tensor<?x?xf16>, tensor<?x?xf16>, i1, index, index, index)
++        outs(%init : tensor<?x?xf32>) -> tensor<?x?xf32>
++    scf.yield %else : tensor<?x?xf32>
++  }
++  annotation.mark %join keys = ["bind_buffer"] values = [%l0c : memref<?x?xf32, #hivm.address_space<cc>>] : tensor<?x?xf32>
++  %size = tensor.dim %join, %zero : tensor<?x?xf32>
++  %next = hivm.hir.mmadL1 ins(%a, %b, %reuse, %n, %n, %n : tensor<?x?xf16>, tensor<?x?xf16>, i1, index, index, index)
++      outs(%join : tensor<?x?xf32>) -> tensor<?x?xf32>
++  %other = hivm.hir.mmadL1 {a_transpose} ins(%a, %b, %reuse, %n, %n, %n : tensor<?x?xf16>, tensor<?x?xf16>, i1, index, index, index)
++      outs(%join : tensor<?x?xf32>) -> tensor<?x?xf32>
++  return %next, %other, %size : tensor<?x?xf32>, tensor<?x?xf32>, index
++}
+ }
+diff --git a/bishengir/test/Dialect/HIVM/insert-fixpipe-for-sliced-if-result.mlir b/bishengir/test/Dialect/HIVM/insert-fixpipe-for-sliced-if-result.mlir
+new file mode 100644
+index 000000000..1a72580e8
+--- /dev/null
++++ b/bishengir/test/Dialect/HIVM/insert-fixpipe-for-sliced-if-result.mlir
+@@ -0,0 +1,31 @@
++// RUN: bishengir-opt -hivm-insert-fixpipe %s | FileCheck %s
++// RUN: bishengir-opt -hivm-insert-fixpipe -hivm-insert-fixpipe %s | FileCheck %s
++
++module attributes {hacc.target = #hacc.target<"Ascend910B4">} {
++  // The converting fixpipe reads L0C through its slice. The other slice
++  // needs a transfer before the store can read it.
++  // CHECK-LABEL: func.func @sliced_if_result
++  // CHECK: %[[ACC:.*]] = scf.if
++  // CHECK: %[[COPY:.*]] = hivm.hir.fixpipe {{.*}}ins(%[[ACC]] :
++  // CHECK: %[[RAW_TILE:.*]] = tensor.extract_slice %[[ACC]][
++  // CHECK: hivm.hir.fixpipe {{.*}}F322BF16{{.*}}ins(%[[RAW_TILE]] :
++  // CHECK: %[[COPIED_TILE:.*]] = tensor.extract_slice %[[COPY]][
++  // CHECK: hivm.hir.store ins(%[[COPIED_TILE]] :
++  func.func @sliced_if_result(%cond: i1, %lhs: tensor<64x64xf32>,
++      %rhs: tensor<64x64xf32>, %offset: index, %size: index,
++      %bf16_out: memref<?x64xbf16>, %f32_out: memref<?x64xf32>) {
++    %acc = scf.if %cond -> tensor<64x64xf32> {
++      scf.yield %lhs : tensor<64x64xf32>
++    } else {
++      scf.yield %rhs : tensor<64x64xf32>
++    } {hivm.remain_in_l0c = [0 : i32]}
++    %raw_tile = tensor.extract_slice %acc[%offset, 0] [%size, 64] [1, 1]
++        : tensor<64x64xf32> to tensor<?x64xf32>
++    hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>, pre_quant = #hivm.fixpipe_pre_quant_mode<F322BF16>}
++        ins(%raw_tile : tensor<?x64xf32>) outs(%bf16_out : memref<?x64xbf16>)
++    %tile = tensor.extract_slice %acc[0, 0] [%size, 64] [1, 1]
++        : tensor<64x64xf32> to tensor<?x64xf32>
++    hivm.hir.store ins(%tile : tensor<?x64xf32>) outs(%f32_out : memref<?x64xf32>)
++    return
++  }
++}

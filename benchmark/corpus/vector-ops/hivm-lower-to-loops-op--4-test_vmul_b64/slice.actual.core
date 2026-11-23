@@ -1,0 +1,4 @@
+run {
+  x0 := compute[unit_vmul@PIPE_V]();
+  return()
+}

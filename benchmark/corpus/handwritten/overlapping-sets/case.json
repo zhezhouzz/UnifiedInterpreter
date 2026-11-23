@@ -1,0 +1,59 @@
+{
+  "group": "handwritten",
+  "id": "overlapping-sets",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-canonicalize"
+  ],
+  "projection": [
+    {
+      "line": 3,
+      "operation": "hivm.hir.set_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]"
+    },
+    {
+      "line": 4,
+      "operation": "hivm.hir.set_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]"
+    },
+    {
+      "line": 5,
+      "operation": "hivm.hir.wait_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]"
+    },
+    {
+      "line": 6,
+      "operation": "hivm.hir.wait_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_MTE2",
+      "PIPE_V"
+    ],
+    "events": [
+      "EVENT_ID0"
+    ],
+    "units": []
+  },
+  "stage": "explicit flags in post-insertion-style input; canonicalize only",
+  "origin": "authored protocol litmus",
+  "property": "Reject completion candidate S S W W at second S; program itself may have other executions.",
+  "translation": {
+    "status": "translated",
+    "function": "overlapping_sets",
+    "diagnostics": []
+  },
+  "expectation": {
+    "scope": "whole straight-line protocol",
+    "method": "independently authored operation sequence",
+    "matches_full_output": true
+  },
+  "slice_translation": {
+    "lines": [
+      3,
+      6
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "overlapping_sets"
+}

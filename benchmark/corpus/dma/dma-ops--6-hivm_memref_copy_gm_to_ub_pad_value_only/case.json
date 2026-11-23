@@ -1,0 +1,61 @@
+{
+  "group": "dma",
+  "id": "dma-ops--6-hivm_memref_copy_gm_to_ub_pad_value_only",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "projection": [
+    {
+      "line": 6,
+      "operation": "hivm.hir.load ins(%alloc : memref<16x16xf16, #hivm.address_space<gm>>) outs(%alloc_0 : memref<16x16xf16, #hivm.address_space<ub>>) pad_mode = <PadValue> pad_value = %cst : f16"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_MTE2"
+    ],
+    "events": [],
+    "units": [
+      "unit_load"
+    ]
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/IR/dma-ops.mlir",
+  "upstream_path": "bishengir/test/Dialect/HIVM/IR/dma-ops.mlir",
+  "split_index": 6,
+  "stage": "intra-core sync pass",
+  "function": "hivm_memref_copy_gm_to_ub_pad_value_only",
+  "translation": {
+    "status": "unsupported",
+    "function": "hivm_memref_copy_gm_to_ub_pad_value_only",
+    "diagnostics": [
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":4:14)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":5:16)",
+        "reason": "No core elaboration rule for this operation."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      6,
+      6
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "hivm_memref_copy_gm_to_ub_pad_value_only"
+}

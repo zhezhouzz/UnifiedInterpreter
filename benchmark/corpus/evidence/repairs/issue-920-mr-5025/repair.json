@@ -1,0 +1,12 @@
+{
+  "issue": 920,
+  "mr": "5025",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/5025",
+  "commit": "3c6f582cd505845e7465f4344bbf96af22c3ec2d",
+  "parent": "6d42ddd3b8bc7ecd65ad8b167685f770f810e73d",
+  "title": "[HIVM][CVPipelining] fix: keep feedback loops out of skew pipelining",
+  "tests": [
+    "bishengir/test/Dialect/HIVM/cv-pipelining-buffer-feedback-cycle.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

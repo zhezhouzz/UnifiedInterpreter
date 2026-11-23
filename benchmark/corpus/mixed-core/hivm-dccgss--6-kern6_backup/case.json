@@ -1,0 +1,66 @@
+{
+  "group": "mixed-core",
+  "id": "hivm-dccgss--6-kern6_backup",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "projection": [
+    {
+      "line": 23,
+      "operation": "hivm.hir.load ins(%arg1 : memref<?xf32, #hivm.address_space<gm>>) outs(%0 : memref<16xf32, #hivm.address_space<ub>>)"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_MTE2"
+    ],
+    "events": [],
+    "units": [
+      "unit_load"
+    ]
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/SyncSolver/hivm-dccgss.mlir",
+  "upstream_path": "bishengir/test/Dialect/HIVM/SyncSolver/hivm-dccgss.mlir",
+  "split_index": 6,
+  "stage": "intra-core sync pass",
+  "function": "kern6_backup",
+  "translation": {
+    "status": "unsupported",
+    "function": "kern6_mix_aiv",
+    "diagnostics": [
+      {
+        "op": "hivm.hir.anchor",
+        "location": "loc(\"<stdin>\":19:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "scf.if",
+        "location": "loc(\"<stdin>\":21:5)",
+        "reason": "Branch guards, yields and SSA joins need a conditional translation."
+      },
+      {
+        "op": "hivm.hir.anchor",
+        "location": "loc(\"<stdin>\":26:5)",
+        "reason": "No core elaboration rule for this operation."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      23,
+      23
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "kern6_mix_aiv"
+}

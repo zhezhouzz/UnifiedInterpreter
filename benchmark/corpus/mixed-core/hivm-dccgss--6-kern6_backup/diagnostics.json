@@ -1,0 +1,20 @@
+{
+  "whole": [
+    {
+      "op": "hivm.hir.anchor",
+      "location": "loc(\"<stdin>\":19:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "scf.if",
+      "location": "loc(\"<stdin>\":21:5)",
+      "reason": "Branch guards, yields and SSA joins need a conditional translation."
+    },
+    {
+      "op": "hivm.hir.anchor",
+      "location": "loc(\"<stdin>\":26:5)",
+      "reason": "No core elaboration rule for this operation."
+    }
+  ],
+  "slice": []
+}

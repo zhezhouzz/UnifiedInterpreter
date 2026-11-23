@@ -1,0 +1,8 @@
+{
+  "title": "[Performance] AutoVectorizeV2 开启多消费者融合后，在 attention 算子上重复清理和验证 IR",
+  "iid": 1005,
+  "updated_at": "2026-11-21T16:59:12.067+08:00",
+  "state": "closed",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1005",
+  "linked_mrs": []
+}

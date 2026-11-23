@@ -1,0 +1,166 @@
+diff --git a/bishengir/lib/Dialect/HIVM/IR/ExtraBufferOpInterface/ExtraBufferAllocations.cpp b/bishengir/lib/Dialect/HIVM/IR/ExtraBufferOpInterface/ExtraBufferAllocations.cpp
+index 898a7d109..4ed79865b 100644
+--- a/bishengir/lib/Dialect/HIVM/IR/ExtraBufferOpInterface/ExtraBufferAllocations.cpp
++++ b/bishengir/lib/Dialect/HIVM/IR/ExtraBufferOpInterface/ExtraBufferAllocations.cpp
+@@ -278,6 +278,14 @@ LogicalResult VCastOp::allocExtraBuffersIfPossible() {
+         useExtraScheme = true;
+       }
+     }
++    // Per-op attribute set by AlignAllocSize for high-rank VCast.
++    // Only honour it when the current rank is still > 3 — FlattenOps may
++    // have collapsed the shape after the attribute was set.
++    auto curRank = cast<ShapedType>(this->getSrc()[0].getType()).getRank();
++    if (curRank > 3 &&
++        getOperation()->hasAttr(hivm::DisableSizeAlignForCastAttr::name)) {
++      useExtraScheme = true;
++    }
+ 
+     SmallVector<int64_t> extraBufSizes;
+     if (!useExtraScheme) {
+diff --git a/bishengir/lib/Dialect/HIVM/IR/LibraryFunctionOpInterface/LibraryFunctionOpInterfaceImpl.cpp b/bishengir/lib/Dialect/HIVM/IR/LibraryFunctionOpInterface/LibraryFunctionOpInterfaceImpl.cpp
+index 83c342539..c97314c54 100644
+--- a/bishengir/lib/Dialect/HIVM/IR/LibraryFunctionOpInterface/LibraryFunctionOpInterfaceImpl.cpp
++++ b/bishengir/lib/Dialect/HIVM/IR/LibraryFunctionOpInterface/LibraryFunctionOpInterfaceImpl.cpp
+@@ -244,6 +244,15 @@ std::string getVCastOpLibraryCallName(VCastOp concreteOp,
+         disableSizeAlignForCast = true;
+       }
+     }
++    // Per-op attribute set by AlignAllocSize for high-rank VCast.
++    // Only honour it when the current rank is still > 3 — FlattenOps may
++    // have collapsed the shape after the attribute was set.
++    auto curRank =
++        cast<ShapedType>(concreteOp.getSrc()[0].getType()).getRank();
++    if (curRank > 3 &&
++        concreteOp->hasAttr(hivm::DisableSizeAlignForCastAttr::name)) {
++      disableSizeAlignForCast = true;
++    }
+     // Disable size align for overflow cast only when the cast is I32 to I8 or
+     // I16 to I8
+     if (disableSizeAlignForCast && (isI32ToI8 || isI16ToI8))
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/AlignBuffer/HIVMAlignAllocSize.cpp b/bishengir/lib/Dialect/HIVM/Transforms/AlignBuffer/HIVMAlignAllocSize.cpp
+index 44ac6c4d3..9016c20c3 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/AlignBuffer/HIVMAlignAllocSize.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/AlignBuffer/HIVMAlignAllocSize.cpp
+@@ -179,6 +179,20 @@ LogicalResult markAllocAlign(func::FuncOp funcOp) {
+         return WalkResult::skip();
+       }
+ 
++      // Skip alloc size alignment for high-rank (>3) VCast ops.
++      // The cast template only needs the last two dims to be 32×32 aligned
++      // for the transpose-based overflow path.  For rank > 3, padding the
++      // alloc's last two dims inflates memory far more than the extra temp
++      // buffer needed by the _no_size_align template variant.  Setting the
++      // per-op attribute makes ExtraBufferAllocations and
++      // getVCastOpLibraryCallName pick the matching scheme automatically.
++      auto srcMemref = dyn_cast<MemRefType>(castOp.getSrc()[0].getType());
++      if (srcMemref && srcMemref.getRank() > 3) {
++        castOp->setAttr(hivm::DisableSizeAlignForCastAttr::name,
++                        UnitAttr::get(builder.getContext()));
++        return WalkResult::skip();
++      }
++
+       if (failed(alignAllocSize(castOp, builder))) {
+         return WalkResult::interrupt();
+       }
+diff --git a/bishengir/test/Dialect/HIVM/alloc-extra-buffer.mlir b/bishengir/test/Dialect/HIVM/alloc-extra-buffer.mlir
+index a9ad13b11..2f5352aa5 100644
+--- a/bishengir/test/Dialect/HIVM/alloc-extra-buffer.mlir
++++ b/bishengir/test/Dialect/HIVM/alloc-extra-buffer.mlir
+@@ -2653,6 +2653,41 @@ func.func @test_cast_s162s8_1d_extra() attributes {hivm.disable_size_align_for_c
+ 
+ // -----
+ 
++// 4D i32->i8 VCast with per-op disable_size_align_for_cast attribute
++// (set by AlignAllocSize for rank > 3). Uses the ×3 extra buffer scheme.
++// alignedSrcSize = 2 * 2 * ceil(2,32) * ceil(2,8) * i32 = 2*2*32*8 = 1024
++// extraBufSize = 1024 * 3 = 3072
++func.func @test_cast_s322s8_4d_extra() {
++  %src = memref.alloc() : memref<2x2x2x2xi32, #hivm.address_space<ub>>
++  %dst = memref.alloc() : memref<2x2x2x2xi8, #hivm.address_space<ub>>
++
++  // CHECK: memref.alloc() : memref<3072xi32>
++  // CHECK: hivm.hir.vcast{{.*}}temp_buffer({{.*}}memref<3072xi32>)
++  hivm.hir.vcast {hivm.disable_size_align_for_cast} ins(%src : memref<2x2x2x2xi32, #hivm.address_space<ub>>)
++                 outs(%dst : memref<2x2x2x2xi8, #hivm.address_space<ub>>)
++                 round_mode = <truncwithoverflow>
++  return
++}
++
++// -----
++
++// 4D i16->i8 VCast with per-op disable_size_align_for_cast attribute.
++// alignedSrcSize = 2 * 2 * ceil(2,32) * ceil(2,16) * i16 = 2*2*32*16 = 2048
++// extraBufSize = 2048 * 3 = 6144
++func.func @test_cast_s162s8_4d_extra() {
++  %src = memref.alloc() : memref<2x2x2x2xi16, #hivm.address_space<ub>>
++  %dst = memref.alloc() : memref<2x2x2x2xi8, #hivm.address_space<ub>>
++
++  // CHECK: memref.alloc() : memref<6144xi16>
++  // CHECK: hivm.hir.vcast{{.*}}temp_buffer({{.*}}memref<6144xi16>)
++  hivm.hir.vcast {hivm.disable_size_align_for_cast} ins(%src : memref<2x2x2x2xi16, #hivm.address_space<ub>>)
++                 outs(%dst : memref<2x2x2x2xi8, #hivm.address_space<ub>>)
++                 round_mode = <truncwithoverflow>
++  return
++}
++
++// -----
++
+ //===----------------------------------------------------------------------===//
+ // AAR (3D last-axis reduce) tests
+ //===----------------------------------------------------------------------===//
+diff --git a/bishengir/test/Dialect/HIVM/hivm-align-alloc-size.mlir b/bishengir/test/Dialect/HIVM/hivm-align-alloc-size.mlir
+index 650b392de..89f7d7dab 100644
+--- a/bishengir/test/Dialect/HIVM/hivm-align-alloc-size.mlir
++++ b/bishengir/test/Dialect/HIVM/hivm-align-alloc-size.mlir
+@@ -237,13 +237,44 @@ func.func @test_sort_half() {
+ 
+ // -----
+ 
+-// CHECK:           %[[VAL_16:.*]] = memref.alloc() : memref<1x1x1x32x32xi8, #hivm.address_space<ub>>
+-// CHECK:           %[[VAL_17:.*]] = memref.subview %[[VAL_16]][0, 0, 0, 0, 0] [1, 1, 1, 1, 32] [1, 1, 1, 1, 1] : memref<1x1x1x32x32xi8, #hivm.address_space<ub>> to  memref<1x1x1x1x32xi8, strided<[1024, 1024, 1024, 32, 1]>, #hivm.address_space<ub>>
+-// CHECK:           %[[VAL_20:.*]] = scf.for %[[VAL_21:.*]] = %[[VAL_9:.*]] to %[[VAL_10:.*]] step %[[VAL_9:.*]] iter_args(%[[VAL_22:.*]] = %[[VAL_17]]) -> (memref<1x1x1x1x32xi8, strided<[1024, 1024, 1024, 32, 1]>, #hivm.address_space<ub>>)  : i32 {
+-// CHECK:             %[[VAL_28:.*]] = memref.alloc() : memref<1x1x1x32x32xi8, #hivm.address_space<ub>>
+-// CHECK:             %[[VAL_29:.*]] = memref.subview %[[VAL_28]][0, 0, 0, 0, 0] [1, 1, 1, 1, 32] [1, 1, 1, 1, 1] : memref<1x1x1x32x32xi8, #hivm.address_space<ub>> to  memref<1x1x1x1x32xi8, strided<[1024, 1024, 1024, 32, 1]>, #hivm.address_space<ub>>
+-// CHECK:             hivm.hir.vcast ins(%[[VAL_27:.*]] : memref<1x1x1x1x32xi32, strided<[1024, 1024, 1024, 32, 1]>, #hivm.address_space<ub>>) outs(%[[VAL_29]] : memref<1x1x1x1x32xi8, strided<[1024, 1024, 1024, 32, 1]>, #hivm.address_space<ub>>) round_mode = <truncwithoverflow>
+-// CHECK:             scf.yield{{.*}}%[[VAL_29]] : memref<1x1x1x1x32xi8, strided<[1024, 1024, 1024, 32, 1]>, #hivm.address_space<ub>>
++// Rank > 3 i32->i8 VCast: alloc size alignment is skipped and the
++// disable_size_align_for_cast attribute is set on the op.
++// CHECK-LABEL: func @test_cast_s322s8_4d
++// CHECK: %[[SRC:.*]] = memref.alloc() : memref<2x2x2x2xi32, #hivm.address_space<ub>>
++// CHECK: %[[DST:.*]] = memref.alloc() : memref<2x2x2x2xi8, #hivm.address_space<ub>>
++// CHECK: hivm.hir.vcast {hivm.disable_size_align_for_cast} ins(%[[SRC]] : memref<2x2x2x2xi32, #hivm.address_space<ub>>) outs(%[[DST]] : memref<2x2x2x2xi8, #hivm.address_space<ub>>) round_mode = <truncwithoverflow>
++func.func @test_cast_s322s8_4d() {
++  %s32 = memref.alloc() : memref<2x2x2x2xi32, #hivm.address_space<ub>>
++  %s8 = memref.alloc() : memref<2x2x2x2xi8, #hivm.address_space<ub>>
++  hivm.hir.vcast ins(%s32 : memref<2x2x2x2xi32, #hivm.address_space<ub>>)
++                outs(%s8 : memref<2x2x2x2xi8, #hivm.address_space<ub>>)
++                round_mode = #hivm.round_mode<truncwithoverflow>
++  return
++}
++
++// -----
++
++// Rank > 3 i16->i8 VCast: same behaviour as i32->i8.
++// CHECK-LABEL: func @test_cast_s162s8_4d
++// CHECK: %[[SRC:.*]] = memref.alloc() : memref<2x2x2x2xi16, #hivm.address_space<ub>>
++// CHECK: %[[DST:.*]] = memref.alloc() : memref<2x2x2x2xi8, #hivm.address_space<ub>>
++// CHECK: hivm.hir.vcast {hivm.disable_size_align_for_cast} ins(%[[SRC]] : memref<2x2x2x2xi16, #hivm.address_space<ub>>) outs(%[[DST]] : memref<2x2x2x2xi8, #hivm.address_space<ub>>) round_mode = <truncwithoverflow>
++func.func @test_cast_s162s8_4d() {
++  %s16 = memref.alloc() : memref<2x2x2x2xi16, #hivm.address_space<ub>>
++  %s8 = memref.alloc() : memref<2x2x2x2xi8, #hivm.address_space<ub>>
++  hivm.hir.vcast ins(%s16 : memref<2x2x2x2xi16, #hivm.address_space<ub>>)
++                outs(%s8 : memref<2x2x2x2xi8, #hivm.address_space<ub>>)
++                round_mode = #hivm.round_mode<truncwithoverflow>
++  return
++}
++
++// -----
++
++// CHECK:           %[[VAL_16:.*]] = memref.alloc(){{.*}}: memref<1x1x1x1x32xi8, #hivm.address_space<ub>>
++// CHECK:           %[[VAL_20:.*]] = scf.for %[[VAL_21:.*]] = %[[VAL_9:.*]] to %[[VAL_10:.*]] step %[[VAL_9:.*]] iter_args(%[[VAL_22:.*]] = %[[VAL_17:.*]]) -> (memref<1x1x1x1x32xi8, #hivm.address_space<ub>>)  : i32 {
++// CHECK-DAG:             %[[VAL_28:.*]] = memref.alloc(){{.*}}: memref<1x1x1x1x32xi8, #hivm.address_space<ub>>
++// CHECK-DAG:             hivm.hir.vcast {hivm.disable_size_align_for_cast} ins(%[[VAL_27:.*]] : memref<1x1x1x1x32xi32, #hivm.address_space<ub>>) outs(%[[VAL_28]] : memref<1x1x1x1x32xi8, #hivm.address_space<ub>>) round_mode = <truncwithoverflow>
++// CHECK-DAG:             scf.yield %[[VAL_28]] : memref<1x1x1x1x32xi8, {{.*}}#hivm.address_space<ub>>
+ // CHECK:           }
+ func.func @triton_yield_iter_args(%arg0: i64, %arg1: memref<?xi8, #hivm.address_space<gm>>, %arg2: memref<?xi8, #hivm.address_space<gm>>, %arg3: memref<?xi8, #hivm.address_space<gm>>, %arg4: memref<?xi8, #hivm.address_space<gm>>, %arg5: memref<?xi8, #hivm.address_space<gm>>, %arg6: i32,  %arg7: i32,  %arg8: i32) {
+   %c1_i32 = arith.constant 1 : i32

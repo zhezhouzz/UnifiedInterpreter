@@ -1,0 +1,40 @@
+{
+  "whole": [
+    {
+      "op": "hivm.hir.nd2nz",
+      "location": "loc(\"<stdin>\":15:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.nd2nz",
+      "location": "loc(\"<stdin>\":18:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.mmadL1",
+      "location": "loc(\"<stdin>\":26:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.nd2nz",
+      "location": "loc(\"<stdin>\":29:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.nd2nz",
+      "location": "loc(\"<stdin>\":33:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.mmadL1",
+      "location": "loc(\"<stdin>\":38:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.fixpipe",
+      "location": "loc(\"<stdin>\":43:5)",
+      "reason": "No core elaboration rule for this operation."
+    }
+  ],
+  "slice": []
+}

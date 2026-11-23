@@ -1,0 +1,107 @@
+{
+  "group": "repair-regression",
+  "id": "mr-3495",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-hivm-insert-load-store-for-mix-cv"
+  ],
+  "projection": [
+    {
+      "line": 10,
+      "operation": "%5 = hivm.hir.vrelu ins(%3 : tensor<16x16xf32>) outs(%4 : tensor<16x16xf32>) -> tensor<16x16xf32>"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_V"
+    ],
+    "events": [],
+    "units": [
+      "unit_vrelu"
+    ]
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/bd112220f039cde86d4c7e70dace419fb826a78c/bishengir/test/Dialect/HIVM/Regbase/insert-load-store-core-ratio.mlir",
+  "stage": "repair test first optimization; see argv",
+  "split_index": 0,
+  "upstream_path": "bishengir/test/Dialect/HIVM/Regbase/insert-load-store-core-ratio.mlir",
+  "repair": {
+    "issue": null,
+    "mr": "3495",
+    "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/3495",
+    "commit": "bd112220f039cde86d4c7e70dace419fb826a78c",
+    "parent": "3d3513d545ef772592db6c17635927e46baeaa06",
+    "title": "fix(core_ratio): disable tight buffers for CV11 on Ascend950",
+    "tests": [
+      "bishengir/test/Conversion/HIVMToLLVM/sync-block-core-ratio-invalid.mlir",
+      "bishengir/test/Conversion/HIVMToLLVM/sync-block-core-ratio.mlir",
+      "bishengir/test/Dialect/HIVM/Regbase/insert-load-store-core-ratio.mlir"
+    ],
+    "diff_scope": "merge-base to pinned MR head"
+  },
+  "translation": {
+    "status": "unsupported",
+    "function": "cv11",
+    "diagnostics": [
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":3:14)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":5:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.fixpipe",
+        "location": "loc(\"<stdin>\":6:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":7:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.load",
+        "location": "loc(\"<stdin>\":8:10)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":9:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.vrelu",
+        "location": "loc(\"<stdin>\":10:10)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "bufferization.materialize_in_destination",
+        "location": "loc(\"<stdin>\":11:5)",
+        "reason": "No core elaboration rule for this operation."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      10,
+      10
+    ],
+    "status": "unsupported",
+    "diagnostics": [
+      {
+        "op": "hivm.hir.vrelu",
+        "location": "loc(\"<stdin>\":10:10)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      }
+    ]
+  },
+  "entry_for_projection": "cv11"
+}

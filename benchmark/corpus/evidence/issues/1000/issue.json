@@ -1,0 +1,8 @@
+{
+  "title": "[Bug]: CustomOps for __builtin_indirect_atomic do not follow Destination-Passing Style",
+  "iid": 1000,
+  "updated_at": "2026-11-19T15:15:50.897+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1000",
+  "linked_mrs": []
+}

@@ -1,0 +1,15 @@
+{
+  "whole": [
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":3:14)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.pipe_barrier",
+      "location": "loc(\"<stdin>\":8:5)",
+      "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+    }
+  ],
+  "slice": []
+}

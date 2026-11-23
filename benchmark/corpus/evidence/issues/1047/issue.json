@@ -1,0 +1,10 @@
+{
+  "title": "[Arange] 3D 标量回退路径缺少 PIPE_V/PIPE_S 同步",
+  "iid": 1047,
+  "updated_at": "2026-11-23T11:25:19.260+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1047",
+  "linked_mrs": [
+    "5282"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "title": "[RFC]: Ascend960 MMAD（mmadL1）异构 A/B 数据类型与 packed s4 支持",
+  "iid": 988,
+  "updated_at": "2026-11-18T18:14:26.513+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/988",
+  "linked_mrs": [
+    "4962"
+  ]
+}

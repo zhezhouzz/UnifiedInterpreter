@@ -1,0 +1,55 @@
+{
+  "whole": [
+    {
+      "op": "hivm.hir.set_ffts_base_addr",
+      "location": "loc(\"<stdin>\":6:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":14:14)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.nd2nz",
+      "location": "loc(\"<stdin>\":15:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.nd2nz",
+      "location": "loc(\"<stdin>\":18:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.nd2nz",
+      "location": "loc(\"<stdin>\":20:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.nd2nz",
+      "location": "loc(\"<stdin>\":23:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.mmadmxL1",
+      "location": "loc(\"<stdin>\":29:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.fixpipe",
+      "location": "loc(\"<stdin>\":34:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":36:16)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":37:16)",
+      "reason": "No core elaboration rule for this operation."
+    }
+  ],
+  "slice": []
+}

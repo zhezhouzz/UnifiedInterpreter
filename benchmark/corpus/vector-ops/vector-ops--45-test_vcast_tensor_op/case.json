@@ -1,0 +1,1033 @@
+{
+  "group": "vector-ops",
+  "id": "vector-ops--45-test_vcast_tensor_op",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "projection": [
+    {
+      "line": 19,
+      "operation": "%15 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%1 : tensor<2x16xf32>) -> tensor<2x16xf32>"
+    },
+    {
+      "line": 20,
+      "operation": "%16 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%4 : tensor<2x16xi16>) round_mode = <round> -> tensor<2x16xi16>"
+    },
+    {
+      "line": 21,
+      "operation": "%17 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%4 : tensor<2x16xi16>) round_mode = <ceil> -> tensor<2x16xi16>"
+    },
+    {
+      "line": 22,
+      "operation": "%18 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%4 : tensor<2x16xi16>) round_mode = <floor> -> tensor<2x16xi16>"
+    },
+    {
+      "line": 23,
+      "operation": "%19 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%4 : tensor<2x16xi16>) -> tensor<2x16xi16>"
+    },
+    {
+      "line": 24,
+      "operation": "%20 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%4 : tensor<2x16xi16>) round_mode = <trunc> -> tensor<2x16xi16>"
+    },
+    {
+      "line": 25,
+      "operation": "%21 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%5 : tensor<2x16xi32>) round_mode = <round> -> tensor<2x16xi32>"
+    },
+    {
+      "line": 26,
+      "operation": "%22 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%5 : tensor<2x16xi32>) round_mode = <ceil> -> tensor<2x16xi32>"
+    },
+    {
+      "line": 27,
+      "operation": "%23 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%5 : tensor<2x16xi32>) round_mode = <floor> -> tensor<2x16xi32>"
+    },
+    {
+      "line": 28,
+      "operation": "%24 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%5 : tensor<2x16xi32>) -> tensor<2x16xi32>"
+    },
+    {
+      "line": 29,
+      "operation": "%25 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%5 : tensor<2x16xi32>) round_mode = <trunc> -> tensor<2x16xi32>"
+    },
+    {
+      "line": 30,
+      "operation": "%26 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%2 : tensor<2x16xi4>) -> tensor<2x16xi4>"
+    },
+    {
+      "line": 31,
+      "operation": "%27 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%2 : tensor<2x16xi4>) round_mode = <round> -> tensor<2x16xi4>"
+    },
+    {
+      "line": 32,
+      "operation": "%28 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%2 : tensor<2x16xi4>) round_mode = <ceil> -> tensor<2x16xi4>"
+    },
+    {
+      "line": 33,
+      "operation": "%29 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%2 : tensor<2x16xi4>) round_mode = <floor> -> tensor<2x16xi4>"
+    },
+    {
+      "line": 34,
+      "operation": "%30 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%2 : tensor<2x16xi4>) -> tensor<2x16xi4>"
+    },
+    {
+      "line": 35,
+      "operation": "%31 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%2 : tensor<2x16xi4>) round_mode = <trunc> -> tensor<2x16xi4>"
+    },
+    {
+      "line": 36,
+      "operation": "%32 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%3 : tensor<2x16xi8>) -> tensor<2x16xi8>"
+    },
+    {
+      "line": 37,
+      "operation": "%33 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%3 : tensor<2x16xi8>) round_mode = <round> -> tensor<2x16xi8>"
+    },
+    {
+      "line": 38,
+      "operation": "%34 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%3 : tensor<2x16xi8>) round_mode = <ceil> -> tensor<2x16xi8>"
+    },
+    {
+      "line": 39,
+      "operation": "%35 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%3 : tensor<2x16xi8>) round_mode = <floor> -> tensor<2x16xi8>"
+    },
+    {
+      "line": 40,
+      "operation": "%36 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%3 : tensor<2x16xi8>) -> tensor<2x16xi8>"
+    },
+    {
+      "line": 41,
+      "operation": "%37 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%3 : tensor<2x16xi8>) round_mode = <trunc> -> tensor<2x16xi8>"
+    },
+    {
+      "line": 42,
+      "operation": "%38 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%8 : tensor<2x16xui8>) -> tensor<2x16xui8>"
+    },
+    {
+      "line": 43,
+      "operation": "%39 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%8 : tensor<2x16xui8>) round_mode = <round> -> tensor<2x16xui8>"
+    },
+    {
+      "line": 44,
+      "operation": "%40 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%8 : tensor<2x16xui8>) round_mode = <ceil> -> tensor<2x16xui8>"
+    },
+    {
+      "line": 45,
+      "operation": "%41 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%8 : tensor<2x16xui8>) round_mode = <floor> -> tensor<2x16xui8>"
+    },
+    {
+      "line": 46,
+      "operation": "%42 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%8 : tensor<2x16xui8>) -> tensor<2x16xui8>"
+    },
+    {
+      "line": 47,
+      "operation": "%43 = hivm.hir.vcast ins(%0 : tensor<2x16xf16>) outs(%8 : tensor<2x16xui8>) round_mode = <trunc> -> tensor<2x16xui8>"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_V"
+    ],
+    "events": [],
+    "units": [
+      "unit_vcast"
+    ]
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/IR/vector-ops.mlir",
+  "upstream_path": "bishengir/test/Dialect/HIVM/IR/vector-ops.mlir",
+  "split_index": 45,
+  "stage": "intra-core sync pass",
+  "function": "test_vcast_tensor_op",
+  "translation": {
+    "status": "unsupported",
+    "function": "test_vcast_tensor_op",
+    "diagnostics": [
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":3:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":4:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":5:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":6:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":7:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":8:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":9:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":10:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":11:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":12:10)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":13:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":14:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":15:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":16:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":17:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":18:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":19:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":20:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":21:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":22:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":23:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":24:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":25:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":26:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":27:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":28:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":29:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":30:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":31:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":32:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":33:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":34:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":35:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":36:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":37:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":38:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":39:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":40:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":41:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":42:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":43:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":44:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":45:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":46:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":47:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":48:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":49:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":50:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":51:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":52:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":53:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":54:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":55:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":56:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":57:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":58:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":59:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":60:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":61:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":62:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":63:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":64:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":65:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":66:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":67:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":68:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":69:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":70:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":71:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":72:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":73:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":74:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":75:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":76:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":77:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":78:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":79:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":80:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":81:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":82:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":83:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":84:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":85:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":86:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":87:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":88:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":89:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":90:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":91:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":92:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":93:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":94:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":95:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":96:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":97:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":98:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":99:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":100:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":101:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":102:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":103:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":104:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":105:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":106:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":107:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":108:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":109:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":110:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":111:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":112:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":113:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":114:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":115:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":116:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":117:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":118:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":119:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":120:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":121:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":122:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":123:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":124:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":125:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":126:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":127:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":128:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":129:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":130:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":131:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":132:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":133:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":134:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":135:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":136:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":137:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":138:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":139:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":140:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":141:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":142:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":143:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":144:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":145:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":146:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":147:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      19,
+      47
+    ],
+    "status": "unsupported",
+    "diagnostics": [
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":19:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":20:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":21:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":22:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":23:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":24:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":25:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":26:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":27:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":28:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":29:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":30:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":31:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":32:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":33:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":34:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":35:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":36:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":37:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":38:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":39:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":40:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":41:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":42:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":43:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":44:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":45:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":46:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":47:11)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      }
+    ]
+  },
+  "entry_for_projection": "test_vcast_tensor_op"
+}

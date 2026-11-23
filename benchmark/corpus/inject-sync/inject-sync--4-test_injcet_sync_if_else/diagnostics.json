@@ -1,0 +1,15 @@
+{
+  "whole": [
+    {
+      "op": "hivm.hir.pipe_barrier",
+      "location": "loc(\"<stdin>\":11:5)",
+      "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+    },
+    {
+      "op": "scf.if",
+      "location": "loc(\"<stdin>\":18:10)",
+      "reason": "Branch guards, yields and SSA joins need a conditional translation."
+    }
+  ],
+  "slice": []
+}

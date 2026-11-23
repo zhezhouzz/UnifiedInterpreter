@@ -1,0 +1,76 @@
+{
+  "group": "custom-macro",
+  "id": "hivm-gss-custom-macro-wait-inject-set--0-test_custom_macro_wait_inject_set",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "projection": [
+    {
+      "line": 9,
+      "operation": "hivm.hir.set_flag[<PIPE_V>, <PIPE_MTE2>, <EVENT_ID0>]"
+    },
+    {
+      "line": 10,
+      "operation": "hivm.hir.wait_flag[<PIPE_V>, <PIPE_MTE2>, <EVENT_ID0>]"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_MTE2",
+      "PIPE_V"
+    ],
+    "events": [
+      "EVENT_ID0"
+    ],
+    "units": []
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/SyncSolver/hivm-gss-custom-macro-wait-inject-set.mlir",
+  "upstream_path": "bishengir/test/Dialect/HIVM/SyncSolver/hivm-gss-custom-macro-wait-inject-set.mlir",
+  "split_index": 0,
+  "stage": "intra-core sync pass",
+  "function": "test_custom_macro_wait_inject_set",
+  "translation": {
+    "status": "unsupported",
+    "function": "test_custom_macro_wait_inject_set",
+    "diagnostics": [
+      {
+        "op": "hivm.hir.custom_macro",
+        "location": "loc(\"<stdin>\":8:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":11:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":13:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":14:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      9,
+      10
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "test_custom_macro_wait_inject_set"
+}

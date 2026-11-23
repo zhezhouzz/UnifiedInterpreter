@@ -1,0 +1,95 @@
+{
+  "group": "tutorial",
+  "id": "vector_sum",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-hivm-graph-sync-solver=solver-version=v2"
+  ],
+  "projection": [
+    {
+      "line": 9,
+      "operation": "hivm.hir.load ins(%arg0 : memref<32xf32, #hivm.address_space<gm>>) outs(%0 : memref<32xf32, #hivm.address_space<ub>>)"
+    },
+    {
+      "line": 10,
+      "operation": "hivm.hir.load ins(%arg1 : memref<32xf32, #hivm.address_space<gm>>) outs(%1 : memref<32xf32, #hivm.address_space<ub>>)"
+    },
+    {
+      "line": 11,
+      "operation": "hivm.hir.set_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]"
+    },
+    {
+      "line": 12,
+      "operation": "hivm.hir.wait_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]"
+    },
+    {
+      "line": 13,
+      "operation": "hivm.hir.vadd ins(%0, %1 : memref<32xf32, #hivm.address_space<ub>>, memref<32xf32, #hivm.address_space<ub>>) outs(%2 : memref<32xf32, #hivm.address_space<ub>>)"
+    },
+    {
+      "line": 14,
+      "operation": "hivm.hir.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]"
+    },
+    {
+      "line": 15,
+      "operation": "hivm.hir.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]"
+    },
+    {
+      "line": 16,
+      "operation": "hivm.hir.store ins(%2 : memref<32xf32, #hivm.address_space<ub>>) outs(%arg2 : memref<32xf32, #hivm.address_space<gm>>)"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_MTE2",
+      "PIPE_MTE3",
+      "PIPE_V"
+    ],
+    "events": [
+      "EVENT_ID0"
+    ],
+    "units": [
+      "unit_load",
+      "unit_store",
+      "unit_vadd"
+    ]
+  },
+  "stage": "GSS after manual specialization of a Python expression",
+  "url": "https://github.com/Ascend/triton-ascend-ops/blob/d6986ddc6f21ebe5e36805c2c03bd4a481773775/tutorial/basic/001-vector_add.py#L46",
+  "function": "npu_vector_add_kernel",
+  "line": 46,
+  "expression": "x1 + y1",
+  "arguments": [
+    "x1",
+    "y1"
+  ],
+  "dtype": "f32",
+  "scope": "32-lane tile, scalar names broadcast externally; input names supplied by caller; offsets computed as integers, no pointer dereference or Triton frontend",
+  "translation": {
+    "status": "unsupported",
+    "function": "vector_sum",
+    "diagnostics": [
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":17:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      9,
+      16
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "vector_sum",
+  "kernel_reference": "LLM-authored single-issuer timing model of entire specialized input. Fresh logical self-fences model the internal barrier and terminal drain. Compare user-operation ordering only; extra fence events and extra serialization are allowed in this reference."
+}

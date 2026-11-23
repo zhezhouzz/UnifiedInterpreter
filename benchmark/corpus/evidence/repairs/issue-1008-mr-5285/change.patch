@@ -1,0 +1,1809 @@
+diff --git a/bishengir/include/bishengir/Dialect/HFusion/IR/HFusionOps.td b/bishengir/include/bishengir/Dialect/HFusion/IR/HFusionOps.td
+index 58afc6d09..9d0c99ac5 100644
+--- a/bishengir/include/bishengir/Dialect/HFusion/IR/HFusionOps.td
++++ b/bishengir/include/bishengir/Dialect/HFusion/IR/HFusionOps.td
+@@ -66,6 +66,11 @@ def PrintOp : HFusion_Op<"print">,
+   let assemblyFormat = [{
+     $prefix attr-dict $arg `:` type($arg)
+   }];
++  // The Triton adapter uses SymbolTable::renameToUnique for its print callees.
++  let extraClassDeclaration = !subst("$mnemonic", opName, [{
++    static constexpr ::llvm::StringLiteral tritonAdapterSymbolPattern =
++        "^triton_$mnemonic(_[0-9]+)?$";
++  }]);
+ }
+ 
+ def AssertOp : HFusion_Op<"assert">,
+diff --git a/bishengir/include/bishengir/Dialect/HFusion/Utils/Utils.h b/bishengir/include/bishengir/Dialect/HFusion/Utils/Utils.h
+index 9d8df1a5e..ca2bac14d 100644
+--- a/bishengir/include/bishengir/Dialect/HFusion/Utils/Utils.h
++++ b/bishengir/include/bishengir/Dialect/HFusion/Utils/Utils.h
+@@ -48,6 +48,10 @@ FailureOr<hfusion::CompareFn> selectI1Predicate(arith::CmpIOp op);
+ 
+ namespace hfusion {
+ 
++/// Read the tt.print properties carried by a Triton adapter declaration.
++std::optional<PrintOp::Properties>
++getTritonPrintProperties(func::FuncOp callee);
++
+ /// Create arith index cast op to cast value `v` to index type.
+ /// If `isUnsigned` is true, create `arith.index_castui`, otherwise create
+ /// `arith.index_cast`.
+diff --git a/bishengir/include/bishengir/Dialect/HIVM/Pipelines/HIVMPipelineBase.h b/bishengir/include/bishengir/Dialect/HIVM/Pipelines/HIVMPipelineBase.h
+index 7dee52a96..2902139c8 100644
+--- a/bishengir/include/bishengir/Dialect/HIVM/Pipelines/HIVMPipelineBase.h
++++ b/bishengir/include/bishengir/Dialect/HIVM/Pipelines/HIVMPipelineBase.h
+@@ -38,6 +38,9 @@ struct HIVMPipelineOptions
+ #include "bishengir/Tools/bishengir-compile/PassPipelineOptions.cpp.inc"
+ };
+ 
++/// Insert, propagate and lower layout conversions around Cube operations.
++void addOptimizedConvertLayoutPipeline(OpPassManager &pm);
++
+ /// A canonicalization pipeline for HIVM pipeline.
+ void canonicalizationHIVMPipeline(OpPassManager &pm);
+ 
+diff --git a/bishengir/include/bishengir/Dialect/HIVM/Pipelines/Passes.h b/bishengir/include/bishengir/Dialect/HIVM/Pipelines/Passes.h
+index 9a51801e4..a5230b34b 100644
+--- a/bishengir/include/bishengir/Dialect/HIVM/Pipelines/Passes.h
++++ b/bishengir/include/bishengir/Dialect/HIVM/Pipelines/Passes.h
+@@ -31,12 +31,11 @@ namespace hivm {
+ // Building and Registering.
+ //===----------------------------------------------------------------------===//
+ 
+-/// Adds the "OptimizeHIVM" pipeline to the `OpPassManager`. This is the
+-/// standard pipeline for optimizing HIVM dialect IR.
++/// Optimize HIVM IR for memory-based targets.
+ void buildOptimizeHIVMPipeline(OpPassManager &pm,
+                                const HIVMPipelineOptions &options);
+ 
+-/// Register the "LowerHIVM" pipeline.
++/// Register the memory-based `optimize-hivm-pipeline`.
+ void registerLowerHIVMPipelines();
+ 
+ } // namespace hivm
+diff --git a/bishengir/include/bishengir/Dialect/HIVM/Pipelines/regbase/Passes.h b/bishengir/include/bishengir/Dialect/HIVM/Pipelines/regbase/Passes.h
+index ad2481ac1..38f996bb0 100644
+--- a/bishengir/include/bishengir/Dialect/HIVM/Pipelines/regbase/Passes.h
++++ b/bishengir/include/bishengir/Dialect/HIVM/Pipelines/regbase/Passes.h
+@@ -25,12 +25,11 @@ namespace regbase {
+ // Building and Registering.
+ //===----------------------------------------------------------------------===//
+ 
++/// Optimize tensor-form HIVM IR for register-based targets.
+ void buildHIVMTensorOptimizations(
+     OpPassManager &pm, const HIVMPipelineOptions &hivmPipelineOptions);
+ 
+-/// Adds the "LowerHIVM" pipeline to the `OpPassManager`. This is the
+-/// standard pipeline for lowering from HIVM dialect to LLVM IR.
+-/// \note This includes the `ConvertToHIVM` pipeline.
++/// Bufferize HIVM IR and run the register-based memory and sync passes.
+ void buildLowerHIVMPipelines(OpPassManager &pm,
+                              const HIVMPipelineOptions &hivmPipelineOptions);
+ 
+@@ -40,7 +39,7 @@ void buildLowerHIVMPipelines(OpPassManager &pm,
+ /// Idempotent; called by the pipeline builders themselves.
+ void registerKernelKindPassesForRegbase();
+ 
+-/// Register the "LowerHIVM" pipeline.
++/// Register the register-based `lower-hivm-pipeline`.
+ void registerLowerHIVMPipelines();
+ 
+ /// Adds sync-block-lock finalize passes (insert infer-sync-block-lock-num/init
+diff --git a/bishengir/include/bishengir/Tools/Utils/Utils.h b/bishengir/include/bishengir/Tools/Utils/Utils.h
+index 340055a49..64d1a5245 100644
+--- a/bishengir/include/bishengir/Tools/Utils/Utils.h
++++ b/bishengir/include/bishengir/Tools/Utils/Utils.h
+@@ -125,8 +125,9 @@ std::string getBiShengInstallPath();
+ std::string getBiShengCompilerInstallPath();
+ 
+ /// Get the absolute path of the current executable. Resolves symlinks and
+-/// handles invocation via PATH. \p argv0 is argv[0] from main, \p mainAddr
+-/// is reinterpret_cast<void*>(main). Returns empty string on failure.
++/// handles invocation via PATH. \p argv0 is argv[0] from main. \p mainAddr
++/// is the address of a static object in the executable. Returns an empty string
++/// on failure.
+ std::string getExecutablePath(const char *argv0, void *mainAddr);
+ 
+ /// Prints a diagnostic to llvm::outs() and return a LogicalResult.
+diff --git a/bishengir/include/bishengir/Tools/bishengir-compile/Config.h b/bishengir/include/bishengir/Tools/bishengir-compile/Config.h
+index 491e21a77..6788b0d25 100644
+--- a/bishengir/include/bishengir/Tools/bishengir-compile/Config.h
++++ b/bishengir/include/bishengir/Tools/bishengir-compile/Config.h
+@@ -107,13 +107,8 @@ public:
+            mlir::hacc::utils::supportsRegBaseVectorLowering(getTarget());
+   }
+ 
+-  /// Returns true if layout optimization should be enabled (Ascend950/960
+-  /// only).
+-  bool shouldEnableLayoutOptimization() const {
+-    return getEnableLayoutOptimization() &&
+-           (mlir::hacc::utils::isAscend950(getTarget()) ||
+-            mlir::hacc::utils::isAscend960(getTarget()));
+-  }
++  /// Disable layout conversion for modules with unsupported operations.
++  void disableUnsupportedLayoutOptimization(mlir::ModuleOp module);
+ 
+   /// Set the path of the bishengir-compile executable (e.g. argv[0]).
+   /// Used to locate the default aicore bitcode files in ../lib.
+diff --git a/bishengir/include/bishengir/Tools/bishengir-compile/regbase/Utility.h b/bishengir/include/bishengir/Tools/bishengir-compile/regbase/Utility.h
+index fbf41c898..af145a783 100644
+--- a/bishengir/include/bishengir/Tools/bishengir-compile/regbase/Utility.h
++++ b/bishengir/include/bishengir/Tools/bishengir-compile/regbase/Utility.h
+@@ -31,9 +31,6 @@
+ namespace bishengir {
+ namespace regbase {
+ 
+-llvm::LogicalResult inferLayoutOptimization(
+-    mlir::ModuleOp &module, BiShengIRCompileMainConfig &config);
+-
+ llvm::LogicalResult inferMixedCV(mlir::ModuleOp &module,
+                                  BiShengIRCompileMainConfig &config);
+ 
+diff --git a/bishengir/include/bishengir/Tools/hivmc/Utility.h b/bishengir/include/bishengir/Tools/hivmc/Utility.h
+index 5055d0ba4..3fbb2582b 100644
+--- a/bishengir/include/bishengir/Tools/hivmc/Utility.h
++++ b/bishengir/include/bishengir/Tools/hivmc/Utility.h
+@@ -178,8 +178,9 @@ bool verifyEarlyAuxSha(mlir::ModuleOp module,
+                        const std::map<SubCoreTarget, std::string> &earlyPaths);
+ 
+ /// Get the absolute path of the current executable. Resolves symlinks and
+-/// handles invocation via PATH. \p argv0 is argv[0] from main, \p mainAddr
+-/// is reinterpret_cast<void*>(main). Returns empty string on failure.
++/// handles invocation via PATH. \p argv0 is argv[0] from main. \p mainAddr
++/// is the address of a static object in the executable. Returns an empty string
++/// on failure.
+ std::string getExecutablePath(const char *argv0, void *mainAddr);
+ 
+ } // namespace bishengir
+diff --git a/bishengir/lib/Dialect/HFusion/Transforms/AdaptTritonKernel.cpp b/bishengir/lib/Dialect/HFusion/Transforms/AdaptTritonKernel.cpp
+index e397702c7..2d6f369f9 100644
+--- a/bishengir/lib/Dialect/HFusion/Transforms/AdaptTritonKernel.cpp
++++ b/bishengir/lib/Dialect/HFusion/Transforms/AdaptTritonKernel.cpp
+@@ -19,6 +19,7 @@
+ #include "bishengir/Dialect/HFusion/IR/HFusion.h"
+ #include "bishengir/Dialect/HFusion/IR/HFusionImpl.h"
+ #include "bishengir/Dialect/HFusion/Transforms/Passes.h"
++#include "bishengir/Dialect/HFusion/Utils/Utils.h"
+ #include "bishengir/Dialect/SCF/Transforms/Transform.h"
+ #include "bishengir/Dialect/Utils/Util.h"
+ #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+@@ -215,53 +216,22 @@ void markSyncBlockLockArgument(func::FuncOp funcOp) {
+           funcOp.getContext(), hacc::KernelArgType::kSyncBlockLock)});
+ }
+ 
+-/// triton print op is converted triton_print func call in triton adaptor,
+-/// therefore this pattern match func call of which func name starts with
+-/// "triton_print".
+ struct TritonPrintToHFusionPrintPattern
+     : public OpRewritePattern<func::CallOp> {
+   using OpRewritePattern<func::CallOp>::OpRewritePattern;
+ 
+-  static constexpr StringRef printFuncName = "triton_print";
+-
+   LogicalResult matchAndRewrite(func::CallOp callOp,
+                                 PatternRewriter &rewriter) const override {
+-    auto funcOp =
+-        mlir::utils::getCalledFunction<func::FuncOp, func::CallOp>(callOp);
+-    if (!funcOp) {
+-      return rewriter.notifyMatchFailure(
+-          callOp, "Called funcOp is null");
+-    }
+-    auto funcName = funcOp.getSymName();
+-    if (!funcName.starts_with(printFuncName)) {
+-      return rewriter.notifyMatchFailure(
+-          callOp, funcName + " does not starts with the prefix triton_print");
+-    }
+-    auto printOpNameStr = hfusion::PrintOp::getOperationName();
+-    auto printOpName =
+-        mlir::OperationName(printOpNameStr, rewriter.getContext());
+-    auto prefixAttrName = hfusion::PrintOp::getPrefixAttrName(printOpName);
+-    bool hasPrefixAttr = funcOp->hasAttr(prefixAttrName);
+-    if (!hasPrefixAttr) {
+-      return rewriter.notifyMatchFailure(
+-          funcOp, funcName + " has no attribute of prefix");
+-    }
+-    auto hexAttrName = hfusion::PrintOp::getHexAttrName(printOpName);
+-    bool hasHexAttr = funcOp->hasAttr(hexAttrName);
+-    if (!hasHexAttr) {
+-      return rewriter.notifyMatchFailure(funcOp,
+-                                         funcName + " has no attribute of hex");
+-    }
+-
+-    auto prefixAttr = funcOp->getAttrOfType<StringAttr>(prefixAttrName);
+-    auto hexAttr = funcOp->getAttrOfType<BoolAttr>(hexAttrName);
+-    for (Value operand : callOp.getArgOperands()) {
+-      rewriter.create<hfusion::PrintOp>(callOp.getLoc(), prefixAttr, hexAttr,
+-                                        operand);
+-    }
++    auto callee = dyn_cast_if_present<func::FuncOp>(callOp.resolveCallable());
++    auto print = hfusion::getTritonPrintProperties(callee);
++    if (!print)
++      return failure();
++    for (Value operand : callOp.getArgOperands())
++      rewriter.create<hfusion::PrintOp>(callOp.getLoc(), print->prefix,
++                                        print->hex, operand);
+     rewriter.eraseOp(callOp);
+-    rewriter.eraseOp(funcOp);
+-
++    if (SymbolTable::symbolKnownUseEmpty(callee, callee->getParentOp()))
++      rewriter.eraseOp(callee);
+     return success();
+   }
+ };
+diff --git a/bishengir/lib/Dialect/HFusion/Utils/Utils.cpp b/bishengir/lib/Dialect/HFusion/Utils/Utils.cpp
+index 5e035e897..2dedd8802 100644
+--- a/bishengir/lib/Dialect/HFusion/Utils/Utils.cpp
++++ b/bishengir/lib/Dialect/HFusion/Utils/Utils.cpp
+@@ -30,6 +30,7 @@
+ #include "llvm/Support/Casting.h"
+ #include "llvm/Support/Debug.h"
+ #include "llvm/Support/MathExtras.h"
++#include "llvm/Support/Regex.h"
+ 
+ #include "mlir/Analysis/SliceAnalysis.h"
+ #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+@@ -51,6 +52,22 @@ using namespace mlir::hfusion;
+ 
+ using namespace mlir::utils::debugger;
+ 
++std::optional<hfusion::PrintOp::Properties>
++hfusion::getTritonPrintProperties(func::FuncOp callee) {
++  static const llvm::Regex printSymbol(PrintOp::tritonAdapterSymbolPattern);
++  if (!callee || !callee.isExternal() ||
++      callee.getFunctionType().getNumResults() ||
++      !printSymbol.match(callee.getSymName()))
++    return std::nullopt;
++
++  PrintOp::Properties properties;
++  for (NamedAttribute attr : callee->getDiscardableAttrs())
++    PrintOp::setInherentAttr(properties, attr.getName(), attr.getValue());
++  if (!properties.prefix || !properties.hex)
++    return std::nullopt;
++  return properties;
++}
++
+ /// int n:
+ ///   (1) b = a + 2^(n-1)
+ ///   (2) d = c % 2^(n)
+diff --git a/bishengir/lib/Dialect/HIVM/Pipelines/HIVMPipelineBase.cpp b/bishengir/lib/Dialect/HIVM/Pipelines/HIVMPipelineBase.cpp
+index b068ffff5..dd373cce2 100644
+--- a/bishengir/lib/Dialect/HIVM/Pipelines/HIVMPipelineBase.cpp
++++ b/bishengir/lib/Dialect/HIVM/Pipelines/HIVMPipelineBase.cpp
+@@ -30,6 +30,20 @@
+ namespace mlir {
+ namespace hivm {
+ 
++void addOptimizedConvertLayoutPipeline(OpPassManager &pm) {
++  pm.nest<func::FuncOp>().addPass(createInsertConvertLayoutPass());
++
++  PropagateConvertLayoutOptions options;
++  options.allowAgnosticOps = false;
++  pm.nest<func::FuncOp>().addPass(createPropagateConvertLayoutPass(options));
++
++  pm.nest<func::FuncOp>().addPass(createCanonicalizerPass());
++  pm.nest<func::FuncOp>().addPass(createCSEPass());
++
++  pm.nest<func::FuncOp>().addPass(createCombineOptimizedConvertLayoutPass());
++  pm.nest<func::FuncOp>().addPass(createConvertLayoutToTransposePass());
++}
++
+ void canonicalizationHIVMPipeline(OpPassManager &pm) {
+   pm.addPass(createArithToAffineConversionPass());
+   pm.nest<func::FuncOp>().addPass(scf::createCanonicalizeIterArgPass());
+diff --git a/bishengir/lib/Dialect/HIVM/Pipelines/HIVMPipelines.cpp b/bishengir/lib/Dialect/HIVM/Pipelines/HIVMPipelines.cpp
+index 9ceefef06..96eb06b7d 100644
+--- a/bishengir/lib/Dialect/HIVM/Pipelines/HIVMPipelines.cpp
++++ b/bishengir/lib/Dialect/HIVM/Pipelines/HIVMPipelines.cpp
+@@ -1,4 +1,4 @@
+-//===- HIVMPipelines.cpp - HIVM pipelines ---------------------------------===//
++//===- HIVMPipelines.cpp - Memory-based HIVM pipeline ---------------------===//
+ //
+ // Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+ // Licensed under the Apache License, Version 2.0 (the "License");
+@@ -135,39 +135,14 @@ static void hivmAutoInsertLdStForMixCVPipeline(
+     OpPassManager &pm, const HIVMPipelineOptions &hivmPipelineOptions) {
+   InsertLoadStoreForMixCVOptions options;
+   options.enableLegacy =
++      !hivmPipelineOptions.enableTritonKernelCompile ||
+       hivmPipelineOptions.enableLegacyInsertLoadStoreForMixCV;
+   options.disableTightCoupledBuffer =
+       hivmPipelineOptions.disableTightCoupledBuffer;
+-  // Non-triton paths keep the legacy insert-load-store behavior.
+-  // Triton A5 kernels leave enableLegacy false and Select the propagator
+-  // path via isA5Target() (module hacc.target / pass --target).
+-  if (!hivmPipelineOptions.enableTritonKernelCompile)
+-    options.enableLegacy = true;
+   pm.nest<func::FuncOp>().addPass(createMarkMatmulRowCollapsesPass());
+-  if (options.enableLegacy) {
+-    pm.nest<func::FuncOp>().addPass(
+-        mlir::hivm::createInsertLoadStoreForMixCVPass(options));
+-  } else {
+-    pm.nest<func::FuncOp>().addPass(
+-        mlir::hivm::createInsertLoadStoreForMixCVPass(options));
+-    pm.nest<func::FuncOp>().addPass(
+-        mlir::hivm::createInsertLoadStoreForScalarPass());
+-  }
+-}
+-
+-static void addOptimizedConvertLayoutPipeline(OpPassManager &pm) {
+-  pm.nest<func::FuncOp>().addPass(createInsertConvertLayoutPass());
+-
+-  PropagateConvertLayoutOptions options;
+-  options.allowAgnosticOps = false;
+-  pm.nest<func::FuncOp>().addPass(createPropagateConvertLayoutPass(options));
+-
+-  pm.nest<func::FuncOp>().addPass(createCanonicalizerPass());
+-  pm.nest<func::FuncOp>().addPass(createCSEPass());
+-
+-  // Fold load+convert_layout into ND2NZ and convert_layout+fixpipe on A3.
+-  pm.addPass(mlir::hivm::createCombineOptimizedConvertLayoutPass());
+-  pm.nest<func::FuncOp>().addPass(createConvertLayoutToTransposePass());
++  pm.nest<func::FuncOp>().addPass(createInsertLoadStoreForMixCVPass(options));
++  if (!options.enableLegacy)
++    pm.nest<func::FuncOp>().addPass(createInsertLoadStoreForScalarPass());
+ }
+ 
+ static void hivmPreBufferizationOptimizationPipeline(
+@@ -184,9 +159,6 @@ static void hivmPreBufferizationOptimizationPipeline(
+   pm.addPass(mlir::hivm::createNormalizeMatmulPass());
+   pm.addPass(mlir::hivm::createNormalizeConvOpsPass());
+   pm.addPass(mlir::hivm::createNormalizeBitwiseSelectPass());
+-  // After Insert/Inline split, InlineFixpipe only folds into existing fixpipe.
+-  // A3 mem-based path still needs InsertFixpipe (MR 2052 /
+-  // compile-bisheng-distributed).
+   pm.addPass(mlir::hivm::createCacheModuleTargetPass());
+   pm.addPass(mlir::hivm::createInsertFixpipePass());
+   {
+@@ -198,12 +170,6 @@ static void hivmPreBufferizationOptimizationPipeline(
+   if (!hivmPipelineOptions.disableAutoCVWorkSpaceManage) {
+     hivmAutoInsertLdStForMixCVPipeline(pm, hivmPipelineOptions);
+   }
+-  if (hivmPipelineOptions.enableLayoutOptimization) {
+-    // Run after mix-CV load/store insertion so mmad operands are separated from
+-    // producers by DMA ops, then fold remaining convert_layout into ND2NZ /
+-    // fixpipe on the A3 mem-based path.
+-    addOptimizedConvertLayoutPipeline(pm);
+-  }
+   pm.nest<func::FuncOp>().addPass(createTileBatchMMIntoLoopPass());
+ 
+   pm.addPass(mlir::hivm::createNormalizeMatmulPass());
+@@ -292,6 +258,13 @@ static void hivmPreBufferizationOptimizationPipeline(
+                                   hivmPipelineOptions.tileMixCubeLoop}));
+   }
+ 
++  if (hivmPipelineOptions.enableLayoutOptimization) {
++    // The Cube loop tiler slices MMAD in ND coordinates. Fold its empty
++    // accumulator slices before converting the operands to fractal layout.
++    pm.nest<func::FuncOp>().addPass(tensor::createFoldTensorEmptyPass());
++    addOptimizedConvertLayoutPipeline(pm);
++  }
++
+   if (!hivmPipelineOptions.disableAutoCVWorkSpaceManage) {
+     pm.nest<func::FuncOp>().addPass(createInferBufferSizeFromSlicePass());
+     inferAndSetBufferSizePipeline(pm, hivmPipelineOptions);
+@@ -314,14 +287,6 @@ static void hivmPreBufferizationOptimizationPipeline(
+   if (hivmPipelineOptions.enableTritonKernelCompile) {
+     pm.addPass(createInsertInferTaskTypeFuncPass());
+   }
+-  // Mark/hoist tightly-coupled buffers on the MIX function first so the
+-  // AIC/AIV clones share consistent buffer ids and multi-buffer anchors
+-  // (Ascend950 / RegBase; no-op on other arches).
+-  // SplitMixedIfConditionals is a standalone pass (not wired here); run it
+-  // explicitly before SplitMixKernel when mixed-core scf.if splitting is
+-  // needed.
+-  pm.nest<func::FuncOp>().addPass(createMarkTightlyCoupledBufferPass());
+-  pm.nest<func::FuncOp>().addPass(createHoistTightlyCoupledAllocPass());
+   // Split mix kernel is done before bufferization because it depends on
+   // tensor SSA property.
+   pm.addPass(createSplitMixKernelPass());
+@@ -547,8 +512,7 @@ void buildOptimizeHIVMPipeline(OpPassManager &pm,
+   // DIScopeForLLVMFuncOpPass attaches a DISubprogram to every function, so
+   // calls must carry a location even when the input IR has none at all. Keep
+   // this condition in sync with the pass's enabling condition in
+-  // hivmc/A5/PassPipelineA5.cpp and hivmc/A3/PassPipelineA3.cpp; sanitizer
+-  // belongs here because it also turns that pass on.
++  // hivmc/A3/PassPipelineA3.cpp, including sanitizer builds.
+   FixCallUnknownLocOptions fixCallLocOptions;
+   fixCallLocOptions.assumeDebugInfo = options.enableSanitizer ||
+                                       options.enableDebugInfo ||
+@@ -563,7 +527,7 @@ void buildOptimizeHIVMPipeline(OpPassManager &pm,
+ 
+ void registerLowerHIVMPipelines() {
+   PassPipelineRegistration<HIVMPipelineOptions>(
+-      "optimize-hivm-pipeline", "optimize hivm pipeline",
++      "optimize-hivm-pipeline", "Optimize HIVM for memory-based targets",
+       [](OpPassManager &pm, const HIVMPipelineOptions &options) {
+         buildOptimizeHIVMPipeline(pm, options);
+       });
+diff --git a/bishengir/lib/Dialect/HIVM/Pipelines/regbase/HIVMRegbasePipelines.cpp b/bishengir/lib/Dialect/HIVM/Pipelines/regbase/HIVMRegbasePipelines.cpp
+index 807091e92..aecb16bff 100644
+--- a/bishengir/lib/Dialect/HIVM/Pipelines/regbase/HIVMRegbasePipelines.cpp
++++ b/bishengir/lib/Dialect/HIVM/Pipelines/regbase/HIVMRegbasePipelines.cpp
+@@ -1,4 +1,4 @@
+-//===- HIVMPipelines.cpp - HIVM pipelines ---------------------------------===//
++//===- HIVMRegbasePipelines.cpp - Register-based HIVM pipelines -----------===//
+ //
+ // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+ // See https://llvm.org/LICENSE.txt for license information.
+@@ -69,9 +69,8 @@ earlySkewMarkTCBOpts(const HIVMPipelineOptions &pipelineOpts) {
+   return opts;
+ }
+ 
+-// Unregistered Skew kernels keep master's early MarkTCB. Registered kernels
+-// skip that run and take PR 3160's infer / affine / constantize / set /
+-// MarkTCB immediately before CVPipelining.
++// Registered Skew kernels need concrete buffer sizes before their tightly
++// coupled buffers are marked for CV pipelining.
+ struct PrepareRegisteredSkewTCBPass
+     : public PassWrapper<PrepareRegisteredSkewTCBPass,
+                          OperationPass<func::FuncOp>> {
+@@ -88,7 +87,8 @@ struct PrepareRegisteredSkewTCBPass
+     return "hivm-prepare-registered-skew-tcb";
+   }
+   StringRef getDescription() const override {
+-    return "PR 3160 infer/constantize/MarkTCB for registered Skew kernels";
++    return "Infer buffer sizes and mark tightly coupled buffers for Skew "
++           "kernels";
+   }
+ 
+   void runOnOperation() override {
+@@ -166,7 +166,6 @@ hivmCVCommunicationPipeline(OpPassManager &pm,
+   if (hivmPipelineOptions.enableTritonKernelCompile) {
+     hivmAutoInsertLdStForMixCVPipeline(pm, hivmPipelineOptions);
+   } else if (hacc::utils::isAscend950(hivmPipelineOptions.target)) {
+-    // New A5 convert layout pipeline
+     // TODO: move the infer&set buffer size passes right before plan-memory
+     // after cv-pipelining can handle dynamic shape
+     pm.nest<func::FuncOp>().addPass(createInferBufferSizeFromSlicePass());
+@@ -303,21 +302,6 @@ hivmCrossCoreAutoSyncPipeline(OpPassManager &pm,
+   }
+ }
+ 
+-static void addOptimizedConvertLayoutFixpipePipeline(OpPassManager &pm) {
+-  pm.nest<func::FuncOp>().addPass(createInsertConvertLayoutPass());
+-
+-  PropagateConvertLayoutOptions options;
+-  options.allowAgnosticOps = false;
+-  pm.nest<func::FuncOp>().addPass(createPropagateConvertLayoutPass(options));
+-
+-  pm.nest<func::FuncOp>().addPass(createCanonicalizerPass());
+-  pm.nest<func::FuncOp>().addPass(createCSEPass());
+-
+-  pm.nest<func::FuncOp>().addPass(
+-      mlir::hivm::createCombineOptimizedConvertLayoutPass());
+-  pm.nest<func::FuncOp>().addPass(createConvertLayoutToTransposePass());
+-}
+-
+ static void
+ hivmWorkspacePipeline(OpPassManager &pm,
+                       const HIVMPipelineOptions &hivmPipelineOptions) {
+@@ -457,16 +441,6 @@ private:
+ 
+ static void hivmPreBufferizationOptimizationPipeline(
+     OpPassManager &pm, const HIVMPipelineOptions &hivmPipelineOptions) {
+-  if (!hacc::utils::isRegBasedArch(hivmPipelineOptions.target)) {
+-    // HIVM brc/reduce op's operands have the same rank, so after
+-    // converting from Linalg/HFusion to HIVM, reshape ops will be
+-    // inserted. Need to propagate them.
+-    PropagateReshapeOptions propagateOption;
+-    propagateOption.forHIVM = true;
+-    pm.nest<func::FuncOp>().addPass(
+-        tensor::createPropagateReshapePass(propagateOption));
+-  }
+-
+   pm.addPass(mlir::scf::createRemoveRedundantLoopInitPass());
+   pm.addPass(mlir::hivm::createNormalizeMatmulPass());
+   pm.addPass(mlir::hivm::createNormalizeConvOpsPass());
+@@ -483,14 +457,8 @@ static void hivmPreBufferizationOptimizationPipeline(
+   pm.nest<func::FuncOp>().addPass(createPromoteL1GatherPass());
+   hivmCVCommunicationPipeline(pm, hivmPipelineOptions);
+   convertTensorToTightCoupledBuffer(pm);
+-  if (hivmPipelineOptions.enableLayoutOptimization) {
+-    // Combine optimized folds:
+-    // - load + convert layout
+-    // - convert layout + fixpipe
+-    // For regbase convert layout optimization is done early in the pass
+-    // Inserts convert layout before and after cube operations
+-    addOptimizedConvertLayoutFixpipePipeline(pm);
+-  }
++  if (hivmPipelineOptions.enableLayoutOptimization)
++    addOptimizedConvertLayoutPipeline(pm);
+   {
+     TileBatchMMIntoLoopOptions tileBatchMMOpts;
+     tileBatchMMOpts.keepRegBaseBatch =
+@@ -555,8 +523,7 @@ static void hivmPreBufferizationOptimizationPipeline(
+   // standard CVPipelining causes migrateOps to clone the TCB-marked allocs
+   // into work-item loops; those dead clones retain their marks and force
+   // PlanMemory to allocate them as independent buffers, causing UB overflow.
+-  // Registered kernels skip this early run and take the PR 3160 sequence
+-  // immediately before CVPipelining.
++  // Registered kernels defer marking until their buffer sizes are known.
+   if (hivmPipelineOptions.setCVPipelineMode == CVPipelineMode::Skew) {
+     pm.nest<func::FuncOp>().addPass(createMarkTightlyCoupledBufferPass(
+         earlySkewMarkTCBOpts(hivmPipelineOptions)));
+@@ -711,26 +678,14 @@ static void hivmPostBufferizationOptimizationPipeline(
+   // Op decompose, need mark buffer size for newly allocated buffer.
+   pm.nest<func::FuncOp>().addPass(createHIVMDecomposeOpPass());
+   syncBlockLockPipeline(pm, SyncBlockLockPipelinePhase::Prepare);
+-  if (hacc::utils::isRegBasedArch(hivmPipelineOptions.target)) {
+-    // make sure no alloc within vf and no value returned by vf,
+-    // so InferHIVMMemScope can work correctly
+-    pm.addPass(createOutlineAllocInVFPass());
+-    // Move VF entry DMA on argument buffers to the caller before VF cleanup.
+-    pm.addPass(createOutlineCopyInVFPass());
+-    pm.addPass(bufferization::createDropEquivalentBufferResultsPass());
+-    // Late pipeline workaround for VFFusion/tree-reduce fusion helpers. This
+-    // recovery is separate from InlineScope's regular scope-unwrapping role.
+-    // Such helpers may survive earlier inlining because the affine inliner
+-    // rejects their top-level affine.apply operations at scf.for call sites.
+-    // Lower those operations and retry inlining before InferHIVMMemScope
+-    // encounters the remaining helper memref-result boundaries, avoiding
+-    // module-wide affine lowering.
+-    // TODO: Remove this workaround once helper generation or earlier helper
+-    // elimination fixes the underlying issue.
+-    InlineScopeOptions inlineOptions;
+-    inlineOptions.lowerAffineApplyForInlining = true;
+-    pm.addPass(scope::createInlineScopePass(inlineOptions));
+-  }
++  pm.addPass(createOutlineAllocInVFPass());
++  pm.addPass(createOutlineCopyInVFPass());
++  pm.addPass(bufferization::createDropEquivalentBufferResultsPass());
++  // Lower affine.apply in fusion helpers so they can be inlined before
++  // memory scope inference visits their memref results.
++  InlineScopeOptions inlineOptions;
++  inlineOptions.lowerAffineApplyForInlining = true;
++  pm.addPass(scope::createInlineScopePass(inlineOptions));
+   // Bind buffer should be done after outline alloc in vf because the source
+   // allocs might be inside the VF.
+   pm.nest<func::FuncOp>().addPass(memref::createBindBufferPass());
+@@ -742,15 +697,6 @@ static void hivmPostBufferizationOptimizationPipeline(
+   // Currently no Ops decompose in this phase
+   decomposeOption.decomposePhase =
+       bishengir::DecomposePhase::BEFORE_HIVM_STRIDE_ALIGNMENT;
+-  pm.nest<func::FuncOp>().addPass(
+-      createHIVMAggregatedDecomposeOpPass(decomposeOption));
+-  if (!hacc::utils::isRegBasedArch(hivmPipelineOptions.target)) {
+-    // Transform uncontinuous access to deinterleave op
+-    pm.nest<func::FuncOp>().addPass(createHIVMRecognizeDeinterleaveOpPass());
+-    decomposeOption.decomposePhase =
+-        bishengir::DecomposePhase::AFTER_RECOGNIZE_DEINTERLEAVE;
+-  }
+-
+   pm.nest<func::FuncOp>().addPass(
+       createHIVMAggregatedDecomposeOpPass(decomposeOption));
+   decomposeOption.decomposePhase =
+@@ -797,13 +743,9 @@ static void hivmPostBufferizationOptimizationPipeline(
+   pm.nest<func::FuncOp>().addPass(createReduceRankSubviewPass());
+   pm.nest<func::FuncOp>().addPass(createLiftLowestStridePass());
+   pm.nest<func::FuncOp>().addPass(createAllocExtraBufferPass());
+-  if (hacc::utils::isRegBasedArch(hivmPipelineOptions.target)) {
+-    // make sure no alloc within vf and no value returned by vf,
+-    // so InferHIVMMemScope can work correctly
+-    pm.addPass(createOutlineAllocInVFPass());
+-    pm.addPass(createOutlineCopyInVFPass());
+-    pm.addPass(bufferization::createDropEquivalentBufferResultsPass());
+-  }
++  pm.addPass(createOutlineAllocInVFPass());
++  pm.addPass(createOutlineCopyInVFPass());
++  pm.addPass(bufferization::createDropEquivalentBufferResultsPass());
+   // Infer memory scope for newly allocated extra buffer
+   pm.addPass(createInferHIVMMemScopePass());
+   canonicalizationHIVMPipeline(pm);
+@@ -872,8 +814,7 @@ static void hivmPostBufferizationOptimizationPipeline(
+   pm.nest<func::FuncOp>().addPass(createLowerMultiBufferCounterPass());
+   pm.nest<func::FuncOp>().addPass(createLiftLowestStridePass());
+   canonicalizationHIVMPipeline(pm);
+-  if (!hivmPipelineOptions.enableDirectHIVMLowering &&
+-      hacc::utils::isRegBasedArch(hivmPipelineOptions.target)) {
++  if (!hivmPipelineOptions.enableDirectHIVMLowering) {
+     pm.nest<func::FuncOp>().addPass(arith::createNormalizeArithPass());
+     pm.nest<func::FuncOp>().addPass(arith::createLiftArithIndexCastPass());
+     pm.nest<func::FuncOp>().addPass(
+@@ -923,7 +864,7 @@ void buildLowerHIVMPipelines(OpPassManager &pm,
+ 
+ void registerLowerHIVMPipelines() {
+   PassPipelineRegistration<HIVMPipelineOptions>(
+-      "lower-hivm-pipeline", "lower hivm pipeline",
++      "lower-hivm-pipeline", "Lower HIVM for register-based targets",
+       [](OpPassManager &pm, const HIVMPipelineOptions &options) {
+         buildHIVMTensorOptimizations(pm, options);
+         buildLowerHIVMPipelines(pm, options);
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/AlignBuffer/MarkStrideAlign.cpp b/bishengir/lib/Dialect/HIVM/Transforms/AlignBuffer/MarkStrideAlign.cpp
+index 108618dfe..c09bfd3a3 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/AlignBuffer/MarkStrideAlign.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/AlignBuffer/MarkStrideAlign.cpp
+@@ -328,9 +328,8 @@ static bool isMarked(Value op) {
+   return false;
+ }
+ 
+-// Filter memref without UB/GM target space
+ static SmallVector<MemRefType>
+-filterNonHivmSpace(const SmallVectorImpl<MemRefType> &memRefTypes) {
++getUBMemRefTypes(const SmallVectorImpl<MemRefType> &memRefTypes) {
+   SmallVector<MemRefType> resMemRefTypes;
+   for (auto memRefType : memRefTypes) {
+     auto hivmSpace =
+@@ -954,7 +953,9 @@ void MarkStrideAlignPass::runOnOperation() {
+     auto memrefTypes = util::getMemRefTypes(types);
+     if (isAllRank0(memrefTypes))
+       return WalkResult::advance();
+-    if (!isAnyOfLocalBuffer(memrefTypes))
++    // Stride alignment marks UB buffers. A GM-to-L1 ND2NZ has none.
++    auto ubMemRefTypes = getUBMemRefTypes(memrefTypes);
++    if (ubMemRefTypes.empty())
+       return WalkResult::advance();
+ 
+     bool isUBDMAOp = isa<hivm::LoadOp>(op) || isa<hivm::StoreOp>(op) ||
+@@ -969,29 +970,24 @@ void MarkStrideAlignPass::runOnOperation() {
+       if (!isa<FixpipeOp>(op) && isAllOnesShape(memrefTypes)) {
+         return WalkResult::advance();
+       }
+-      // Filter memrefs not in ubspace
+-      auto filterMemrefTypes = filterNonHivmSpace(memrefTypes);
+-      LLVM_DEBUG(llvm::dbgs()
+-                     << "mark-stride-align: reg-based path, filterMemrefTypes=";
+-                 dumpMemRefTypes(llvm::dbgs(), filterMemrefTypes);
+-                 llvm::dbgs() << "\n";);
+-      if (filterMemrefTypes.empty())
+-        return WalkResult::skip();
++      LLVM_DEBUG(
++          llvm::dbgs() << "mark-stride-align: reg-based path, ubMemRefTypes=";
++          dumpMemRefTypes(llvm::dbgs(), ubMemRefTypes); llvm::dbgs() << "\n";);
+       // In A5, the previous hfusion-flatten pass merges axes for both tensors
+       // and memrefs, so it no longer calls the getFlattened method of the Op
+       // for analysis. Instead, it directly treats the Op as already having
+       // undergone the axis merging operation and proceeds with analysis.
+-      ReassociationIndices identityReassoc(filterMemrefTypes[0].getRank());
+-      for (auto i = 0; i < filterMemrefTypes[0].getRank(); ++i) {
++      ReassociationIndices identityReassoc(ubMemRefTypes[0].getRank());
++      for (auto i = 0; i < ubMemRefTypes[0].getRank(); ++i) {
+         identityReassoc[i] = i;
+       }
+       // In A5, memrefTypes is already the result of flattening.
+-      alignDim = getLastDiscontinuousDimRegBased(filterMemrefTypes,
+-                                                 identityReassoc, isUBDMAOp);
++      alignDim = getLastDiscontinuousDimRegBased(ubMemRefTypes, identityReassoc,
++                                                 isUBDMAOp);
+       if (isa<FixpipeOp>(op)) {
+         auto fixpipeOp = dyn_cast<FixpipeOp>(op);
+         auto alignDimAlignBytes = getLastDiscontinuousDimRegBasedForFixcctoub(
+-            filterMemrefTypes, identityReassoc, fixpipeOp);
++            ubMemRefTypes, identityReassoc, fixpipeOp);
+         for (const auto &[alignDimUpdate, alignByte] : alignDimAlignBytes) {
+           if (alignDimUpdate.has_value()) {
+             for (const auto &oper : hivmOp.getTargetSpaceOperands(
+@@ -1028,7 +1024,6 @@ void MarkStrideAlignPass::runOnOperation() {
+         return WalkResult::advance();
+       }
+     } else {
+-      // For A2/3
+       if (isAllOnesShape(memrefTypes)) {
+         return WalkResult::advance();
+       }
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/CombineOptimizedConvertLayout.cpp b/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/CombineOptimizedConvertLayout.cpp
+index b11ebd114..e0b44e43b 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/CombineOptimizedConvertLayout.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/CombineOptimizedConvertLayout.cpp
+@@ -237,23 +237,18 @@ matchDirectLoadConvertLayout(ConvertLayoutOp op, PatternRewriter &rewriter) {
+         op, "source is not from a to_tensor operation");
+ 
+   Value toTensorMemref = toTensorOp.getMemref();
+-  int32_t userCount = 0;
+-  LoadOp loadOp = nullptr;
++  LoadOp loadOp;
+   for (Operation *user : toTensorMemref.getUsers()) {
+     if (user == toTensorOp)
+       continue;
+-    userCount++;
+-    if (isa<LoadOp>(user)) {
+-      loadOp = cast<LoadOp>(user);
+-      continue;
+-    }
+-    return rewriter.notifyMatchFailure(
+-        user, "Unwanted user of convert_layout to_tensor memref");
++    auto writer = dyn_cast<LoadOp>(user);
++    if (!writer || loadOp || writer.getDst() != toTensorMemref)
++      return rewriter.notifyMatchFailure(
++          toTensorOp, "expected a single load into the memref");
++    loadOp = writer;
+   }
+-  if (userCount > 1 || !loadOp)
+-    return rewriter.notifyMatchFailure(
+-        toTensorMemref.getDefiningOp(),
+-        "More than one user of to_tensor memref");
++  if (!loadOp)
++    return rewriter.notifyMatchFailure(toTensorOp, "no load into the memref");
+ 
+   if (failed(verifyLoadDominatesConvertLayout(loadOp, op, rewriter)))
+     return failure();
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/InsertConvertLayout.cpp b/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/InsertConvertLayout.cpp
+index 89cdf3b17..555f02909 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/InsertConvertLayout.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/InsertConvertLayout.cpp
+@@ -16,8 +16,8 @@
+ //===----------------------------------------------------------------------===//
+ 
+ #include "bishengir/Conversion/Passes.h"
+-#include "bishengir/Dialect/HACC/Utils/Utils.h"
+ #include "bishengir/Dialect/HFusion/IR/HFusion.h"
++#include "bishengir/Dialect/HIVM/IR/Capability/Cube/Mmad/MmadCapabilityQuery.h"
+ #include "bishengir/Dialect/HIVM/IR/Capability/DMA/CubeLoad/CubeLoadCapabilityQuery.h"
+ #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+ #include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
+@@ -354,9 +354,19 @@ struct InsertConvertLayoutAroundMmadL1 : public OpRewritePattern<MmadL1Op> {
+     Value bMatrix = op.getB();
+     Value cMatrix = op.getC();
+ 
++    // A non-initializing MMAD reads the previous C. A chained MMAD also
++    // keeps its result in L0C. A Vector transpose would break either use.
++    auto arch = mmadArchitecture(op);
++    const bool keepAccumulatorInL0C =
++        arch &&
++        bishengir::npu::getCubeVectorDataExchange(*arch) ==
++            bishengir::npu::CubeVectorDataExchange::kGlobalMemoryOnly &&
++        (!op.isInitConstant(true) ||
++         (op->getNumResults() && isResultRemainInL0C(op->getOpResult(0))));
++
+     // Check if already converted (rank 4 check is still a heuristic)
+     if (isAlreadyConverted(aMatrix) && isAlreadyConverted(bMatrix) &&
+-        isAlreadyConverted(cMatrix)) {
++        (keepAccumulatorInL0C || isAlreadyConverted(cMatrix))) {
+       return rewriter.notifyMatchFailure(op, "already converted");
+     }
+ 
+@@ -405,7 +415,8 @@ struct InsertConvertLayoutAroundMmadL1 : public OpRewritePattern<MmadL1Op> {
+     };
+     maybeRetarget(aMatrix, dstLayoutA);
+     maybeRetarget(bMatrix, dstLayoutB);
+-    maybeRetarget(cMatrix, dstLayoutC);
++    if (!keepAccumulatorInL0C)
++      maybeRetarget(cMatrix, dstLayoutC);
+ 
+     // Refresh operands after possible Fixpipe retargeting.
+     aMatrix = op.getMatmulA();
+@@ -429,6 +440,11 @@ struct InsertConvertLayoutAroundMmadL1 : public OpRewritePattern<MmadL1Op> {
+                                        dstLayoutB, op.getOperation())))
+       return rewriter.notifyMatchFailure(op, "failed to convert B matrix");
+ 
++    if (keepAccumulatorInL0C) {
++      rewriter.replaceOp(op, newOp);
++      return success();
++    }
++
+     if (failed(convertAndAssignOperand(rewriter, loc, cMatrix,
+                                        newOp.getCMutable(), srcLayoutC,
+                                        dstLayoutC, op.getOperation())))
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/Propagate/PropagateConvertLayout.cpp b/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/Propagate/PropagateConvertLayout.cpp
+index 458a3a49e..c7beca184 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/Propagate/PropagateConvertLayout.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/Propagate/PropagateConvertLayout.cpp
+@@ -42,7 +42,25 @@ using namespace mlir::hivm;
+ 
+ namespace {
+ 
+-/// Find the single writer of an L1 tensor read only by `reader`.
++/// Find the transfer that initializes this tensor's buffer before its reader.
++template <typename TransferOp>
++static TransferOp getTransferWriter(bufferization::ToTensorOp view,
++                                    Operation *reader) {
++  TransferOp writer;
++  for (Operation *user : view.getMemref().getUsers()) {
++    if (user == view)
++      continue;
++    auto transfer = dyn_cast<TransferOp>(user);
++    if (!transfer || writer || transfer.getDst() != view.getMemref())
++      return {};
++    writer = transfer;
++  }
++  if (!writer || writer->getBlock() != reader->getBlock() ||
++      !writer->isBeforeInBlock(reader))
++    return {};
++  return writer;
++}
++
+ static CopyOp getPrivateL1Copy(bufferization::ToTensorOp view,
+                                Operation *reader) {
+   if (!view || !view->hasOneUse())
+@@ -51,69 +69,133 @@ static CopyOp getPrivateL1Copy(bufferization::ToTensorOp view,
+   if (!alloc ||
+       getOptionalHIVMAddressSpace(alloc.getType()) != AddressSpace::L1)
+     return {};
+-  CopyOp copy;
+-  for (Operation *user : alloc->getUsers()) {
+-    if (user == view)
+-      continue;
+-    auto writer = dyn_cast<CopyOp>(user);
+-    if (!writer || copy || writer.getDst() != alloc.getResult())
+-      return {};
+-    copy = writer;
+-  }
++  auto copy = getTransferWriter<CopyOp>(view, reader);
+   if (!copy || copy.getSrc().getType() != view.getType() ||
+       copy.getResultTensor() || copy.getPadMode() || copy.getPadValue() ||
+-      copy.getCollapseReassociation() ||
+-      copy->getBlock() != reader->getBlock() || !copy->isBeforeInBlock(reader))
++      copy.getCollapseReassociation())
+     return {};
+   return copy;
+ }
+ 
+-/// Move a static expand through its private UB-to-L1 copy. This exposes a
+-/// direct to_tensor source to the existing layout-conversion rewrite.
+-struct MoveExpandBeforeUBToCBufCopy
+-    : public OpRewritePattern<tensor::ExpandShapeOp> {
++/// The reshaped GM descriptor must preserve the tensor's element order and
++/// describe a matrix with contiguous rows for ND2NZ.
++template <typename ReshapeOp>
++static FailureOr<MemRefType> getGMMatrixType(LoadOp load, ReshapeOp reshape) {
++  auto srcType = dyn_cast<MemRefType>(load.getSrc().getType());
++  auto shape = reshape.getType().getShape();
++  if (!srcType || !isStrided(srcType) || shape.size() != 2 ||
++      srcType.getShape() != reshape.getSrcType().getShape() ||
++      getOptionalHIVMAddressSpace(srcType).value_or(AddressSpace::GM) !=
++          AddressSpace::GM ||
++      load->getNumOperands() != 2 || load.getPadMode() ||
++      load.getInitOutBuffer() || load.getBroadcastAxesAttr() ||
++      load.getMayImplicitTransposeWithLastAxis())
++    return failure();
++
++  auto groups = reshape.getReassociationIndices();
++  MemRefType matrix;
++  if constexpr (std::is_same_v<ReshapeOp, tensor::CollapseShapeOp>) {
++    if (!memref::CollapseShapeOp::isGuaranteedCollapsible(srcType, groups))
++      return failure();
++    matrix = memref::CollapseShapeOp::computeCollapsedType(srcType, groups);
++  } else {
++    auto expanded =
++        memref::ExpandShapeOp::computeExpandedType(srcType, shape, groups);
++    if (failed(expanded))
++      return failure();
++    matrix = *expanded;
++  }
++  auto strides = getStridesAndOffset(matrix).first;
++  if ((shape[1] != 1 && strides[1] != 1) ||
++      (shape[0] != 1 && strides[0] < shape[1]))
++    return failure();
++  return matrix;
++}
++
++/// Move the static reshape feeding convert_layout to the source of its
++/// transfer. The conversion then sees the tensor view of the new allocation.
++template <typename ReshapeOp>
++struct MoveReshapeBeforeTransfer : OpRewritePattern<ConvertLayoutOp> {
+   using OpRewritePattern::OpRewritePattern;
+ 
+-  LogicalResult matchAndRewrite(tensor::ExpandShapeOp expand,
++  LogicalResult matchAndRewrite(ConvertLayoutOp convert,
+                                 PatternRewriter &rewriter) const override {
+-    // Static result types can still carry SSA output extents.
+-    if (!expand->hasOneUse() || !expand.getType().hasStaticShape() ||
+-        !expand.getOutputShape().empty() ||
+-        expand.getResultType().getEncoding())
++    auto reshape = convert.getSource().getDefiningOp<ReshapeOp>();
++    auto convertedType = dyn_cast<RankedTensorType>(convert.getType());
++    // An expand with a static result may still depend on SSA output extents.
++    if (!reshape || reshape->getNumOperands() != 1 ||
++        !reshape.getType().hasStaticShape() ||
++        reshape.getResultType().getEncoding() ||
++        !convert.getOutputShape().empty() || !convertedType ||
++        !convertedType.hasStaticShape() || convertedType.getEncoding())
+       return failure();
+-    auto convertLayout = dyn_cast<ConvertLayoutOp>(*expand->user_begin());
+-    if (!convertLayout || !convertLayout.getOutputShape().empty())
++    Value src = reshape.getSrc();
++    auto view = src.getDefiningOp<bufferization::ToTensorOp>();
++    if (!view)
+       return failure();
+-    auto convertedType = dyn_cast<RankedTensorType>(convertLayout.getType());
+-    if (!convertedType || !convertedType.hasStaticShape() ||
+-        convertedType.getEncoding())
++    auto alloc = view.getMemref().getDefiningOp<memref::AllocOp>();
++    if (!alloc)
+       return failure();
+ 
+-    auto toTensor = expand.getSrc().getDefiningOp<bufferization::ToTensorOp>();
+-    auto copy = getPrivateL1Copy(toTensor, expand);
+-    if (!copy)
+-      return failure();
+-    auto alloc = toTensor.getMemref().getDefiningOp<memref::AllocOp>();
++    auto copy =
++        reshape->hasOneUse() ? getPrivateL1Copy(view, reshape) : CopyOp{};
++    LoadOp load;
++    MemRefType gmMatrix;
++    if (!copy) {
++      load = getTransferWriter<LoadOp>(view, reshape);
++      if (!load ||
++          convert.getSrcLayout().getDataLayout() != hivm::DataLayout::ND ||
++          convert.getDstLayout().getDataLayout() != hivm::DataLayout::Fractal)
++        return failure();
++      auto matrixType = getGMMatrixType(load, reshape);
++      if (failed(matrixType))
++        return failure();
++      gmMatrix = *matrixType;
++    }
+ 
+     rewriter.setInsertionPoint(alloc);
+-    auto expandedType = MemRefType::get(
+-        expand.getType().getShape(), expand.getType().getElementType(),
++    auto bufferType = MemRefType::get(
++        reshape.getType().getShape(), reshape.getType().getElementType(),
+         MemRefLayoutAttrInterface(), alloc.getType().getMemorySpace());
+-    auto expandedAlloc = rewriter.create<memref::AllocOp>(
+-        alloc.getLoc(), expandedType, alloc.getAlignmentAttr());
+-    auto expandedTensor = rewriter.create<bufferization::ToTensorOp>(
+-        toTensor.getLoc(), expandedAlloc, toTensor.getRestrict(),
+-        toTensor.getWritable());
+-
+-    rewriter.modifyOpInPlace(
+-        expand, [&] { expand.getSrcMutable().assign(copy.getSrc()); });
+-    rewriter.moveOpBefore(expand, copy);
+-    rewriter.modifyOpInPlace(copy, [&] {
+-      copy.getSrcMutable().assign(expand.getResult());
+-      copy.getDstMutable().assign(expandedAlloc);
++    auto buffer = rewriter.create<memref::AllocOp>(alloc.getLoc(), bufferType,
++                                                   alloc.getAlignmentAttr());
++    // Propagation can place convert_layout immediately after this tensor view.
++    // Keep it at the original reshape, after the buffer has been initialized.
++    rewriter.setInsertionPoint(reshape);
++    auto tensor = rewriter.create<bufferization::ToTensorOp>(
++        view.getLoc(), buffer, view.getRestrict(), view.getWritable());
++
++    if (copy) {
++      rewriter.modifyOpInPlace(
++          reshape, [&] { reshape.getSrcMutable().assign(copy.getSrc()); });
++      rewriter.moveOpBefore(reshape, copy);
++      rewriter.modifyOpInPlace(copy, [&] {
++        copy.getSrcMutable().assign(reshape.getResult());
++        copy.getDstMutable().assign(buffer);
++      });
++      rewriter.replaceAllUsesExcept(reshape.getResult(), tensor.getResult(),
++                                    copy);
++      return success();
++    }
++
++    // Other ND readers keep their original load. Both reads must see the
++    // same GM contents, including when a later operation overwrites the source.
++    if (!view->hasOneUse()) {
++      rewriter.setInsertionPointAfter(load);
++      load = cast<LoadOp>(rewriter.clone(*load));
++    }
++    rewriter.setInsertionPoint(load);
++    using MemRefReshapeOp =
++        std::conditional_t<std::is_same_v<ReshapeOp, tensor::CollapseShapeOp>,
++                           memref::CollapseShapeOp, memref::ExpandShapeOp>;
++    auto matrix = rewriter.create<MemRefReshapeOp>(
++        reshape.getLoc(), gmMatrix, load.getSrc(),
++        reshape.getReassociationIndices());
++    rewriter.modifyOpInPlace(load, [&] {
++      load.getSrcMutable().assign(matrix);
++      load.getDstMutable().assign(buffer);
+     });
+-    rewriter.replaceAllUsesExcept(expand.getResult(),
+-                                  expandedTensor.getResult(), copy);
++    rewriter.replaceOp(reshape, tensor.getResult());
+     return success();
+   }
+ };
+@@ -431,8 +513,9 @@ struct PropagateConvertLayoutPass
+     // Run these prioritized copy-boundary rewrites before the generic
+     // propagation patterns, so later patterns see the intended converted value.
+     RewritePatternSet firstPatterns(context);
+-    firstPatterns.add<MoveExpandBeforeUBToCBufCopy, PackSlicedMatmulOperand>(
+-        context);
++    firstPatterns.add<MoveReshapeBeforeTransfer<tensor::ExpandShapeOp>,
++                      MoveReshapeBeforeTransfer<tensor::CollapseShapeOp>,
++                      PackSlicedMatmulOperand>(context);
+     firstPatterns.add<MoveConvertLayoutToSourceOfUBToCBufCopy>(context);
+     firstPatterns.add<MoveConvertLayoutBeforeTensorCopy>(context);
+     if (failed(applyPatternsGreedily(module, std::move(firstPatterns))))
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/InjectBlockSync.cpp b/bishengir/lib/Dialect/HIVM/Transforms/InjectBlockSync.cpp
+index 767354980..55843af76 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/InjectBlockSync.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/InjectBlockSync.cpp
+@@ -302,7 +302,8 @@ void SyncBlockIRTranslator::UpdateDestinationStyleOpInform(
+   if (!pipeOp) {
+     return;
+   }
+-  if (!isa<hivm::FixpipeOp, hivm::StoreOp, hivm::LoadOp>(op)) {
++  // A fused ND2NZ reads the same GM workspace as the Cube load it replaces.
++  if (!isa<hivm::FixpipeOp, hivm::StoreOp, hivm::LoadOp, hivm::ND2NZOp>(op)) {
+     return;
+   }
+   hivm::PIPE pipe = pipeOp.getPipe();
+@@ -416,8 +417,8 @@ void InjectBlockSyncAnalysis::InjectAllBlockSync() {
+ 
+   func_->walk<WalkOrder::PreOrder>([&](Operation *op) {
+     opBuilder.setInsertionPointAfter(op);
+-    if (isa<hivm::LoadOp, hivm::MmadL1Op, hivm::FixpipeOp, hivm::StoreOp,
+-            hivm::CopyOp, tensor::InsertSliceOp>(op)) {
++    if (isa<hivm::LoadOp, hivm::ND2NZOp, hivm::MmadL1Op, hivm::FixpipeOp,
++            hivm::StoreOp, hivm::CopyOp, tensor::InsertSliceOp>(op)) {
+       insertBlockAll(op, /*insertBefore=*/true);
+       insertBlockAll(op);
+     }
+diff --git a/bishengir/lib/Tools/bishengir-compile/BiShengIRCompileConfig.cpp b/bishengir/lib/Tools/bishengir-compile/BiShengIRCompileConfig.cpp
+index 22fc82610..6c7dadab6 100644
+--- a/bishengir/lib/Tools/bishengir-compile/BiShengIRCompileConfig.cpp
++++ b/bishengir/lib/Tools/bishengir-compile/BiShengIRCompileConfig.cpp
+@@ -18,14 +18,19 @@
+ #include "bishengir/Config/bishengir-config.h"
+ #include "bishengir/Dialect/Analysis/VFFusion/Utils.h"
+ #include "bishengir/Dialect/HACC/Utils/Utils.h"
++#include "bishengir/Dialect/HFusion/Utils/Utils.h"
+ #include "bishengir/Dialect/HIVM/Utils/MultiBufferMode.h"
++#include "bishengir/Dialect/Scope/IR/Scope.h"
+ #include "bishengir/Tools/Utils/Utils.h"
+ #include "bishengir/Tools/bishengir-compile/Config.h"
+ 
+ #if BISHENGIR_ENABLE_TRITON_COMPILE
+ #include "proton/Dialect/include/Conversion/ProtonToProtonGPU/Passes.h"
++#include "triton/Dialect/Triton/IR/Dialect.h"
+ #endif
+ 
++#include "mlir/Dialect/Func/IR/FuncOps.h"
++#include "mlir/Dialect/Linalg/IR/Linalg.h"
+ #include "mlir/Support/LLVM.h"
+ #include "llvm/ADT/StringRef.h"
+ #include "llvm/ADT/Twine.h"
+@@ -346,6 +351,31 @@ void BiShengIRCompileMainConfig::registerCLOptions() {
+   *clOptionsConfig;
+ }
+ 
++void BiShengIRCompileMainConfig::disableUnsupportedLayoutOptimization(
++    mlir::ModuleOp module) {
++  if (!getEnableLayoutOptimization())
++    return;
++  mlir::SymbolTableCollection symbols;
++  auto walk = module.walk<mlir::WalkOrder::PreOrder>([&](mlir::Operation *op) {
++    if (isa<mlir::linalg::BatchMatmulOp, mlir::scope::ScopeOp,
++            mlir::hfusion::PrintOp>(op))
++      return mlir::WalkResult::interrupt();
++#if BISHENGIR_ENABLE_TRITON_COMPILE
++    if (isa<mlir::triton::PrintOp>(op))
++      return mlir::WalkResult::interrupt();
++#endif
++    if (auto call = dyn_cast<mlir::func::CallOp>(op)) {
++      auto callee = symbols.lookupNearestSymbolFrom<mlir::func::FuncOp>(
++          call, call.getCalleeAttr());
++      if (mlir::hfusion::getTritonPrintProperties(callee))
++        return mlir::WalkResult::interrupt();
++    }
++    return mlir::WalkResult::advance();
++  });
++  if (walk.wasInterrupted())
++    setEnableLayoutOptimization(false);
++}
++
+ /// Apply arch-dependent defaults that must not override user-provided flags.
+ ///
+ /// `--set-workspace-multibuffer` keeps the TableGen default of 4 for A3, but
+diff --git a/bishengir/lib/Tools/bishengir-compile/BiShengIRCompileMain.cpp b/bishengir/lib/Tools/bishengir-compile/BiShengIRCompileMain.cpp
+index e01570c76..d30ec66ab 100644
+--- a/bishengir/lib/Tools/bishengir-compile/BiShengIRCompileMain.cpp
++++ b/bishengir/lib/Tools/bishengir-compile/BiShengIRCompileMain.cpp
+@@ -294,6 +294,7 @@ FailureOr<OwningModuleRef>
+ bishengir::runBiShengIRPipeline(ModuleOp mod,
+                                 BiShengIRCompileMainConfig config,
+                                 BishengAsyncRuntime *runtime) {
++  config.disableUnsupportedLayoutOptimization(mod);
+   MLIRContext *ctx = mod->getContext();
+   mlir::DiagnosticEngine &diagEngine = ctx->getDiagEngine();
+   std::vector<std::unique_ptr<Diagnostic>> collectedDiagnostics;
+diff --git a/bishengir/lib/Tools/bishengir-compile/CMakeLists.txt b/bishengir/lib/Tools/bishengir-compile/CMakeLists.txt
+index 7144475d2..9006944e4 100644
+--- a/bishengir/lib/Tools/bishengir-compile/CMakeLists.txt
++++ b/bishengir/lib/Tools/bishengir-compile/CMakeLists.txt
+@@ -9,6 +9,7 @@ if(BISHENGIR_ENABLE_TRITON_COMPILE)
+   # pulled in (via InitAllDialects.h -> RegisterTritonDialects.h / Proton
+   # Passes.h) when compiling bishengir-compile sources. Without these, ninja may
+   # schedule the .cpp.o build before tablegen runs under RelWithDebInfo builds.
++  set(triton_ir_lib TritonIR)
+   list(APPEND triton_deps
+     ProtonTableGen
+     ProtonAttrDefsIncGen
+@@ -33,9 +34,14 @@ add_bishengir_library(BiShengIRCompileConfigLib
+   ${triton_deps}
+ 
+   LINK_LIBS PUBLIC
++  ${triton_ir_lib}
+   BiShengIRHACCUtils
++  BiShengIRHFusionUtils
+   BiShengIRPass
++  BiShengIRScopeDialect
+   BiShengIRToolUtils
++  MLIRFuncDialect
++  MLIRLinalgDialect
+ )
+ 
+ add_bishengir_library(BiShengIRCompileLib
+diff --git a/bishengir/lib/Tools/bishengir-compile/PassPipeline.cpp b/bishengir/lib/Tools/bishengir-compile/PassPipeline.cpp
+index 5ff6497a8..a7b3407be 100755
+--- a/bishengir/lib/Tools/bishengir-compile/PassPipeline.cpp
++++ b/bishengir/lib/Tools/bishengir-compile/PassPipeline.cpp
+@@ -18,11 +18,13 @@
+ #include "bishengir/Tools/bishengir-compile/PassPipeline.h"
+ #include "bishengir/Config/bishengir-config.h"
+ #include "bishengir/Dialect/HACC/Transforms/Passes.h"
+-#include "bishengir/Dialect/HACC/Utils/Utils.h"
+ #include "bishengir/Dialect/HFusion/Pipelines/Passes.h"
+ #include "bishengir/Dialect/HIVM/Pipelines/ConvertToHIVMPipeline.h"
+ #include "bishengir/Dialect/HIVM/Pipelines/Passes.h"
++#include "bishengir/Target/LLVMIR/Dialect/All.h"
++#include "bishengir/Tools/Utils/Utils.h"
+ #include "bishengir/Tools/bishengir-compile/BiShengIRCompile.h"
++#include "bishengir/Tools/hivmc/PassPipelineA3.h"
+ #include "bishengir/Transforms/Passes.h"
+ 
+ #if BISHENGIR_ENABLE_TORCH_CONVERSIONS
+@@ -35,6 +37,8 @@
+ 
+ #include "mlir/Pass/Pass.h"
+ #include "mlir/Pass/PassRegistry.h"
++#include "mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h"
++#include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
+ #include "llvm/Support/CommandLine.h"
+ 
+ #include <memory>
+@@ -61,12 +65,6 @@ void setupHIVMPipelineOptions(hivm::HIVMPipelineOptions &options,
+                               const BiShengIRCompileMainConfig &config) {
+ #define GEN_HIVM_OPTION_SETUP
+ #include "bishengir/Tools/bishengir-compile/ConfigUtils.cpp.inc"
+-  // Options.td defaults EnableLayoutOptimization=true for Ascend950
+-  // (A5-630/v4). Keep the A3 mem-based path historically off unless the target
+-  // is Ascend950/960.
+-  if (!(mlir::hacc::utils::isAscend950(config.getTarget()) ||
+-        mlir::hacc::utils::isAscend960(config.getTarget())))
+-    options.enableLayoutOptimization = false;
+ }
+ 
+ void buildBiShengHIRPipeline(OpPassManager &pm,
+@@ -125,12 +123,32 @@ public:
+     return "Compile BiShengIR module to binary.";
+   }
+ 
+-  void runOnOperation() override {
+-    ModuleOp moduleOp = getOperation();
++  // The nested HIR pipeline reads its target and layout flag from the config.
++  BiShengIRCompileMainConfig getCompileConfig() const {
+     BiShengIRCompileMainConfig config;
+-    // Use generated metadata from Options.td to map pass options back to the
+-    // compile config.
+     config.setOutputFile(outputFile);
++    config.setTarget(target);
++    config.setEnableLayoutOptimization(enableLayoutOptimization);
++    return config;
++  }
++
++  void getDependentDialects(DialectRegistry &registry) const override {
++    mlir::registerBuiltinDialectTranslation(registry);
++    mlir::registerLLVMDialectTranslation(registry);
++    bishengir::registerAllToLLVMIRTranslations(registry);
++    OpPassManager pm(ModuleOp::getOperationName(),
++                     OpPassManager::Nesting::Implicit);
++    buildBiShengHIRPipeline(pm, getCompileConfig());
++    buildBiShengHIRHIVMToLLVMPipeline(pm, HIVMCMainConfig{});
++    pm.getDependentDialects(registry);
++  }
++
++  void runOnOperation() override {
++    ModuleOp moduleOp = getOperation();
++    BiShengIRCompileMainConfig config = getCompileConfig();
++    static char executableAnchor;
++    config.setExecutablePath(
++        getExecutablePath("bishengir-opt", &executableAnchor));
+ 
+     SmallVector<Pass::Option<bool> *> sharedWithHIVMCompileBool = {
+         &enableAutoBindSubBlock,
+@@ -226,6 +244,7 @@ public:
+     auto res = runBiShengIRPipeline(cloned, config);
+     if (failed(res)) {
+       signalPassFailure();
++      return;
+     }
+     IRMapping mapper;
+     auto blocks =
+diff --git a/bishengir/lib/Tools/bishengir-compile/regbase/BiShengIRCompileMain.cpp b/bishengir/lib/Tools/bishengir-compile/regbase/BiShengIRCompileMain.cpp
+index bf8334a39..83cc10c8d 100644
+--- a/bishengir/lib/Tools/bishengir-compile/regbase/BiShengIRCompileMain.cpp
++++ b/bishengir/lib/Tools/bishengir-compile/regbase/BiShengIRCompileMain.cpp
+@@ -666,6 +666,8 @@ bishengir::regbase::runRegBasePipeline(ModuleOp mod,
+     return failure();
+   }
+ 
++  config.disableUnsupportedLayoutOptimization(mod);
++
+   if (regbase::isSpecialCaseCloseNewTreeReduce(mod)) {
+     LDBG("Matched a known new-TreeReduce regression signature; disabling "
+          "TreeReduce");
+diff --git a/bishengir/lib/Tools/bishengir-compile/regbase/Driver.cpp b/bishengir/lib/Tools/bishengir-compile/regbase/Driver.cpp
+index 5212b2944..082435ef3 100644
+--- a/bishengir/lib/Tools/bishengir-compile/regbase/Driver.cpp
++++ b/bishengir/lib/Tools/bishengir-compile/regbase/Driver.cpp
+@@ -67,10 +67,6 @@ int runRegBaseCompile(ModuleOp module, BiShengIRCompileMainConfig config,
+   // if (!shouldUseDirectRegBasePipeline(config))
+   //   return runExternalRegBaseCompile(originalCLArgs);
+ 
+-  if (failed(inferLayoutOptimization(module, config))) {
+-    llvm::errs() << "[ERROR] Failed to infer layout optimization\n";
+-    return EXIT_FAILURE;
+-  }
+   if (config.getEnableTritonKernelCompile()) {
+     if (failed(inferMixedCV(module, config))) {
+       llvm::errs() << "[ERROR] Failed to infer mix mode\n";
+diff --git a/bishengir/lib/Tools/bishengir-compile/regbase/PassPipeline.cpp b/bishengir/lib/Tools/bishengir-compile/regbase/PassPipeline.cpp
+index 9f03c7eda..a2707bfc9 100644
+--- a/bishengir/lib/Tools/bishengir-compile/regbase/PassPipeline.cpp
++++ b/bishengir/lib/Tools/bishengir-compile/regbase/PassPipeline.cpp
+@@ -132,7 +132,7 @@ void setupHIVMPipelineOptions(hivm::HIVMPipelineOptions &hivmPipelineOptions,
+     auto wsMbOpt = registeredOptions.find("set-workspace-multibuffer");
+     bool hasExplicit = wsMbOpt != registeredOptions.end() &&
+                        wsMbOpt->second->getNumOccurrences() != 0;
+-    if (!hasExplicit && hacc::utils::isRegBasedArch(config.getTarget()))
++    if (!hasExplicit)
+       options.setWorkspaceMultibuffer = 2;
+   }
+ 
+@@ -272,7 +272,7 @@ void setupHIVMAVEPipelineOptions(
+       config.getEnableTritonKernelCompile();
+   hivmAVEPipelineOptions.enableMixedCV = config.shouldEnableMixedCV();
+   hivmAVEPipelineOptions.enableLayoutOptimization =
+-      config.shouldEnableLayoutOptimization();
++      config.getEnableLayoutOptimization();
+   hivmAVEPipelineOptions.simtVFDynamicSize = config.getSimtVFDynamicSize();
+   hivmAVEPipelineOptions.enableAutoBlockifyLoop =
+       config.getEnableAutoBlockifyLoop();
+@@ -298,7 +298,7 @@ void setupHIVMAVEPipelineOptions(
+     auto wsMbOpt = registeredOptions.find("set-workspace-multibuffer");
+     bool hasExplicit = wsMbOpt != registeredOptions.end() &&
+                        wsMbOpt->second->getNumOccurrences() != 0;
+-    if (!hasExplicit && hacc::utils::isRegBasedArch(config.getTarget()))
++    if (!hasExplicit)
+       wsMb = 2;
+     hivmAVEPipelineOptions.workspaceMultiBufferNum = wsMb;
+   }
+@@ -642,8 +642,7 @@ void buildBiShengHIRPipeline(OpPassManager &pm,
+         std::make_unique<hivm::ConvertToHIVMPipelineOptions>();
+     convertOptions->enableTritonKernelCompile =
+         config.getEnableTritonKernelCompile();
+-    convertOptions->enableRegBaseHIVMPipe =
+-        hacc::utils::isRegBasedArch(config.getTarget());
++    convertOptions->enableRegBaseHIVMPipe = true;
+     auto options = std::make_unique<hivm::HIVMPipelineOptions>();
+     setupHIVMPipelineOptions(*options, config);
+     hivm::buildConvertToHIVMPipeline(pm, *convertOptions);
+diff --git a/bishengir/lib/Tools/bishengir-compile/regbase/PassPipelineV2.cpp b/bishengir/lib/Tools/bishengir-compile/regbase/PassPipelineV2.cpp
+index 6db1a93f2..54d74a212 100644
+--- a/bishengir/lib/Tools/bishengir-compile/regbase/PassPipelineV2.cpp
++++ b/bishengir/lib/Tools/bishengir-compile/regbase/PassPipelineV2.cpp
+@@ -139,8 +139,7 @@ void buildV2HIRPipeline(OpPassManager &pm,
+         std::make_unique<hivm::ConvertToHIVMPipelineOptions>();
+     convertOptions->enableTritonKernelCompile =
+         config.getEnableTritonKernelCompile();
+-    convertOptions->enableRegBaseHIVMPipe =
+-        hacc::utils::isRegBasedArch(config.getTarget());
++    convertOptions->enableRegBaseHIVMPipe = true;
+     auto options = std::make_unique<hivm::HIVMPipelineOptions>();
+     setupHIVMPipelineOptions(*options, config);
+     hivm::buildConvertToHIVMPipeline(pm, *convertOptions);
+diff --git a/bishengir/lib/Tools/bishengir-compile/regbase/Utility.cpp b/bishengir/lib/Tools/bishengir-compile/regbase/Utility.cpp
+index bcc3c4d85..231f35adb 100644
+--- a/bishengir/lib/Tools/bishengir-compile/regbase/Utility.cpp
++++ b/bishengir/lib/Tools/bishengir-compile/regbase/Utility.cpp
+@@ -21,7 +21,6 @@
+ #include "bishengir/Dialect/Scope/IR/Scope.h"
+ 
+ #include "mlir/Dialect/Func/IR/FuncOps.h"
+-#include "mlir/Dialect/Linalg/IR/Linalg.h"
+ #include "llvm/ADT/STLExtras.h"
+ #include "llvm/ADT/SmallVector.h"
+ #include "llvm/Support/CommandLine.h"
+@@ -97,29 +96,6 @@ LogicalResult inferMixedCV(ModuleOp &module,
+   return success();
+ }
+ 
+-LogicalResult inferLayoutOptimization(ModuleOp &module,
+-                                      BiShengIRCompileMainConfig &config) {
+-  module.walk<WalkOrder::PreOrder>([&](Operation *op) -> WalkResult {
+-    if (isa<linalg::BatchMatmulOp>(op)) {
+-      config.setEnableLayoutOptimization(false);
+-      return WalkResult::interrupt();
+-    }
+-    if (auto callOp = dyn_cast<func::CallOp>(op)) {
+-      auto callee = callOp.getCallee();
+-      if (callee.starts_with("triton_print")) {
+-        config.setEnableLayoutOptimization(false);
+-        return WalkResult::interrupt();
+-      }
+-    }
+-    if (isa<scope::ScopeOp>(op)) {
+-      config.setEnableLayoutOptimization(false);
+-      return WalkResult::interrupt();
+-    }
+-    return WalkResult::advance();
+-  });
+-  return success();
+-}
+-
+ std::vector<std::string>
+ filterRegBaseForwardedHIVMCOptions(ArrayRef<std::string> originalCLArgs) {
+   std::vector<std::string> result;
+diff --git a/bishengir/test/Dialect/HFusion/hfusion-adapt-triton-kernel.mlir b/bishengir/test/Dialect/HFusion/hfusion-adapt-triton-kernel.mlir
+index e7ca285f6..9a0f08c2a 100644
+--- a/bishengir/test/Dialect/HFusion/hfusion-adapt-triton-kernel.mlir
++++ b/bishengir/test/Dialect/HFusion/hfusion-adapt-triton-kernel.mlir
+@@ -162,15 +162,26 @@ module {
+ // CHECK: %[[TENSOR:.*]] = bufferization.to_tensor
+ // CHECK-NEXT: hfusion.print "PID: " {hex = true} %[[PID_32]] : i32
+ // CHECK-NEXT: hfusion.print "" {hex = false} %[[TENSOR]] : tensor<1024xf32>
++// CHECK-NEXT: hfusion.print "PID: " {hex = true} %[[PID_32]] : i32
+ // CHECK-NEXT: call @a_triton_print_1
++// CHECK-NEXT: call @triton_print_log
++// CHECK-NEXT: call @triton_print_1
++// CHECK-NEXT: call @triton_print_2
+ func.func private @triton_print(i32) attributes {hex = true, prefix = "PID: "}
+ func.func private @triton_print_0(tensor<1024xf32>) attributes {hex = false, prefix = ""}
++func.func private @triton_print_log(i32) attributes {hex = false, prefix = "log"}
++func.func private @triton_print_1(i32)
++func.func private @triton_print_2(i32) attributes {hex = "false", prefix = "log"}
+ func.func private @a_triton_print_1(tensor<1024xf32>) attributes {hex = false, prefix = "Val: "}
+ func.func @triton_kernel_printop(%pid: i32, %arg0: memref<1024xf32>) {
+   %0 = bufferization.to_tensor %arg0 restrict writable : memref<1024xf32>
+   func.call @triton_print(%pid) : (i32) -> ()
+   func.call @triton_print_0(%0) : (tensor<1024xf32>) -> ()
++  func.call @triton_print(%pid) : (i32) -> ()
+   func.call @a_triton_print_1(%0) : (tensor<1024xf32>) -> ()
++  func.call @triton_print_log(%pid) : (i32) -> ()
++  func.call @triton_print_1(%pid) : (i32) -> ()
++  func.call @triton_print_2(%pid) : (i32) -> ()
+   return
+ }
+ 
+diff --git a/bishengir/test/Dialect/HIVM/a3-layout-optimization.mlir b/bishengir/test/Dialect/HIVM/a3-layout-optimization.mlir
+new file mode 100644
+index 000000000..f3a9db730
+--- /dev/null
++++ b/bishengir/test/Dialect/HIVM/a3-layout-optimization.mlir
+@@ -0,0 +1,74 @@
++// REQUIRES: enable-lir-compile
++// DEFINE: %{compile} = bishengir-compile --enable-triton-kernel-compile=true --mlir-disable-threading --mlir-print-ir-after=tile-cube-vector-loop,hivm-insert-convert-layout
++// DEFINE: %{opt} = bishengir-opt %s --mlir-disable-threading --mlir-print-ir-after=tile-cube-vector-loop,hivm-insert-convert-layout -o %t.mlir
++// RUN: %{compile} %s --target=Ascend910_9382 -o %t.default.o 2> %t.default.log
++// RUN: FileCheck %s --check-prefixes=TILE,ND,PACKED < %t.default.log
++// RUN: %{compile} %s --target=Ascend910_9382 --enable-layout-optimization=true -o %t.on.o 2> %t.on.log
++// RUN: FileCheck %s --check-prefixes=TILE,ND,PACKED < %t.on.log
++// RUN: %{compile} %s --target=Ascend910_9382 --enable-layout-optimization=false -o %t.off.o 2> %t.off.log
++// RUN: FileCheck %s --check-prefixes=TILE,ND --implicit-check-not=InsertConvertLayout < %t.off.log
++// RUN: %{compile} %s --target=Ascend910B2 -o %t.a2.o 2> %t.a2.log
++// RUN: FileCheck %s --check-prefixes=TILE,ND,PACKED < %t.a2.log
++// RUN: %{compile} %s --target=Ascend910B2 --enable-layout-optimization=false -o %t.a2-off.o 2> %t.a2-off.log
++// RUN: FileCheck %s --check-prefixes=TILE,ND --implicit-check-not=InsertConvertLayout < %t.a2-off.log
++// RUN: %{compile} %S/../../bishengir-compile/triton/device-debug/cube1.mlir --target=Ascend910_9382 --enable-hfusion-compile=true -o %t.print.o 2> %t.print.log
++// RUN: FileCheck %s --check-prefix=TILE --implicit-check-not=InsertConvertLayout < %t.print.log
++// RUN: bishengir-opt %S/../../bishengir-compile/triton/device-debug/cube1.mlir -adapt-triton-kernel -o %t.hfusion.mlir
++// RUN: %{compile} %t.hfusion.mlir --target=Ascend910_9382 --enable-hfusion-compile=true -o %t.hfusion.o 2> %t.hfusion.log
++// RUN: FileCheck %s --check-prefix=TILE --implicit-check-not=InsertConvertLayout < %t.hfusion.log
++// RUN: %{opt} '-bishengir-compile=target=Ascend910_9382 o=%t.pass.o' 2> %t.pass.log
++// RUN: FileCheck %s --check-prefixes=TILE,ND,PACKED < %t.pass.log
++// RUN: %{opt} '-bishengir-compile=target=Ascend910_9382 enable-layout-optimization=false o=%t.pass-off.o' 2> %t.pass-off.log
++// RUN: FileCheck %s --check-prefixes=TILE,ND --implicit-check-not=InsertConvertLayout < %t.pass-off.log
++// RUN: echo 'module {}' | bishengir-opt --hacc-append-device-spec=target=Ascend950PR_9579 '--lower-hivm-pipeline=target=Ascend950PR_9579' --dump-pass-pipeline -o /dev/null 2>&1 | FileCheck %s --check-prefix=A5-ORDER
++// A5-ORDER: hivm-insert-convert-layout{{.*}}hivm-tile-batchmm-into-loop
++
++// TILE: IR Dump After TileCubeVectorLoop
++// ND: hivm.hir.mmadL1
++// ND-SAME: tensor<32x64xf16>, tensor<64x64xf16>
++// PACKED: IR Dump After InsertConvertLayout
++// PACKED: hivm.hir.mmadL1
++// PACKED-SAME: tensor<4x2x16x16xf16>, tensor<4x4x16x16xf16>
++
++// An ordinary function may share the Triton adapter's print prefix.
++func.func private @triton_print_count(%count: index) -> index {
++  return %count : index
++}
++
++func.func @matmul_loop(
++    %ffts: i64 {hacc.arg_type = #hacc.arg_type<ffts_base_address>},
++    %lhs: memref<?x64x64xf16, #hivm.address_space<gm>>,
++    %rhs: memref<64x64xf16, #hivm.address_space<gm>>,
++    %dst: memref<?x64x64xf32, #hivm.address_space<gm>>, %count: index,
++    %workspace: memref<?xi8> {hacc.arg_type = #hacc.arg_type<workspace>},
++    %num_x: i32, %num_y: i32, %num_z: i32, %id_x: i32, %id_y: i32, %id_z: i32)
++    attributes {hacc.entry, hacc.function_kind = #hacc.function_kind<DEVICE>} {
++  %true = arith.constant true
++  %c0 = arith.constant 0 : index
++  %c1 = arith.constant 1 : index
++  %c64 = arith.constant 64 : index
++  %bound = func.call @triton_print_count(%count) : (index) -> index
++  scf.for %i = %c0 to %bound step %c1 {
++    %src = memref.subview %lhs[%i, 0, 0] [1, 64, 64] [1, 1, 1]
++      : memref<?x64x64xf16, #hivm.address_space<gm>>
++        to memref<64x64xf16, strided<[64, 1], offset: ?>, #hivm.address_space<gm>>
++    %a_buf = memref.alloc() : memref<64x64xf16>
++    hivm.hir.load ins(%src : memref<64x64xf16, strided<[64, 1], offset: ?>, #hivm.address_space<gm>>)
++                  outs(%a_buf : memref<64x64xf16>)
++    %a = bufferization.to_tensor %a_buf restrict writable : memref<64x64xf16>
++    %b_buf = memref.alloc() : memref<64x64xf16>
++    hivm.hir.load ins(%rhs : memref<64x64xf16, #hivm.address_space<gm>>) outs(%b_buf : memref<64x64xf16>)
++    %b = bufferization.to_tensor %b_buf restrict writable : memref<64x64xf16>
++    %empty = tensor.empty() : tensor<64x64xf32>
++    // Two M tiles exercise packing a slice of the empty accumulator.
++    %c = hivm.hir.mmadL1 {hivm.tile_mix_cube_num = 2 : i32} ins(%a, %b, %true, %c64, %c64, %c64
++        : tensor<64x64xf16>, tensor<64x64xf16>, i1, index, index, index)
++        outs(%empty : tensor<64x64xf32>) -> tensor<64x64xf32>
++    %out = memref.subview %dst[%i, 0, 0] [1, 64, 64] [1, 1, 1]
++      : memref<?x64x64xf32, #hivm.address_space<gm>>
++        to memref<64x64xf32, strided<[64, 1], offset: ?>, #hivm.address_space<gm>>
++    hivm.hir.store ins(%c : tensor<64x64xf32>)
++                   outs(%out : memref<64x64xf32, strided<[64, 1], offset: ?>, #hivm.address_space<gm>>)
++  } {hivm.loop_core_type = #hivm.tcore_type<CUBE>}
++  return
++}
+diff --git a/bishengir/test/Dialect/HIVM/auto-mark-matmul-collapse.mlir b/bishengir/test/Dialect/HIVM/auto-mark-matmul-collapse.mlir
+index 651ce7200..3b789cc2a 100644
+--- a/bishengir/test/Dialect/HIVM/auto-mark-matmul-collapse.mlir
++++ b/bishengir/test/Dialect/HIVM/auto-mark-matmul-collapse.mlir
+@@ -2,6 +2,7 @@
+ // RUN: bishengir-opt %s -hivm-mark-matmul-row-collapses -hivm-insert-load-store-for-mix-cv='enable-legacy=true' -canonicalize-ext | FileCheck %s
+ // RUN: bishengir-opt %s -hivm-mark-matmul-row-collapses -hivm-insert-load-store-for-mix-cv -hivm-mark-matmul-row-collapses -hivm-insert-load-store-for-mix-cv -canonicalize-ext | FileCheck %s
+ // RUN: bishengir-opt %s -verify-diagnostics -hacc-append-device-spec='target=Ascend910_9382' -optimize-hivm-pipeline='target=Ascend910_9382 enable-triton-kernel-compile=true enable-layout-optimization=false tile-mix-cube-loop=1 tile-mix-vector-loop=1' | FileCheck %s --check-prefix=FULL --implicit-check-not='memref<2x4x2x16x16xf16'
++// RUN: bishengir-opt %s -verify-diagnostics -hacc-append-device-spec='target=Ascend910_9382' -optimize-hivm-pipeline='target=Ascend910_9382 enable-triton-kernel-compile=true enable-layout-optimization=true' | FileCheck %s --check-prefix=FULL --implicit-check-not='memref<2x4x2x16x16xf16'
+ 
+ // FULL-LABEL: func.func @dynamic_row_merge_mix_aic(
+ // FULL: memref<4x4x16x16xf16, #hivm.address_space<cbuf>>
+diff --git a/bishengir/test/Dialect/HIVM/combine-optimized-convert-layout.mlir b/bishengir/test/Dialect/HIVM/combine-optimized-convert-layout.mlir
+index c150972b7..9daae1b12 100644
+--- a/bishengir/test/Dialect/HIVM/combine-optimized-convert-layout.mlir
++++ b/bishengir/test/Dialect/HIVM/combine-optimized-convert-layout.mlir
+@@ -569,6 +569,20 @@ func.func @fold_fixpipe_nz2nz_fractal_to_fractal(%src: tensor<16x16xf32>) -> ten
+ 
+ // -----
+ 
++// CHECK-LABEL: func.func @keep_convert_from_block_argument(
++// CHECK: hivm.hir.convert_layout
++func.func @keep_convert_from_block_argument(%arg: memref<16x16xf16, #hivm.address_space<gm>>)
++    -> tensor<1x1x16x16xf16> {
++  %src = bufferization.to_tensor %arg restrict writable : memref<16x16xf16, #hivm.address_space<gm>>
++  %fr = hivm.hir.convert_layout %src output_shape [1, 1, 16, 16]
++    {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>,
++     srcLayout = #hivm.data_layout<ND, transpose = false>}
++    : (tensor<16x16xf16>) -> tensor<1x1x16x16xf16>
++  return %fr : tensor<1x1x16x16xf16>
++}
++
++// -----
++
+ // Leftover ND→Fractal on an NZ2NZ Fixpipe is also folded into a rank-4 Fixpipe.
+ // CHECK-LABEL: func.func @fold_fixpipe_nz2nz_nd_to_fractal
+ // CHECK-NOT: hivm.hir.convert_layout
+diff --git a/bishengir/test/Dialect/HIVM/hivm-pipeline-skip-bind-sub-block.mlir b/bishengir/test/Dialect/HIVM/hivm-pipeline-skip-bind-sub-block.mlir
+index d93f576d8..a1c4890f5 100644
+--- a/bishengir/test/Dialect/HIVM/hivm-pipeline-skip-bind-sub-block.mlir
++++ b/bishengir/test/Dialect/HIVM/hivm-pipeline-skip-bind-sub-block.mlir
+@@ -1,7 +1,7 @@
+ // RUN: bishengir-opt %s --hacc-append-device-spec=target=Ascend910B1 --optimize-hivm-pipeline --dump-pass-pipeline -o /dev/null 2>&1 | FileCheck %s --check-prefix=DEFAULT
+ // RUN: bishengir-opt %s --hacc-append-device-spec=target=Ascend910B1 --optimize-hivm-pipeline='skip-hivm-bind-sub-block-pass=true' --dump-pass-pipeline -o /dev/null 2>&1 | FileCheck %s --check-prefix=SKIP
+ // RUN: bishengir-opt %s --hacc-append-device-spec=target=Ascend910B1 --optimize-hivm-pipeline='enable-auto-bind-sub-block=false' --dump-pass-pipeline -o /dev/null 2>&1 | FileCheck %s --check-prefix=DISABLE-TILING
+-// RUN: bishengir-opt %s --hacc-append-device-spec=target=Ascend960 --optimize-hivm-pipeline='target=Ascend960' --dump-pass-pipeline -o /dev/null 2>&1 | FileCheck %s --check-prefix=A6
++// RUN: bishengir-opt %s --hacc-append-device-spec=target=Ascend960 --lower-hivm-pipeline='target=Ascend960' --dump-pass-pipeline -o /dev/null 2>&1 | FileCheck %s --check-prefix=A6
+ 
+ // DEFAULT: hivm-bind-sub-block{{.*}}enable-tile=true
+ // SKIP-NOT: hivm-bind-sub-block
+diff --git a/bishengir/test/Dialect/HIVM/inject-block-sync.mlir b/bishengir/test/Dialect/HIVM/inject-block-sync.mlir
+index 5c8cbd69e..ea62dff1d 100644
+--- a/bishengir/test/Dialect/HIVM/inject-block-sync.mlir
++++ b/bishengir/test/Dialect/HIVM/inject-block-sync.mlir
+@@ -647,3 +647,32 @@ func.func @matmul_x_w_bias_down_up_fused_layer_1_kernel(%arg0: i64 {hacc.arg_typ
+   hivm.hir.store ins(%extracted_slice : tensor<?x?xf16>) outs(%subview_11 : memref<?x?xf16, strided<[?, 1], offset: ?>>)
+   return
+ }
++
++// -----
++
++// CHECK-LABEL: func.func @pack_vector_workspace
++// CHECK: sync_block_set[<CUBE>, <PIPE_MTE2>, <PIPE_S>] flag = [[FREE:[0-9]+]]
++// CHECK: scf.for
++// CHECK: sync_block_wait[<VECTOR>, <PIPE_MTE2>, <PIPE_S>] flag = [[FREE]]
++// CHECK: %[[STORED:.*]] = hivm.hir.store
++// CHECK: sync_block_set[<VECTOR>, <PIPE_MTE3>, <PIPE_S>] flag = [[READY:[0-9]+]]
++// CHECK: sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_S>] flag = [[READY]]
++// CHECK: hivm.hir.nd2nz {{.*}}ins(%[[STORED]]
++// CHECK: sync_block_set[<CUBE>, <PIPE_MTE2>, <PIPE_S>] flag = [[FREE]]
++// CHECK: }
++// CHECK: sync_block_wait[<VECTOR>, <PIPE_MTE2>, <PIPE_S>] flag = [[FREE]]
++func.func @pack_vector_workspace(%ffts: i64 {hacc.arg_type = #hacc.arg_type<ffts_base_address>},
++    %workspace: memref<?xi8> {hacc.arg_type = #hacc.arg_type<workspace>}, %src: tensor<16x16xf16>, %count: index)
++    attributes {hivm.func_core_type = #hivm.func_core_type<MIX>} {
++  %c0 = arith.constant 0 : index
++  %c1 = arith.constant 1 : index
++  %buffer = memref_ext.alloc_workspace() from %workspace offset = [%c0] : from memref<?xi8> to memref<16x16xf16>
++  %stage = bufferization.to_tensor %buffer restrict writable : memref<16x16xf16>
++  %dst = tensor.empty() : tensor<1x1x16x16xf16>
++  scf.for %i = %c0 to %count step %c1 {
++    %stored = hivm.hir.store ins(%src : tensor<16x16xf16>) outs(%stage : tensor<16x16xf16>)
++        {hivm.tcore_type = #hivm.tcore_type<VECTOR>} -> tensor<16x16xf16>
++    %packed = hivm.hir.nd2nz {dst_continuous} ins(%stored : tensor<16x16xf16>) outs(%dst : tensor<1x1x16x16xf16>) -> tensor<1x1x16x16xf16>
++  }
++  return
++}
+diff --git a/bishengir/test/Dialect/HIVM/insert-convert-layout.mlir b/bishengir/test/Dialect/HIVM/insert-convert-layout.mlir
+index fc788e71d..71f9ce8fb 100644
+--- a/bishengir/test/Dialect/HIVM/insert-convert-layout.mlir
++++ b/bishengir/test/Dialect/HIVM/insert-convert-layout.mlir
+@@ -1,4 +1,5 @@
+ // RUN: bishengir-opt %s --hivm-insert-convert-layout --split-input-file | FileCheck %s
++// RUN: sed 's/Ascend910_9382/Ascend950PR_9579/g' %s | bishengir-opt --hivm-insert-convert-layout --split-input-file | FileCheck %s --check-prefix=A5
+ 
+ // CHECK-LABEL: func.func @insert_for_mmad_basic(
+ // CHECK-SAME: %[[A:.*]]: tensor<64x16xf16>, %[[B:.*]]: tensor<16x32xf16>)
+@@ -304,3 +305,35 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+     return %mmad0, %mmad1 : tensor<32x32xi32>, tensor<32x32xi32>
+   }
+ }
++
++// -----
++
++module attributes {hacc.target = #hacc.target<"Ascend910_9382">} {
++  // A5-LABEL: func.func @a3_keep_l0c_accumulator(
++  // A5: hivm.hir.mmadL1
++  // A5-SAME: outs({{.*}} : tensor<1x4x16x16xf32>) -> tensor<1x4x16x16xf32>
++  // A5: hivm.hir.mmadL1
++  // A5-SAME: outs({{.*}} : tensor<1x4x16x16xf32>) -> tensor<1x4x16x16xf32>
++  // CHECK-LABEL: func.func @a3_keep_l0c_accumulator(
++  // CHECK: %[[ACC:.*]] = hivm.hir.mmadL1
++  // CHECK-SAME: tensor<2x4x16x8xf32>, tensor<2x1x16x8xf32>
++  // CHECK-SAME: outs({{.*}} : tensor<64x16xf32>) -> tensor<64x16xf32>
++  // CHECK: %[[RESULT:.*]] = hivm.hir.mmadL1
++  // CHECK-SAME: tensor<2x4x16x8xf32>, tensor<2x1x16x8xf32>
++  // CHECK-SAME: outs(%[[ACC]] : tensor<64x16xf32>) -> tensor<64x16xf32>
++  // CHECK-NEXT: return %[[RESULT]] : tensor<64x16xf32>
++  func.func @a3_keep_l0c_accumulator(%a: tensor<64x16xf32>, %b: tensor<16x16xf32>) -> tensor<64x16xf32> {
++    %true = arith.constant true
++    %false = arith.constant false
++    %c16 = arith.constant 16 : index
++    %c64 = arith.constant 64 : index
++    %empty = tensor.empty() : tensor<64x16xf32>
++    %acc = hivm.hir.mmadL1 {hivm.remain_in_l0c = [0 : i32]}
++        ins(%a, %b, %true, %c64, %c16, %c16 : tensor<64x16xf32>, tensor<16x16xf32>, i1, index, index, index)
++        outs(%empty : tensor<64x16xf32>) -> tensor<64x16xf32>
++    %result = hivm.hir.mmadL1
++        ins(%a, %b, %false, %c64, %c16, %c16 : tensor<64x16xf32>, tensor<16x16xf32>, i1, index, index, index)
++        outs(%acc : tensor<64x16xf32>) -> tensor<64x16xf32>
++    return %result : tensor<64x16xf32>
++  }
++}
+diff --git a/bishengir/test/Dialect/HIVM/propagate-convert-layout-cbuf-reshape.mlir b/bishengir/test/Dialect/HIVM/propagate-convert-layout-cbuf-reshape.mlir
+index d959007c3..2b5733e20 100644
+--- a/bishengir/test/Dialect/HIVM/propagate-convert-layout-cbuf-reshape.mlir
++++ b/bishengir/test/Dialect/HIVM/propagate-convert-layout-cbuf-reshape.mlir
+@@ -51,6 +51,39 @@ func.func @while_copy_reshape(%input: tensor<1024xf32>, %rhs: tensor<4x2x16x8xf3
+ 
+ // -----
+ 
++// CHECK-LABEL: func.func @collapse_before_l1_copy(
++// CHECK-SAME: %[[INPUT:[^:]+]]: tensor<2x16x32xf32>
++// CHECK: %[[L1:.*]] = memref.alloc() : memref<4x2x16x8xf32, #hivm.address_space<cbuf>>
++// CHECK: %[[VIEW:.*]] = bufferization.to_tensor %[[L1]]
++// CHECK: %[[MATRIX:.*]] = tensor.collapse_shape %[[INPUT]]
++// CHECK: %[[PACKED:.*]] = hivm.hir.convert_layout %[[MATRIX]]
++// CHECK: hivm.hir.copy ins(%[[PACKED]] : tensor<4x2x16x8xf32>) outs(%[[L1]] :
++// CHECK: hivm.hir.mmadL1 ins(%[[VIEW]],
++// LOWER-LABEL: func.func @collapse_before_l1_copy(
++// LOWER: %[[MATRIX:.*]] = tensor.collapse_shape
++// LOWER: %[[EXPANDED:.*]] = tensor.expand_shape %[[MATRIX]]
++// LOWER: hivm.hir.vtranspose ins(%[[EXPANDED]]
++// LOWER: hivm.hir.copy
++// LOWER: hivm.hir.mmadL1
++module attributes {hacc.target = #hacc.target<"Ascend910B4">} {
++  func.func @collapse_before_l1_copy(%input: tensor<2x16x32xf32>, %rhs: tensor<4x2x16x8xf32>) -> tensor<2x2x16x16xf32> {
++    %c32 = arith.constant 32 : index
++    %true = arith.constant true
++    %alloc = memref.alloc() : memref<2x16x32xf32, #hivm.address_space<cbuf>>
++    %tensor = bufferization.to_tensor %alloc restrict writable : memref<2x16x32xf32, #hivm.address_space<cbuf>>
++    hivm.hir.copy ins(%input : tensor<2x16x32xf32>) outs(%alloc : memref<2x16x32xf32, #hivm.address_space<cbuf>>)
++    %matrix = tensor.collapse_shape %tensor [[0, 1], [2]] : tensor<2x16x32xf32> into tensor<32x32xf32>
++    %fractal = hivm.hir.convert_layout %matrix output_shape [4, 2, 16, 8]
++        {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 8]>, srcLayout = #hivm.data_layout<ND>}
++        : (tensor<32x32xf32>) -> tensor<4x2x16x8xf32>
++    %empty = tensor.empty() : tensor<2x2x16x16xf32>
++    %dot = hivm.hir.mmadL1 ins(%fractal, %rhs, %true, %c32, %c32, %c32 : tensor<4x2x16x8xf32>, tensor<4x2x16x8xf32>, i1, index, index, index) outs(%empty : tensor<2x2x16x16xf32>) -> tensor<2x2x16x16xf32>
++    return %dot : tensor<2x2x16x16xf32>
++  }
++}
++
++// -----
++
+ // A second reader of the reshape still needs the original ND buffer.
+ // CHECK-LABEL: func.func @shared_reshape(
+ // CHECK:       %[[L1:.*]] = memref.alloc() : memref<1024xf32, #hivm.address_space<cbuf>>
+diff --git a/bishengir/test/Dialect/HIVM/propagate-convert-layout-load-reshape.mlir b/bishengir/test/Dialect/HIVM/propagate-convert-layout-load-reshape.mlir
+new file mode 100644
+index 000000000..2a644936a
+--- /dev/null
++++ b/bishengir/test/Dialect/HIVM/propagate-convert-layout-load-reshape.mlir
+@@ -0,0 +1,134 @@
++// RUN: bishengir-opt %s --hivm-propagate-convert-layout="allow-agnostic-ops=false" --canonicalize --split-input-file | FileCheck %s --check-prefix=PROP
++// RUN: bishengir-opt %s --hivm-propagate-convert-layout="allow-agnostic-ops=false" --canonicalize --hivm-combine-optimized-convert-layout --split-input-file | FileCheck %s --check-prefix=COMBINE
++
++// A shared GM input feeds a rank-2 dot and a rank-3 Vector broadcast.
++// PROP-LABEL: func.func @dot_broadcast(
++// PROP-SAME: %[[GM:[^:]+]]: memref<1x1x1xf16>
++// PROP: %[[BUF:.*]] = memref.alloc() : memref<1x1xf16>
++// PROP: %[[MATRIX:.*]] = memref.collapse_shape %[[GM]] {{.*}} into memref<1x1xf16>
++// PROP: hivm.hir.load ins(%[[MATRIX]] : memref<1x1xf16>) outs(%[[BUF]] : memref<1x1xf16>) core_type = <CUBE>
++// PROP: hivm.hir.load ins(%[[GM]] : memref<1x1x1xf16>) {{.*}}core_type = <VECTOR>
++// PROP: %[[TENSOR:.*]] = bufferization.to_tensor %[[BUF]] restrict writable
++// PROP: hivm.hir.convert_layout %[[TENSOR]]
++// COMBINE-LABEL: func.func @dot_broadcast(
++// COMBINE-SAME: %[[LEFT:[^:]+]]: memref<1x1x1xf16>, %[[RIGHT:[^:]+]]: memref<1x1xf16>
++// COMBINE: %[[MATRIX:.*]] = memref.collapse_shape %[[LEFT]] {{.*}} into memref<1x1xf16>
++// COMBINE: hivm.hir.nd2nz {{.*}}ins(%[[MATRIX]] : memref<1x1xf16>) outs(%[[A:[^ ]+]] : memref<1x1x16x16xf16>)
++// COMBINE: %[[LHS:.*]] = bufferization.to_tensor %[[A]] restrict writable
++// COMBINE: hivm.hir.load ins(%[[LEFT]] : memref<1x1x1xf16>) outs(%[[V:[^ ]+]] : memref<1x1x1xf16>) core_type = <VECTOR>
++// COMBINE: %[[VECTOR:.*]] = bufferization.to_tensor %[[V]] restrict writable
++// COMBINE: hivm.hir.nd2nz {{.*}}ins(%[[RIGHT]] : memref<1x1xf16>) outs(%[[B:[^ ]+]] : memref<1x1x16x16xf16>)
++// COMBINE: %[[RHS:.*]] = bufferization.to_tensor %[[B]] restrict writable
++// COMBINE: hivm.hir.mmadL1 ins(%[[LHS]], %[[RHS]],
++// COMBINE: hivm.hir.vbrc ins(%[[VECTOR]]
++module attributes {hacc.target = #hacc.target<"Ascend910B4">} {
++  func.func @dot_broadcast(%left: memref<1x1x1xf16>, %gm: memref<1x1xf16>)
++      -> (tensor<1x1x16x16xf32>, tensor<231x1x1xf16>) {
++    %true = arith.constant true
++    %one = arith.constant 1 : index
++    %cubeBuf = memref.alloc() : memref<1x1x1xf16>
++    %vectorBuf = memref.alloc() : memref<1x1x1xf16>
++    hivm.hir.load ins(%left : memref<1x1x1xf16>) outs(%cubeBuf : memref<1x1x1xf16>) core_type = <CUBE>
++    hivm.hir.load ins(%left : memref<1x1x1xf16>) outs(%vectorBuf : memref<1x1x1xf16>) core_type = <VECTOR>
++    %cube = bufferization.to_tensor %cubeBuf restrict writable : memref<1x1x1xf16>
++    %vector = bufferization.to_tensor %vectorBuf restrict writable : memref<1x1x1xf16>
++    %lhs = tensor.collapse_shape %cube [[0, 1], [2]] : tensor<1x1x1xf16> into tensor<1x1xf16>
++    %a = hivm.hir.convert_layout %lhs output_shape [1, 1, 16, 16]
++        {srcLayout = #hivm.data_layout<ND>, dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>}
++        : (tensor<1x1xf16>) -> tensor<1x1x16x16xf16>
++    %buf = memref.alloc() : memref<1x1xf16>
++    hivm.hir.load ins(%gm : memref<1x1xf16>) outs(%buf : memref<1x1xf16>) core_type = <CUBE>
++    %rhs = bufferization.to_tensor %buf restrict writable : memref<1x1xf16>
++    %b = hivm.hir.convert_layout %rhs output_shape [1, 1, 16, 16]
++        {srcLayout = #hivm.data_layout<ND>, dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>}
++        : (tensor<1x1xf16>) -> tensor<1x1x16x16xf16>
++    %acc = tensor.empty() : tensor<1x1x16x16xf32>
++    %dot = hivm.hir.mmadL1 ins(%a, %b, %true, %one, %one, %one : tensor<1x1x16x16xf16>, tensor<1x1x16x16xf16>, i1, index, index, index)
++        outs(%acc : tensor<1x1x16x16xf32>) -> tensor<1x1x16x16xf32>
++    %out = tensor.empty() : tensor<231x1x1xf16>
++    %brc = hivm.hir.vbrc ins(%vector : tensor<1x1x1xf16>) outs(%out : tensor<231x1x1xf16>) broadcast_dims = [0] -> tensor<231x1x1xf16>
++    return %dot, %brc : tensor<1x1x16x16xf32>, tensor<231x1x1xf16>
++  }
++}
++
++// -----
++
++// Both views read the value of GM before the intervening store.
++// PROP-LABEL: func.func @shared_load_collapse(
++// PROP-SAME: %[[GM:[^:]+]]: memref<2x3x16xf16, strided<[96, 32, 1], offset: ?>>
++// PROP: hivm.hir.load ins(%[[GM]] :
++// PROP: %[[MATRIX:.*]] = memref.collapse_shape %[[GM]] {{.*}} into memref<6x16xf16, strided<[32, 1], offset: ?>>
++// PROP: hivm.hir.load ins(%[[MATRIX]] :
++// PROP: memref.store {{.*}}, %[[GM]]
++// PROP: hivm.hir.convert_layout
++// COMBINE-LABEL: func.func @shared_load_collapse(
++// COMBINE-SAME: %[[GM:[^:]+]]: memref<2x3x16xf16, strided<[96, 32, 1], offset: ?>>
++// COMBINE: hivm.hir.load ins(%[[GM]] : {{.*}}) outs(%[[ND:[^ ]+]] :
++// COMBINE: %[[MATRIX:.*]] = memref.collapse_shape %[[GM]] {{.*}} into memref<6x16xf16, strided<[32, 1], offset: ?>>
++// COMBINE: hivm.hir.nd2nz {{.*}}ins(%[[MATRIX]] : {{.*}}) outs(%[[L1:[^ ]+]] :
++// COMBINE: %[[PACKED:.*]] = bufferization.to_tensor %[[L1]] restrict writable
++// COMBINE: %[[ORIGINAL:.*]] = bufferization.to_tensor %[[ND]] restrict writable
++// COMBINE: memref.store {{.*}}, %[[GM]]
++// COMBINE: return %[[PACKED]], %[[ORIGINAL]]
++func.func @shared_load_collapse(%gm: memref<2x3x16xf16, strided<[96, 32, 1], offset: ?>>)
++    -> (tensor<1x1x16x16xf16>, tensor<2x3x16xf16>) {
++  %c0 = arith.constant 0 : index
++  %zero = arith.constant 0.0 : f16
++  %buf = memref.alloc() : memref<2x3x16xf16>
++  hivm.hir.load ins(%gm : memref<2x3x16xf16, strided<[96, 32, 1], offset: ?>>) outs(%buf : memref<2x3x16xf16>)
++  %tensor = bufferization.to_tensor %buf restrict writable : memref<2x3x16xf16>
++  memref.store %zero, %gm[%c0, %c0, %c0] : memref<2x3x16xf16, strided<[96, 32, 1], offset: ?>>
++  %matrix = tensor.collapse_shape %tensor [[0, 1], [2]] : tensor<2x3x16xf16> into tensor<6x16xf16>
++  %packed = hivm.hir.convert_layout %matrix output_shape [1, 1, 16, 16]
++      {srcLayout = #hivm.data_layout<ND>, dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>}
++      : (tensor<6x16xf16>) -> tensor<1x1x16x16xf16>
++  return %packed, %tensor : tensor<1x1x16x16xf16>, tensor<2x3x16xf16>
++}
++
++// -----
++
++// Rows 2 and 3 are separated by a gap in GM. Only the local tensor is dense.
++// PROP-LABEL: func.func @noncontiguous_load_collapse(
++// PROP: hivm.hir.load
++// PROP: %[[ND:.*]] = tensor.collapse_shape
++// PROP: hivm.hir.convert_layout %[[ND]]
++// COMBINE-LABEL: func.func @noncontiguous_load_collapse(
++// COMBINE: hivm.hir.load
++// COMBINE: %[[ND:.*]] = tensor.collapse_shape
++// COMBINE: hivm.hir.convert_layout %[[ND]]
++func.func @noncontiguous_load_collapse(%src: memref<2x3x16xf16, strided<[64, 16, 1]>>)
++    -> tensor<1x1x16x16xf16> {
++  %buf = memref.alloc() : memref<2x3x16xf16>
++  hivm.hir.load ins(%src : memref<2x3x16xf16, strided<[64, 16, 1]>>) outs(%buf : memref<2x3x16xf16>)
++  %tensor = bufferization.to_tensor %buf restrict writable : memref<2x3x16xf16>
++  %matrix = tensor.collapse_shape %tensor [[0, 1], [2]] : tensor<2x3x16xf16> into tensor<6x16xf16>
++  %packed = hivm.hir.convert_layout %matrix output_shape [1, 1, 16, 16]
++      {srcLayout = #hivm.data_layout<ND>, dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>}
++      : (tensor<6x16xf16>) -> tensor<1x1x16x16xf16>
++  return %packed : tensor<1x1x16x16xf16>
++}
++
++// -----
++
++// PROP-LABEL: func.func @expand_loaded_vector(
++// PROP-SAME: %[[GM:[^:]+]]: memref<1024xf32>
++// PROP: %[[BUF:.*]] = memref.alloc() : memref<32x32xf32>
++// PROP: %[[MATRIX:.*]] = memref.expand_shape %[[GM]] {{.*}} into memref<32x32xf32>
++// PROP: hivm.hir.load ins(%[[MATRIX]] : memref<32x32xf32>) outs(%[[BUF]] :
++// PROP: %[[TENSOR:.*]] = bufferization.to_tensor %[[BUF]] restrict writable
++// PROP: hivm.hir.convert_layout %[[TENSOR]]
++// COMBINE-LABEL: func.func @expand_loaded_vector(
++// COMBINE: %[[MATRIX:.*]] = memref.expand_shape
++// COMBINE: hivm.hir.nd2nz {{.*}}ins(%[[MATRIX]] : memref<32x32xf32>)
++// COMBINE-NOT: hivm.hir.convert_layout
++// COMBINE: return
++func.func @expand_loaded_vector(%gm: memref<1024xf32>) -> tensor<4x2x16x8xf32> {
++  %buf = memref.alloc() : memref<1024xf32>
++  hivm.hir.load ins(%gm : memref<1024xf32>) outs(%buf : memref<1024xf32>)
++  %tensor = bufferization.to_tensor %buf restrict writable : memref<1024xf32>
++  %matrix = tensor.expand_shape %tensor [[0, 1]] output_shape [32, 32] : tensor<1024xf32> into tensor<32x32xf32>
++  %packed = hivm.hir.convert_layout %matrix output_shape [4, 2, 16, 8]
++      {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 8]>, srcLayout = #hivm.data_layout<ND>}
++      : (tensor<32x32xf32>) -> tensor<4x2x16x8xf32>
++  return %packed : tensor<4x2x16x8xf32>
++}
+diff --git a/bishengir/test/bishengir-compile/triton/device-debug/mixed-layout-print.mlir b/bishengir/test/bishengir-compile/triton/device-debug/mixed-layout-print.mlir
+index b930e431b..5ef2fec0a 100644
+--- a/bishengir/test/bishengir-compile/triton/device-debug/mixed-layout-print.mlir
++++ b/bishengir/test/bishengir-compile/triton/device-debug/mixed-layout-print.mlir
+@@ -118,7 +118,7 @@ module {
+ //--- vector.mlir
+ module {
+   func.func private @triton_print(tensor<32x2x32x32xbf16>) attributes {hex = false, prefix = " x: "}
+-  func.func private @triton_print_flat(tensor<65536xbf16>) attributes {hex = false, prefix = "flat"}
++  func.func private @triton_print_0(tensor<65536xbf16>) attributes {hex = false, prefix = "flat"}
+   func.func @kernel(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xbf16> {tt.tensor_kind = 0 : i32}, %arg3: memref<?xbf16> {tt.tensor_kind = 0 : i32}, %arg4: memref<?xf32> {tt.tensor_kind = 1 : i32}, %arg5: i32, %arg6: i32, %arg7: i32, %arg8: i32, %arg9: i32, %arg10: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd"} {
+     %in = memref.reinterpret_cast %arg2 to offset: [0], sizes: [65536], strides: [1] : memref<?xbf16> to memref<65536xbf16, strided<[1]>>
+     %buf = memref.alloc() : memref<65536xbf16>
+@@ -127,7 +127,7 @@ module {
+     %shape = arith.constant dense<[32, 2, 32, 32]> : tensor<4xi64>
+     %p = tensor.reshape %v(%shape) : (tensor<65536xbf16>, tensor<4xi64>) -> tensor<32x2x32x32xbf16>
+     call @triton_print(%p) : (tensor<32x2x32x32xbf16>) -> ()
+-    call @triton_print_flat(%v) : (tensor<65536xbf16>) -> ()
++    call @triton_print_0(%v) : (tensor<65536xbf16>) -> ()
+     return
+   }
+ }
+diff --git a/bishengir/tools/bishengir-compile/bishengir-compile.cpp b/bishengir/tools/bishengir-compile/bishengir-compile.cpp
+index 50fd001dc..2181f731c 100644
+--- a/bishengir/tools/bishengir-compile/bishengir-compile.cpp
++++ b/bishengir/tools/bishengir-compile/bishengir-compile.cpp
+@@ -52,12 +52,6 @@
+ #include "llvm/Support/SourceMgr.h"
+ #include "llvm/Support/VersionTuple.h"
+ 
+-namespace {
+-// getMainExecutable needs an address inside this binary; ISO C++ forbids using
+-// `main` as a normal function pointer.
+-static void bishengirCompileExecutableAnchor() {}
+-} // namespace
+-
+ /// Check if any argv is --target VALUE, --target=VALUE, -target VALUE, or
+ /// -target=VALUE where VALUE matches Ascend910_95* (Ascend910_950z,
+ /// Ascend910_9579, ...) or Ascend950*.
+@@ -175,8 +169,9 @@ int main(int argc, char **argv) {
+   bool regbase = hasRegBaseTarget(argc, argv);
+   bishengir::BiShengIRCompileMainConfig config =
+       bishengir::BiShengIRCompileMainConfig::createFromCLOptions(regbase);
+-  config.setExecutablePath(bishengir::getExecutablePath(
+-      argv[0], reinterpret_cast<void *>(&bishengirCompileExecutableAnchor)));
++  static char executableAnchor;
++  config.setExecutablePath(
++      bishengir::getExecutablePath(argv[0], &executableAnchor));
+   // Check the validity of intput/output options
+   if (failed(checkInOutOptionsValidity(config))) {
+     return EXIT_FAILURE;

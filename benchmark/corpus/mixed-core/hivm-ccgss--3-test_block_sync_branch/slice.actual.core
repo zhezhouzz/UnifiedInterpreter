@@ -1,0 +1,10 @@
+run {
+  x0 := compute[unit_load@PIPE_MTE2]();
+  setflag[PIPE_MTE2, PIPE_V](EVENT_ID0);
+  waitflag[PIPE_MTE2, PIPE_V](EVENT_ID0);
+  x3 := compute[unit_vadd@PIPE_V]();
+  setflag[PIPE_V, PIPE_MTE3](EVENT_ID0);
+  waitflag[PIPE_V, PIPE_MTE3](EVENT_ID0);
+  x6 := compute[unit_store@PIPE_MTE3]();
+  return()
+}

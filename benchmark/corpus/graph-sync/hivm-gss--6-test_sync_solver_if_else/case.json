@@ -1,0 +1,80 @@
+{
+  "group": "graph-sync",
+  "id": "hivm-gss--6-test_sync_solver_if_else",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "projection": [
+    {
+      "line": 12,
+      "operation": "hivm.hir.load ins(%arg1 : memref<16x16x16xf16, #hivm.address_space<gm>>) outs(%1 : memref<16x16x16xf16, #hivm.address_space<ub>>)"
+    },
+    {
+      "line": 13,
+      "operation": "hivm.hir.load ins(%arg2 : memref<16x16x16xf16, #hivm.address_space<gm>>) outs(%2 : memref<16x16x16xf16, #hivm.address_space<ub>>)"
+    },
+    {
+      "line": 14,
+      "operation": "hivm.hir.load ins(%arg3 : memref<16x16x16xf16, #hivm.address_space<gm>>) outs(%3 : memref<16x16x16xf16, #hivm.address_space<ub>>)"
+    },
+    {
+      "line": 15,
+      "operation": "hivm.hir.set_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]"
+    },
+    {
+      "line": 16,
+      "operation": "hivm.hir.wait_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_MTE2",
+      "PIPE_V"
+    ],
+    "events": [
+      "EVENT_ID0"
+    ],
+    "units": [
+      "unit_load"
+    ]
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/SyncSolver/hivm-gss.mlir",
+  "upstream_path": "bishengir/test/Dialect/HIVM/SyncSolver/hivm-gss.mlir",
+  "split_index": 6,
+  "stage": "intra-core sync pass",
+  "function": "test_sync_solver_if_else",
+  "translation": {
+    "status": "unsupported",
+    "function": "test_sync_solver_if_else",
+    "diagnostics": [
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":11:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      },
+      {
+        "op": "scf.if",
+        "location": "loc(\"<stdin>\":17:10)",
+        "reason": "Branch guards, yields and SSA joins need a conditional translation."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      12,
+      16
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "test_sync_solver_if_else"
+}

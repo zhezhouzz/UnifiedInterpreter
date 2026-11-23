@@ -1,0 +1,56 @@
+{
+  "group": "multibuffer",
+  "id": "enable-multi-buffer-while--2-while_enable_before_region",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "projection": [
+    {
+      "line": 14,
+      "operation": "hivm.hir.load ins(%arg0 : memref<16xf16, #hivm.address_space<gm>>) outs(%1 : memref<16xf16, #hivm.address_space<ub>>)"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_MTE2"
+    ],
+    "events": [],
+    "units": [
+      "unit_load"
+    ]
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/enable-multi-buffer-while.mlir",
+  "upstream_path": "bishengir/test/Dialect/HIVM/enable-multi-buffer-while.mlir",
+  "split_index": 2,
+  "stage": "intra-core sync pass",
+  "function": "while_enable_before_region",
+  "translation": {
+    "status": "unsupported",
+    "function": "while_enable_before_region",
+    "diagnostics": [
+      {
+        "op": "scf.while",
+        "location": "loc(\"<stdin>\":8:10)",
+        "reason": "Data-dependent trip count and yielded state need a while translation."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      14,
+      14
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "while_enable_before_region"
+}

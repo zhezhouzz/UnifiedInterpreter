@@ -1,0 +1,66 @@
+{
+  "group": "vector-ops",
+  "id": "hivm-lower-to-loops-op--30-test_vmax_b64",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "projection": [
+    {
+      "line": 6,
+      "operation": "hivm.hir.vmax ins(%alloc, %alloc_0 : memref<64xi64>, memref<64xi64>) outs(%alloc_1 : memref<64xi64>)"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_V"
+    ],
+    "events": [],
+    "units": [
+      "unit_vmax"
+    ]
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/hivm-lower-to-loops-op.mlir",
+  "upstream_path": "bishengir/test/Dialect/HIVM/hivm-lower-to-loops-op.mlir",
+  "split_index": 30,
+  "stage": "intra-core sync pass",
+  "function": "test_vmax_b64",
+  "translation": {
+    "status": "unsupported",
+    "function": "test_vmax_b64",
+    "diagnostics": [
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":3:14)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":4:16)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":5:16)",
+        "reason": "No core elaboration rule for this operation."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      6,
+      6
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "test_vmax_b64"
+}

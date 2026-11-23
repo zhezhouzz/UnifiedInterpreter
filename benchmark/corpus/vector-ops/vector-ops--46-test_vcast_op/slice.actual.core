@@ -1,0 +1,7 @@
+run {
+  x0 := compute[unit_vcast@PIPE_V]();
+  x1 := compute[unit_vcast@PIPE_V]();
+  x2 := compute[unit_vcast@PIPE_V]();
+  x3 := compute[unit_vcast@PIPE_V]();
+  return()
+}

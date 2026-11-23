@@ -1,5 +1,8 @@
 # 分核与同步插入后的 HIVM Benchmark
 
+[新版 trace 语料、原生 MLIR parser 与三分钟演示](corpus/README.md) · [逐例索引](corpus/CATALOG.md) · [GitCode issue 与修复测试](corpus/evidence/README.md)
+
+
 2026-11-23。本机 bishengir-opt 1.2.0，报告源提交 fbdf863a8c8c268e5cfea0d5f1d921e227267fd5，LLVM 19.1.7。本文将每个源 kernel/上游回归函数计作一个输入族，芯片、pass 开关、变异和随机数据记作变体。目录中的材料用于选择下一批翻译目标。
 
 ## 第一批入口

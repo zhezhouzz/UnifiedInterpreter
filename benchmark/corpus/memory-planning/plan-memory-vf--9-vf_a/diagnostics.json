@@ -1,0 +1,20 @@
+{
+  "whole": [
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":10:14)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "annotation.mark",
+      "location": "loc(\"<stdin>\":11:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.debug",
+      "location": "loc(\"<stdin>\":15:5)",
+      "reason": "No core elaboration rule for this operation."
+    }
+  ],
+  "slice": []
+}

@@ -1,0 +1,126 @@
+{
+  "group": "mixed-core",
+  "id": "hivm-ccgss-reg--0-test_block_sync_normal",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "projection": [
+    {
+      "line": 32,
+      "operation": "hivm.hir.wait_flag[<PIPE_FIX>, <PIPE_MTE2>, <EVENT_ID0>]"
+    },
+    {
+      "line": 33,
+      "operation": "hivm.hir.load ins(%arg2 : memref<256xf32, #hivm.address_space<gm>>) outs(%alloc_3 : memref<256xf32, #hivm.address_space<ub>>)"
+    },
+    {
+      "line": 34,
+      "operation": "hivm.hir.set_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]"
+    },
+    {
+      "line": 35,
+      "operation": "hivm.hir.wait_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]"
+    },
+    {
+      "line": 36,
+      "operation": "hivm.hir.vadd ins(%alloc_3, %alloc_4 : memref<256xf32, #hivm.address_space<ub>>, memref<256xf32, #hivm.address_space<ub>>) outs(%alloc_3 : memref<256xf32, #hivm.address_space<ub>>)"
+    },
+    {
+      "line": 37,
+      "operation": "hivm.hir.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]"
+    },
+    {
+      "line": 38,
+      "operation": "hivm.hir.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]"
+    },
+    {
+      "line": 39,
+      "operation": "hivm.hir.store ins(%alloc_3 : memref<256xf32, #hivm.address_space<ub>>) outs(%arg3 : memref<256xf32, #hivm.address_space<gm>>)"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_FIX",
+      "PIPE_MTE2",
+      "PIPE_MTE3",
+      "PIPE_V"
+    ],
+    "events": [
+      "EVENT_ID0"
+    ],
+    "units": [
+      "unit_load",
+      "unit_store",
+      "unit_vadd"
+    ]
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/SyncSolver/hivm-ccgss-reg.mlir",
+  "upstream_path": "bishengir/test/Dialect/HIVM/SyncSolver/hivm-ccgss-reg.mlir",
+  "split_index": 0,
+  "stage": "intra-core sync pass",
+  "function": "test_block_sync_normal",
+  "translation": {
+    "status": "unsupported",
+    "function": "test_block_sync_normal",
+    "diagnostics": [
+      {
+        "op": "hivm.hir.set_ffts_base_addr",
+        "location": "loc(\"<stdin>\":5:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":11:14)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.nd2nz",
+        "location": "loc(\"<stdin>\":12:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.nd2nz",
+        "location": "loc(\"<stdin>\":15:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.mmadL1",
+        "location": "loc(\"<stdin>\":23:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.fixpipe",
+        "location": "loc(\"<stdin>\":28:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":30:16)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":31:16)",
+        "reason": "No core elaboration rule for this operation."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      32,
+      39
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "test_block_sync_normal"
+}

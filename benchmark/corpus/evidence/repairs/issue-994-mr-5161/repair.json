@@ -1,0 +1,11 @@
+{
+  "issue": 994,
+  "mr": "5161",
+  "commit": "1a7475c243df15835183248c94d1b367b94c96fd",
+  "parent": "8c2a8e9825737db83d54e4639e7112345fd67d45",
+  "title": "[HIVM] fix: preserve L0C across while accumulation loops",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/5161",
+  "tests": [
+    "bishengir/test/Dialect/HIVM/insert-fixpipe-accumulation-while-no-outer-fixpipe.mlir"
+  ]
+}

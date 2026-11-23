@@ -1,0 +1,8 @@
+{
+  "title": "[HIVM][Atomic] A3 仍用有序锁，带结果的 atomic_cas 在 insert-load-store 崩溃",
+  "iid": 1030,
+  "updated_at": "2026-11-20T16:47:27.747+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1030",
+  "linked_mrs": []
+}

@@ -1,0 +1,60 @@
+{
+  "whole": [
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":26:14)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "annotation.mark",
+      "location": "loc(\"<stdin>\":27:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "memref.subview",
+      "location": "loc(\"<stdin>\":28:16)",
+      "reason": "A subview needs alias and offset resolution."
+    },
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":31:16)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "func.call",
+      "location": "loc(\"<stdin>\":33:5)",
+      "reason": "The call needs a callee effect summary or inlining."
+    },
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":34:16)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "func.call",
+      "location": "loc(\"<stdin>\":35:5)",
+      "reason": "The call needs a callee effect summary or inlining."
+    },
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":36:16)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "annotation.mark",
+      "location": "loc(\"<stdin>\":37:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "memref.subview",
+      "location": "loc(\"<stdin>\":38:18)",
+      "reason": "A subview needs alias and offset resolution."
+    },
+    {
+      "op": "func.call",
+      "location": "loc(\"<stdin>\":39:5)",
+      "reason": "The call needs a callee effect summary or inlining."
+    }
+  ],
+  "slice": []
+}

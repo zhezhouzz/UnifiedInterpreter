@@ -1,0 +1,10 @@
+{
+  "whole": [
+    {
+      "op": "hivm.hir.custom_macro",
+      "location": "loc(\"<stdin>\":6:5)",
+      "reason": "No core elaboration rule for this operation."
+    }
+  ],
+  "slice": []
+}

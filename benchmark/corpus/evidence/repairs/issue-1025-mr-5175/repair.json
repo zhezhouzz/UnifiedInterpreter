@@ -1,0 +1,11 @@
+{
+  "issue": 1025,
+  "mr": "5175",
+  "commit": "0d4925f3174186ffd2c0fe1cfed3727602ef5c44",
+  "parent": "02cd0c7060f64704761cf91dff8ed7f16d5662e0",
+  "title": "[HFusion][SimplifyOps] fix: rank fp8 types so f32->fp8->f32 is not folded",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/5175",
+  "tests": [
+    "bishengir/test/Dialect/HFusion/hfusion-simplify-ops-cast-op.mlir"
+  ]
+}

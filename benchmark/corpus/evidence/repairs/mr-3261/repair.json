@@ -1,0 +1,13 @@
+{
+  "issue": null,
+  "mr": "3261",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/3261",
+  "commit": "e507be8a4d921a3efa93e3c501071e112592b3e4",
+  "parent": "7c64c1ba2c4a982261da5fec39294a4ec60d071b",
+  "title": "[HIVM] Fix MIX deadlock on empty preload loops",
+  "tests": [
+    "bishengir/test/Dialect/HIVM/hivm-create-preload-empty-loop.mlir",
+    "bishengir/test/Dialect/HIVM/hivm-create-preload.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

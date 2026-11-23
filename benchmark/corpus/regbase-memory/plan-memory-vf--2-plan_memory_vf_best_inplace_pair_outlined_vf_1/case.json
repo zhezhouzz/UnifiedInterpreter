@@ -1,0 +1,96 @@
+{
+  "group": "regbase-memory",
+  "id": "plan-memory-vf--2-plan_memory_vf_best_inplace_pair_outlined_vf_1",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "projection": [
+    {
+      "line": 25,
+      "operation": "hivm.hir.set_flag[<PIPE_V>, <PIPE_S>, <EVENT_ID0>]"
+    },
+    {
+      "line": 26,
+      "operation": "hivm.hir.wait_flag[<PIPE_V>, <PIPE_S>, <EVENT_ID0>]"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_S",
+      "PIPE_V"
+    ],
+    "events": [
+      "EVENT_ID0"
+    ],
+    "units": []
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/RegBase/plan-memory-vf.mlir",
+  "upstream_path": "bishengir/test/Dialect/HIVM/RegBase/plan-memory-vf.mlir",
+  "split_index": 2,
+  "stage": "intra-core sync pass",
+  "function": "plan_memory_vf_best_inplace_pair_outlined_vf_1",
+  "translation": {
+    "status": "unsupported",
+    "function": "plan_memory_vf_best_inplace_pair",
+    "diagnostics": [
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":20:14)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.debug",
+        "location": "loc(\"<stdin>\":21:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":22:16)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":23:16)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "func.call",
+        "location": "loc(\"<stdin>\":24:5)",
+        "reason": "The call needs a callee effect summary or inlining."
+      },
+      {
+        "op": "hivm.hir.debug",
+        "location": "loc(\"<stdin>\":27:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.reinterpret_cast",
+        "location": "loc(\"<stdin>\":28:25)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":30:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      25,
+      26
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "plan_memory_vf_best_inplace_pair"
+}

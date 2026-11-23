@@ -1,0 +1,8 @@
+{
+  "title": "[HIVM][SplitMixKernel]: 'memref.alloc' op error: read before first write",
+  "iid": 1010,
+  "updated_at": "2026-11-23T11:43:49.839+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1010",
+  "linked_mrs": []
+}

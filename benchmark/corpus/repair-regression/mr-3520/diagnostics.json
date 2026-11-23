@@ -1,0 +1,26 @@
+{
+  "whole": [
+    {
+      "op": "arith.cmpi",
+      "location": "loc(\"<stdin>\":5:10)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "memref.subview",
+      "location": "loc(\"<stdin>\":6:16)",
+      "reason": "A subview needs alias and offset resolution."
+    },
+    {
+      "op": "scf.if",
+      "location": "loc(\"<stdin>\":7:10)",
+      "reason": "Branch guards, yields and SSA joins need a conditional translation."
+    }
+  ],
+  "slice": [
+    {
+      "op": "hivm.hir.vbrc",
+      "location": "loc(\"<stdin>\":9:7)",
+      "reason": "vbrc dispatch requires a UB or L1 destination."
+    }
+  ]
+}

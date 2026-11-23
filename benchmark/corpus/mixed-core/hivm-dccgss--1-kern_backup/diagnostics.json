@@ -1,0 +1,20 @@
+{
+  "whole": [
+    {
+      "op": "hivm.hir.anchor",
+      "location": "loc(\"<stdin>\":18:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.anchor",
+      "location": "loc(\"<stdin>\":19:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.anchor",
+      "location": "loc(\"<stdin>\":26:5)",
+      "reason": "No core elaboration rule for this operation."
+    }
+  ],
+  "slice": []
+}

@@ -1,0 +1,81 @@
+{
+  "group": "inject-sync",
+  "id": "inject-sync--6-test_injcet_sync_collapse_shape",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-inject-sync",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "projection": [
+    {
+      "line": 8,
+      "operation": "hivm.hir.load ins(%arg0 : memref<16x16x16xf16, #hivm.address_space<gm>>) outs(%0 : memref<16x16x16xf16, #hivm.address_space<ub>>)"
+    },
+    {
+      "line": 9,
+      "operation": "hivm.hir.load ins(%arg1 : memref<16x16x16xf16, #hivm.address_space<gm>>) outs(%1 : memref<16x16x16xf16, #hivm.address_space<ub>>)"
+    },
+    {
+      "line": 10,
+      "operation": "hivm.hir.set_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]"
+    },
+    {
+      "line": 11,
+      "operation": "hivm.hir.wait_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]"
+    },
+    {
+      "line": 12,
+      "operation": "hivm.hir.vadd ins(%0, %1 : memref<16x16x16xf16, #hivm.address_space<ub>>, memref<16x16x16xf16, #hivm.address_space<ub>>) outs(%2 : memref<16x16x16xf16, #hivm.address_space<ub>>)"
+    },
+    {
+      "line": 13,
+      "operation": "hivm.hir.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_MTE2",
+      "PIPE_MTE3",
+      "PIPE_V"
+    ],
+    "events": [
+      "EVENT_ID0"
+    ],
+    "units": [
+      "unit_load",
+      "unit_vadd"
+    ]
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/inject-sync.mlir",
+  "upstream_path": "bishengir/test/Dialect/HIVM/inject-sync.mlir",
+  "split_index": 6,
+  "stage": "intra-core sync pass",
+  "function": "test_injcet_sync_collapse_shape",
+  "translation": {
+    "status": "unsupported",
+    "function": "test_injcet_sync_collapse_shape",
+    "diagnostics": [
+      {
+        "op": "memref.collapse_shape",
+        "location": "loc(\"<stdin>\":14:23)",
+        "reason": "No core elaboration rule for this operation."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      8,
+      13
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "test_injcet_sync_collapse_shape"
+}

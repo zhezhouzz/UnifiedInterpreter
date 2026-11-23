@@ -1,0 +1,14 @@
+{
+  "issue": null,
+  "mr": "3495",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/3495",
+  "commit": "bd112220f039cde86d4c7e70dace419fb826a78c",
+  "parent": "3d3513d545ef772592db6c17635927e46baeaa06",
+  "title": "fix(core_ratio): disable tight buffers for CV11 on Ascend950",
+  "tests": [
+    "bishengir/test/Conversion/HIVMToLLVM/sync-block-core-ratio-invalid.mlir",
+    "bishengir/test/Conversion/HIVMToLLVM/sync-block-core-ratio.mlir",
+    "bishengir/test/Dialect/HIVM/Regbase/insert-load-store-core-ratio.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

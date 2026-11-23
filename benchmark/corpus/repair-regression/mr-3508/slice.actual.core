@@ -1,0 +1,6 @@
+run {
+  x0 := compute[unit_load@PIPE_MTE2]();
+  x1 := compute[unit_vadd@PIPE_V]();
+  x2 := compute[unit_store@PIPE_MTE3]();
+  return()
+}

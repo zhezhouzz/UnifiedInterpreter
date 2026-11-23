@@ -1,0 +1,20 @@
+{
+  "whole": [
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":3:14)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "annotation.mark",
+      "location": "loc(\"<stdin>\":4:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":9:16)",
+      "reason": "No core elaboration rule for this operation."
+    }
+  ],
+  "slice": []
+}

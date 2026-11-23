@@ -1,0 +1,11 @@
+{
+  "issue": 987,
+  "mr": "4912",
+  "commit": "bde7b26693ebd2c8d4afe3b378d67a8790120dad",
+  "parent": "8bc48fb585e72a1a0d1b6978360c62ae8310147c",
+  "title": "[HIVM] feat: extend MMAD_MX for Ascend960 hif4 and mmadConfig support",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/4912",
+  "tests": [
+    "bishengir/test/Conversion/HIVMToStandard/RegBase/convert-hivm-to-standard-ascend960.mlir"
+  ]
+}

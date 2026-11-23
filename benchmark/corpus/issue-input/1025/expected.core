@@ -1,0 +1,5 @@
+run {
+  work_5 := compute[unit_vcast@PIPE_V]();
+  work_6 := compute[unit_vcast@PIPE_V]();
+  return()
+}

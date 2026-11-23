@@ -1,0 +1,377 @@
+diff --git a/bishengir/include/bishengir/Dialect/HIVM/Analysis/DimensionAnalyzer.h b/bishengir/include/bishengir/Dialect/HIVM/Analysis/DimensionAnalyzer.h
+index f44f25335..58c1a5eb1 100644
+--- a/bishengir/include/bishengir/Dialect/HIVM/Analysis/DimensionAnalyzer.h
++++ b/bishengir/include/bishengir/Dialect/HIVM/Analysis/DimensionAnalyzer.h
+@@ -157,6 +157,7 @@ protected:
+                                DictionaryAttr tilingDimMapping);
+   void processMmadL1Op(hivm::MmadL1Op op, bool isTransposeA = false,
+                        bool isTransposeB = false);
++  void processFixpipeOp(hivm::FixpipeOp op);
+ 
+   void startTransaction(Operation *op);
+   bool finalizeTransaction();
+@@ -173,6 +174,10 @@ protected:
+   /// parallel
+   void markDimensions();
+ 
++  /// Mark the preferred tiling order of a Fixpipe destination according to
++  /// which MMAD operand is produced inside the analyzed loop.
++  void markFixpipeTilingPriority(hivm::FixpipeOp op);
++
+   /// Heuristic only: mark transposed dimensions for layout-conversion
+   /// transposes.
+   void markTransposedDim(hivm::VTransposeOp op);
+@@ -242,9 +247,6 @@ protected:
+   void joinShape(int a, int b) override;
+   void joinCollapser(int a, int b) override;
+ 
+-  template <typename StoreOpTy>
+-  std::optional<size_t> inferForcedTilingDim(StoreOpTy op);
+-
+ protected:
+   /// Chosen tiling axis index per SSA \c Value; \c -1 when not chosen.
+   DenseMap<Value, int64_t> tilingDim_;
+diff --git a/bishengir/lib/Dialect/HIVM/Analysis/DimensionAnalyzer.cpp b/bishengir/lib/Dialect/HIVM/Analysis/DimensionAnalyzer.cpp
+index b07390b74..d167c7ae1 100644
+--- a/bishengir/lib/Dialect/HIVM/Analysis/DimensionAnalyzer.cpp
++++ b/bishengir/lib/Dialect/HIVM/Analysis/DimensionAnalyzer.cpp
+@@ -71,22 +71,22 @@ bool DimensionAnalyzer::isReduceDim(Dimension dim) {
+ }
+ 
+ template <typename StoreOpTy> Value getStoreLikeSrc(StoreOpTy storeOp) {
+-  if constexpr (std::is_same_v<
+-                    StoreOpTy,
+-                    bufferization::MaterializeInDestinationOp>)
++  if constexpr (std::is_same_v<StoreOpTy,
++                               bufferization::MaterializeInDestinationOp>)
+     return storeOp.getSource();
+   else if constexpr (std::is_same_v<StoreOpTy, hivm::LocalStoreOp>)
+     return storeOp.getData();
+   else if constexpr (std::is_same_v<StoreOpTy, hivm::DebugOp>)
+     return storeOp.getArg();
++  else if constexpr (std::is_same_v<StoreOpTy, hivm::FixpipeOp>)
++    return storeOp.getDst();
+   else
+     return storeOp.getSrc();
+ }
+ 
+ template <typename StoreOpTy> Value getStoreLikeDst(StoreOpTy storeOp) {
+-  if constexpr (std::is_same_v<
+-                    StoreOpTy,
+-                    bufferization::MaterializeInDestinationOp>)
++  if constexpr (std::is_same_v<StoreOpTy,
++                               bufferization::MaterializeInDestinationOp>)
+     return storeOp.getDest();
+   else if constexpr (std::is_same_v<StoreOpTy, hivm::VReduceOp>)
+     return storeOp.getDstValue();
+@@ -96,6 +96,16 @@ template <typename StoreOpTy> Value getStoreLikeDst(StoreOpTy storeOp) {
+     return storeOp.getDst();
+ }
+ 
++template <typename StoreOpTy>
++Value getStoreLikeGroupValue(StoreOpTy storeOp, Value tilingValue) {
++  // Membase Fixpipe destinations are memrefs and are not tracked by the value
++  // group DSU. Keep branch grouping anchored at the tensor source while using
++  // the destination dimensions as tiling candidates.
++  if constexpr (std::is_same_v<StoreOpTy, hivm::FixpipeOp>)
++    return storeOp.getSrc();
++  return tilingValue;
++}
++
+ void DimensionAnalyzer::processInvalidUpdates(
+     DenseMap<int64_t, DenseMap<int64_t, SmallVector<Dimension>>>
+         &parallelDimMaps,
+@@ -361,7 +371,11 @@ bool DimensionAnalyzer::isValidTilingSize(int64_t dim) const {
+ template <typename StoreOpTy>
+ bool DimensionAnalyzer::checkTileableMaskedStore(StoreOpTy storeOp,
+                                                  size_t i) const {
+-  auto src = getStoreLikeSrc(storeOp);
++  Value src = [&]() -> Value {
++    if constexpr (std::is_same_v<StoreOpTy, hivm::FixpipeOp>)
++      return storeOp.getSrc();
++    return getStoreLikeSrc(storeOp);
++  }();
+   auto dst = getStoreLikeDst(storeOp);
+ 
+   int64_t srcOrigDim = ShapedType::kDynamic;
+@@ -434,16 +448,12 @@ void DimensionAnalyzer::computeTilingDimImpl(
+       // there will only be 1 group.
+       if (rank == 0)
+         return;
+-      auto groupIndex = getValueGroupIndex(src);
++      auto groupIndex = getValueGroupIndex(getStoreLikeGroupValue(op, src));
+       numStoreOps[groupIndex]++;
+       LDBG("Checking operation: " << op << " in group " << groupIndex);
+       auto shape = utils::getShape(src.getType());
+       DenseSet<int> usedParentIdx;
+-      std::optional<size_t> forcedDim = inferForcedTilingDim<StoreOpTy>(op);
+       for (size_t i = 0; i < rank; i++) {
+-        if (forcedDim.has_value() && i != forcedDim.value()) {
+-          continue;
+-        }
+         Dimension dim(src, i);
+         if (isParallelDim(dim)) {
+           if (!isValidTilingSize(shape[i])) {
+@@ -479,62 +489,6 @@ int64_t DimensionAnalyzer::getGlobalTilingAxisId(Value v) {
+   return structuralDsu_->find(args[localDimIdx]);
+ }
+ 
+-/// Infer whether it is necessary to enforce a specific tiling dimension.
+-///
+-/// For Matrix Multiplication (C = A * B):
+-/// - If A is loaded inside the loop and B is outside, the loop marches along
+-/// the M-axis.
+-/// - If B is loaded inside the loop and A is outside, the loop marches along
+-/// the N-axis.
+-template <typename StoreOpTy>
+-std::optional<size_t> DimensionAnalyzer::inferForcedTilingDim(StoreOpTy op) {
+-  auto hasLoadProducerInsideScope = [this](Value rootVal) -> bool {
+-    SmallVector<Value, 4> worklist = {rootVal};
+-    llvm::SmallPtrSet<Operation *, 8> visited;
+-    while (!worklist.empty()) {
+-      Value currVal = worklist.pop_back_val();
+-      Operation *defOp = currVal.getDefiningOp();
+-
+-      if (!defOp || !this->op_->isProperAncestor(defOp))
+-        continue;
+-      if (!visited.insert(defOp).second)
+-        continue;
+-
+-      if (isa<hivm::LoadOp>(defOp))
+-        return true;
+-
+-      for (Value opnd : defOp->getOperands())
+-        worklist.push_back(opnd);
+-    }
+-    return false;
+-  };
+-
+-  if constexpr (std::is_same_v<StoreOpTy, hivm::FixpipeOp>) {
+-    Operation *curr = op.getSrc().getDefiningOp();
+-
+-    while (curr && !isa<hivm::MmadL1Op>(curr) && curr->getNumOperands() > 0) {
+-      curr = curr->getOperand(0).getDefiningOp();
+-    }
+-
+-    if (auto mmadOp = dyn_cast_or_null<hivm::MmadL1Op>(curr)) {
+-      bool isAInside = hasLoadProducerInsideScope(mmadOp.getA());
+-      bool isBInside = hasLoadProducerInsideScope(mmadOp.getB());
+-
+-      if (isAInside && !isBInside) {
+-        LDBG("Forced tiling dim 0 (M-axis) based on internal Load A");
+-        return 0;
+-      }
+-
+-      if (!isAInside && isBInside) {
+-        LDBG("Forced tiling dim 1 (N-axis) based on internal Load B");
+-        return 1;
+-      }
+-    }
+-  }
+-
+-  return std::nullopt;
+-}
+-
+ } // namespace detail
+ } // namespace hivm
+ } // namespace mlir
+diff --git a/bishengir/lib/Dialect/HIVM/Analysis/DimensionMarker.cpp b/bishengir/lib/Dialect/HIVM/Analysis/DimensionMarker.cpp
+index ca611992e..3865ab306 100644
+--- a/bishengir/lib/Dialect/HIVM/Analysis/DimensionMarker.cpp
++++ b/bishengir/lib/Dialect/HIVM/Analysis/DimensionMarker.cpp
+@@ -30,6 +30,7 @@
+ #include "mlir/Interfaces/LoopLikeInterface.h"
+ 
+ #include "llvm/ADT/STLExtras.h"
++#include "llvm/ADT/SmallPtrSet.h"
+ #include "llvm/ADT/SmallVectorExtras.h"
+ #include "llvm/ADT/TypeSwitch.h"
+ #include <algorithm>
+@@ -262,6 +263,10 @@ bool DimensionAnalyzer::processOperation(Operation *op, Value current) {
+             processMmadL1Op(op, isATransposed(op), isBTransposed(op));
+             return true;
+           })
++          .Case<hivm::FixpipeOp>([this](auto op) {
++            processFixpipeOp(op);
++            return true;
++          })
+           .Case<hivm::VGatherOp>([this](auto op) {
+             processVGatherOp(op);
+             return true;
+@@ -564,7 +569,8 @@ void DimensionAnalyzer::processForOp(scf::ForOp op) {
+ 
+ void DimensionAnalyzer::processWhileOp(scf::WhileOp op) {
+   LDBG("Processing WhileOp " << op);
+-  auto conditionOp = cast<scf::ConditionOp>(op.getBeforeBody()->getTerminator());
++  auto conditionOp =
++      cast<scf::ConditionOp>(op.getBeforeBody()->getTerminator());
+   auto yieldOp = cast<scf::YieldOp>(op.getAfterBody()->getTerminator());
+   for (const auto &[beforeArg, init, yield] : zip_equal(
+            op.getBeforeArguments(), op.getInits(), yieldOp.getOperands())) {
+@@ -777,6 +783,69 @@ void DimensionAnalyzer::processMmadL1Op(hivm::MmadL1Op op, bool isTransposeA,
+   }
+ }
+ 
++void DimensionAnalyzer::processFixpipeOp(hivm::FixpipeOp op) {
++  Value src = op.getSrc();
++  Value dst = op.getDst();
++  createDummyRefIfNotExist({src, dst});
++
++  auto srcDims = getValueDimIndices(src);
++  auto dstDims = getValueDimIndices(dst);
++  assert(srcDims.size() == dstDims.size() &&
++         "Fixpipe source and destination ranks must match");
++  // Preserve separate shape identities so the destination can carry its own
++  // priority, but connect corresponding axes for common-axis analysis.
++  for (auto [srcDim, dstDim] : llvm::zip_equal(srcDims, dstDims))
++    joinCollapser(srcDim, dstDim);
++
++  for (Value result : op->getResults())
++    processValue(result, dst);
++}
++
++void DimensionAnalyzer::markFixpipeTilingPriority(hivm::FixpipeOp op) {
++  Value src = op.getSrc();
++  auto dstDims = getValueDimIndices(op.getDst());
++  if (dstDims.size() != 2)
++    return;
++
++  auto hasLoadProducerInsideScope = [this](Value root) {
++    SmallVector<Value, 4> worklist = {root};
++    llvm::SmallPtrSet<Operation *, 8> visited;
++    while (!worklist.empty()) {
++      Value current = worklist.pop_back_val();
++      Operation *definingOp = current.getDefiningOp();
++      if (!definingOp || !op_->isProperAncestor(definingOp))
++        continue;
++      if (!visited.insert(definingOp).second)
++        continue;
++      if (isa<hivm::LoadOp>(definingOp))
++        return true;
++      llvm::append_range(worklist, definingOp->getOperands());
++    }
++    return false;
++  };
++
++  Operation *producer = src.getDefiningOp();
++  while (producer && !isa<hivm::MmadL1Op>(producer) &&
++         producer->getNumOperands() > 0) {
++    producer = producer->getOperand(0).getDefiningOp();
++  }
++  auto mmadOp = dyn_cast_or_null<hivm::MmadL1Op>(producer);
++  if (!mmadOp)
++    return;
++
++  bool isAInside = hasLoadProducerInsideScope(mmadOp.getA());
++  bool isBInside = hasLoadProducerInsideScope(mmadOp.getB());
++  if (isAInside == isBInside)
++    return;
++
++  // The analyzer treats a lower order as a higher tiling priority. M is the
++  // default for a rank-2 result; swap the order when the loop marches along N.
++  SmallVector<int64_t, 2> order =
++      isAInside ? SmallVector<int64_t, 2>{0, 1} : SmallVector<int64_t, 2>{1, 0};
++  for (auto [dim, priority] : llvm::zip_equal(dstDims, order))
++    transposedDimMap[equivalentDsu_->find(dim)] = priority;
++}
++
+ void DimensionAnalyzer::startTransaction(Operation *op) {
+   if (processingOperation)
+     finalizeTransaction();
+@@ -906,20 +975,18 @@ bool DimensionAnalyzer::finalizeTransaction() {
+ }
+ 
+ bool DimensionAnalyzer::isParallelOp(Operation *op) const {
+-  return op &&
+-         (isElemwiseNaryOpImpl(op) || isa<CopyOpInterface>(op) ||
+-          utils::isAllocLikeOp(op) ||
+-          isa<memref::MemorySpaceCastOp, bufferization::ToTensorOp,
++  return op && (isElemwiseNaryOpImpl(op) || isa<CopyOpInterface>(op) ||
++                utils::isAllocLikeOp(op) ||
++                isa<memref::MemorySpaceCastOp, bufferization::ToTensorOp,
+ #ifndef __LLVM_MAJOR_VERSION_22_COMPATIBLE__
+-              bufferization::ToMemrefOp
++                    bufferization::ToMemrefOp
+ #else
+-              bufferization::ToBufferOp
++                    bufferization::ToBufferOp
+ #endif
+-              ,
+-              arith::SelectOp,
+-              bufferization::MaterializeInDestinationOp,
+-              hivm::IndirectLoadOp, hivm::IndirectStoreOp,
+-              hivm::GatherLoadOp, hivm::ScatterStoreOp>(op));
++                    ,
++                    arith::SelectOp, bufferization::MaterializeInDestinationOp,
++                    hivm::IndirectLoadOp, hivm::IndirectStoreOp,
++                    hivm::GatherLoadOp, hivm::ScatterStoreOp>(op));
+ }
+ 
+ void DimensionAnalyzer::combineInferable() {
+@@ -1006,6 +1073,7 @@ void DimensionAnalyzer::markDimensions() {
+         })
+         .Case<tensor::ExtractSliceOp, tensor::InsertSliceOp>(
+             [&](auto op) { processSlice(op); })
++        .Case<hivm::FixpipeOp>([&](auto op) { markFixpipeTilingPriority(op); })
+         .Case<hivm::VTransposeOp>([&](auto op) { markTransposedDim(op); })
+         .Case<memref::AllocOp>([&](auto op) {
+           if (!hacc::utils::isRegBasedArch(
+@@ -1432,8 +1500,7 @@ void DimensionAnalyzer::dumpOpWithStructuralGroups() {
+ 
+   llvm::errs() << "STRUCTURAL_GROUP: " << *op_ << "\n";
+ 
+-  op_->walk(
+-      [&](Operation *op) { op->removeAttr(kStructuralGroupAttrName); });
++  op_->walk([&](Operation *op) { op->removeAttr(kStructuralGroupAttrName); });
+ }
+ 
+ } // namespace detail
+diff --git a/bishengir/test/Dialect/HIVM/tile-cube-vector-loop.mlir b/bishengir/test/Dialect/HIVM/tile-cube-vector-loop.mlir
+index 064ab5310..3a55372f0 100644
+--- a/bishengir/test/Dialect/HIVM/tile-cube-vector-loop.mlir
++++ b/bishengir/test/Dialect/HIVM/tile-cube-vector-loop.mlir
+@@ -852,3 +852,44 @@ module attributes {dlti.target_system_spec = #dlti.target_system_spec<"NPU" : #h
+     return
+   }
+ }
++
++// -----
++
++module attributes {dlti.target_system_spec = #dlti.target_system_spec<"NPU" : #hacc.target_device_spec<#dlti.dl_entry<"L0C_SIZE", 1048576 : i32>, #dlti.dl_entry<"UB_ALIGN_SIZE", 256 : i32>>>, hivm.module_core_type = #hivm.module_core_type<MIX>} {
++  // CHECK-CUBE-LABEL: func.func @test_cube_loop_shared_outer_a
++  // CHECK-VECTOR-LABEL: func.func @test_cube_loop_shared_outer_a
++  // CHECK-CUBE-COUNT-2: scf.for
++  // CHECK-CUBE: op_to_tile_0_branch_0
++  // CHECK-CUBE: op_to_tile_0_branch_1
++  // CHECK-CUBE-NOT: scf.for
++  func.func @test_cube_loop_shared_outer_a(
++      %global_A: memref<256x128xbf16>,
++      %global_B1: memref<128x128xbf16>,
++      %global_B2: memref<128x128xbf16>,
++      %out1: memref<256x128xf32>, %out2: memref<256x128xf32>) {
++    %c0 = arith.constant 0 : index
++    %c1 = arith.constant 1 : index
++    %c4 = arith.constant 4 : index
++    %true = arith.constant true
++    %c256 = arith.constant 256 : index
++    %c128 = arith.constant 128 : index
++    %alloc_A = memref.alloc() : memref<256x128xbf16>
++    hivm.hir.load ins(%global_A : memref<256x128xbf16>) outs(%alloc_A : memref<256x128xbf16>)
++    %tensor_A = bufferization.to_tensor %alloc_A restrict writable : memref<256x128xbf16>
++    scf.for %iv = %c0 to %c4 step %c1 {
++      %alloc_B1 = memref.alloc() : memref<128x128xbf16>
++      hivm.hir.load ins(%global_B1 : memref<128x128xbf16>) outs(%alloc_B1 : memref<128x128xbf16>)
++      %tensor_B1 = bufferization.to_tensor %alloc_B1 restrict writable : memref<128x128xbf16>
++      %empty_out1 = tensor.empty() : tensor<256x128xf32>
++      %mmad1 = hivm.hir.mmadL1 ins(%tensor_A, %tensor_B1, %true, %c256, %c128, %c128 : tensor<256x128xbf16>, tensor<128x128xbf16>, i1, index, index, index) outs(%empty_out1 : tensor<256x128xf32>) -> tensor<256x128xf32>
++      hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>} ins(%mmad1 : tensor<256x128xf32>) outs(%out1 : memref<256x128xf32>)
++      %alloc_B2 = memref.alloc() : memref<128x128xbf16>
++      hivm.hir.load ins(%global_B2 : memref<128x128xbf16>) outs(%alloc_B2 : memref<128x128xbf16>)
++      %tensor_B2 = bufferization.to_tensor %alloc_B2 restrict writable : memref<128x128xbf16>
++      %empty_out2 = tensor.empty() : tensor<256x128xf32>
++      %mmad2 = hivm.hir.mmadL1 ins(%tensor_A, %tensor_B2, %true, %c256, %c128, %c128 : tensor<256x128xbf16>, tensor<128x128xbf16>, i1, index, index, index) outs(%empty_out2 : tensor<256x128xf32>) -> tensor<256x128xf32>
++      hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>} ins(%mmad2 : tensor<256x128xf32>) outs(%out2 : memref<256x128xf32>)
++    } {hivm.loop_core_type = #hivm.tcore_type<CUBE>}
++    return
++  }
++}

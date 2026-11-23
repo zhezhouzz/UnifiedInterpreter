@@ -1,0 +1,112 @@
+diff --git a/bishengir/lib/Dialect/HIVM/Pipelines/v2/HIVMV2Pipelines.cpp b/bishengir/lib/Dialect/HIVM/Pipelines/v2/HIVMV2Pipelines.cpp
+index 09068347c..85abe7284 100644
+--- a/bishengir/lib/Dialect/HIVM/Pipelines/v2/HIVMV2Pipelines.cpp
++++ b/bishengir/lib/Dialect/HIVM/Pipelines/v2/HIVMV2Pipelines.cpp
+@@ -224,8 +224,10 @@ void buildV2PostBufferizationPhase(OpPassManager &pm,
+   localPlanOptions.planMemoryUBCopyBankMode = options.planMemoryUBCopyBankMode;
+   pm.addPass(createPlanMemoryPass(localPlanOptions));
+ 
+-  // Expand slots before the split clones the counters.
+-  if (options.enableMultiBuffer)
++  // CreatePreload needs the complete address list to rotate each stage.
++  bool expandAfterPreload =
++      options.enablePreload && hacc::utils::isAscend960(options.target);
++  if (options.enableMultiBuffer && !expandAfterPreload)
+     addFuncPass(pm, createEnableMultiBufferPass());
+ 
+   // Single-shot cross-core solve on the MIX.
+@@ -236,6 +238,8 @@ void buildV2PostBufferizationPhase(OpPassManager &pm,
+     CreatePreloadOptions preloadOptions;
+     preloadOptions.enablePreload = true;
+     pm.addPass(createCreatePreloadPass(preloadOptions));
++    if (options.enableMultiBuffer && expandAfterPreload)
++      addFuncPass(pm, createEnableMultiBufferPass());
+   }
+ 
+   // Last structural pass.
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/CreatePreload.cpp b/bishengir/lib/Dialect/HIVM/Transforms/CreatePreload.cpp
+index 876b46893..119c1306b 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/CreatePreload.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/CreatePreload.cpp
+@@ -27,6 +27,7 @@
+ #include "bishengir/Dialect/Utils/Util.h"
+ #include "bishengir/Transforms/Passes.h"
+ 
++#include "mlir/Dialect/Affine/IR/AffineOps.h"
+ #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+ #include "mlir/Dialect/Func/IR/FuncOps.h"
+ #include "mlir/Dialect/SCF/IR/SCF.h"
+@@ -282,7 +283,8 @@ static bool isRematerializableAliasOp(Operation *op) {
+     return false;
+   // View-like ops, pointer casts, and pure arithmetic ops can be rematerialized
+   // as part of a result chain in the preload skip branch.
+-  return isa<ViewLikeOpInterface, hivm::PointerCastOp>(op) ||
++  return isa<ViewLikeOpInterface, hivm::PointerCastOp, affine::AffineApplyOp>(
++             op) ||
+          isa<arith::ArithDialect>(op->getDialect());
+ }
+ 
+diff --git a/bishengir/test/Dialect/HIVM/cv-pipelining-preload/create-preload-affine-view-size.mlir b/bishengir/test/Dialect/HIVM/cv-pipelining-preload/create-preload-affine-view-size.mlir
+new file mode 100644
+index 000000000..6097955eb
+--- /dev/null
++++ b/bishengir/test/Dialect/HIVM/cv-pipelining-preload/create-preload-affine-view-size.mlir
+@@ -0,0 +1,36 @@
++// RUN: bishengir-opt %s -create-preload -verify-each | FileCheck %s
++
++#extent = affine_map<()[s0, s1] -> (s0 - s1)>
++func.func private @write(memref<?xf32>)
++func.func private @read(memref<?xf32>)
++
++// The returned view uses the active tile's index in the producer and the
++// preceding tile's index in the consumer.
++// CHECK-LABEL: func.func @return_partial_tile(
++// CHECK-SAME: %[[BUFFER:[^:]+]]: memref<?xf32>, %[[LIMIT:[^:]+]]: index
++// CHECK: scf.for %[[IV:.*]] =
++// CHECK: %[[PREV:.*]] = arith.subi %[[IV]],
++// CHECK: %[[PRODUCER_SIZE:.*]] = affine.apply {{.*}}[%[[LIMIT]], %[[IV]]]
++// CHECK: %[[PRODUCER_VIEW:.*]] = memref.subview %[[BUFFER]][0] [%[[PRODUCER_SIZE]]] [1]
++// CHECK: call @write(%[[PRODUCER_VIEW]])
++// CHECK: %[[CONSUMER_SIZE:.*]] = affine.apply {{.*}}[%[[LIMIT]], %[[PREV]]]
++// CHECK: %[[CONSUMER_VIEW:.*]] = memref.subview %[[BUFFER]][0] [%[[CONSUMER_SIZE]]] [1]
++// CHECK: call @read(%[[CONSUMER_VIEW]])
++func.func @return_partial_tile(%buffer: memref<?xf32>, %limit: index) {
++  %c0 = arith.constant 0 : index
++  %c1 = arith.constant 1 : index
++  scf.for %iv = %c0 to %limit step %c1 {
++    %tile = scope.scope : () -> memref<?xf32> {
++      %size = affine.apply #extent()[%limit, %iv]
++      %view = memref.subview %buffer[0] [%size] [1]
++        : memref<?xf32> to memref<?xf32>
++      func.call @write(%view) : (memref<?xf32>) -> ()
++      scope.return %view : memref<?xf32>
++    } {no_inline, hivm.preload_num = 1 : i32, hivm.max_preload_num = 2 : i32}
++    scope.scope : () -> () {
++      func.call @read(%tile) : (memref<?xf32>) -> ()
++      scope.return
++    } {no_inline, hivm.preload_num = 0 : i32, hivm.max_preload_num = 2 : i32}
++  }
++  return
++}
+diff --git a/bishengir/test/Dialect/HIVM/hivm-v2-pipeline-a6-order.mlir b/bishengir/test/Dialect/HIVM/hivm-v2-pipeline-a6-order.mlir
+index 0aac0bf65..8dcecc3a0 100644
+--- a/bishengir/test/Dialect/HIVM/hivm-v2-pipeline-a6-order.mlir
++++ b/bishengir/test/Dialect/HIVM/hivm-v2-pipeline-a6-order.mlir
+@@ -1,4 +1,6 @@
+ // RUN: bishengir-opt %s --pass-pipeline="builtin.module(hivm-v2-pipeline{target=Ascend960})" --dump-pass-pipeline -o /dev/null 2>&1 | tr ',' '\n' | FileCheck %s --check-prefixes=CHECK,FULL --implicit-check-not=hivm-inject-sync --implicit-check-not=hivm-inject-block-sync --implicit-check-not=hivm-delayed-cross-core-gss --implicit-check-not=hivm-insert-anchors-and-backup
++// RUN: bishengir-opt %s --pass-pipeline="builtin.module(hivm-v2-pipeline{target=Ascend960 enable-preload=true enable-multi-buffer=true})" --dump-pass-pipeline -o /dev/null 2>&1 | FileCheck %s --check-prefix=A6-SLOTS
++// RUN: bishengir-opt %s --pass-pipeline="builtin.module(hivm-v2-pipeline{target=Ascend950PR_9579 enable-preload=true enable-multi-buffer=true})" --dump-pass-pipeline -o /dev/null 2>&1 | FileCheck %s --check-prefix=A5-SLOTS
+ // RUN: bishengir-opt %s --pass-pipeline="builtin.module(hivm-v2-pipeline{target=Ascend960})" --dump-pass-pipeline -o /dev/null 2>&1 | FileCheck %s --check-prefix=NO-MERGE --implicit-check-not=hfusion-merge-vf
+ // RUN: bishengir-opt %s --pass-pipeline="builtin.module(hivm-v2-pre-vectorize-pipeline{target=Ascend960})" --dump-pass-pipeline -o /dev/null 2>&1 | tr ',' '\n' | FileCheck %s --check-prefixes=CHECK,PRE --implicit-check-not=hivm-vectorize --implicit-check-not=bufferiz
+ // RUN: bishengir-opt %s --pass-pipeline="builtin.module(hivm-v2-pipeline{target=Ascend960})" | FileCheck %s --check-prefix=SPLIT
+@@ -42,6 +44,10 @@
+ // FULL-SAME: solver-version=v2
+ // FULL: hivm-vectorize{phase=tail}
+ 
++// Preload rotates the planned A6 address lists before slot selection.
++// A6-SLOTS: hivm-cross-core-gss{{.*}}create-preload{{.*}}hivm-enable-multi-buffer{{.*}}hivm-v2-split-kernel
++// A5-SLOTS: hivm-enable-multi-buffer{{.*}}hivm-cross-core-gss{{.*}}create-preload{{.*}}hivm-v2-split-kernel
++
+ // The same solver version reaches both solves, with unit flags on the per-core
+ // solver. Each disable flag affects only its own solve.
+ // SYNC-OPTIONS: hivm-cross-core-gss

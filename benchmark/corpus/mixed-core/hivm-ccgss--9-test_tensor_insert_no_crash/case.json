@@ -1,0 +1,116 @@
+{
+  "group": "mixed-core",
+  "id": "hivm-ccgss--9-test_tensor_insert_no_crash",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "projection": [
+    {
+      "line": 25,
+      "operation": "hivm.hir.wait_flag[<PIPE_M>, <PIPE_MTE1>, <EVENT_ID0>]"
+    },
+    {
+      "line": 26,
+      "operation": "hivm.hir.wait_flag[<PIPE_M>, <PIPE_MTE1>, <EVENT_ID1>]"
+    },
+    {
+      "line": 27,
+      "operation": "hivm.hir.set_flag[<PIPE_M>, <PIPE_FIX>, <EVENT_ID0>]"
+    },
+    {
+      "line": 28,
+      "operation": "hivm.hir.wait_flag[<PIPE_M>, <PIPE_FIX>, <EVENT_ID0>]"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_FIX",
+      "PIPE_M",
+      "PIPE_MTE1"
+    ],
+    "events": [
+      "EVENT_ID0",
+      "EVENT_ID1"
+    ],
+    "units": []
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/SyncSolver/hivm-ccgss.mlir",
+  "upstream_path": "bishengir/test/Dialect/HIVM/SyncSolver/hivm-ccgss.mlir",
+  "split_index": 9,
+  "stage": "intra-core sync pass",
+  "function": "test_tensor_insert_no_crash",
+  "translation": {
+    "status": "unsupported",
+    "function": "test_tensor_insert_no_crash",
+    "diagnostics": [
+      {
+        "op": "hivm.hir.set_ffts_base_addr",
+        "location": "loc(\"<stdin>\":5:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":12:14)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.nd2nz",
+        "location": "loc(\"<stdin>\":13:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.nd2nz",
+        "location": "loc(\"<stdin>\":16:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.mmadL1",
+        "location": "loc(\"<stdin>\":24:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.fixpipe",
+        "location": "loc(\"<stdin>\":29:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":31:16)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":35:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "tensor.insert",
+        "location": "loc(\"<stdin>\":36:17)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "tensor.extract",
+        "location": "loc(\"<stdin>\":37:18)",
+        "reason": "No core elaboration rule for this operation."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      25,
+      28
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "test_tensor_insert_no_crash"
+}

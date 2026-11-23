@@ -1,0 +1,91 @@
+{
+  "group": "issue-input",
+  "id": "1025",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-convert-hfusion-to-hivm"
+  ],
+  "projection": [
+    {
+      "line": 5,
+      "operation": "%2 = hivm.hir.vcast ins(%arg0 : tensor<bf16>) outs(%0 : tensor<f32>) -> tensor<f32>"
+    },
+    {
+      "line": 6,
+      "operation": "%3 = hivm.hir.vcast ins(%2 : tensor<f32>) outs(%1 : tensor<bf16>) -> tensor<bf16>"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_V"
+    ],
+    "events": [],
+    "units": [
+      "unit_vcast"
+    ]
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/a75cab62dad8cb188b421533b9bdf341d73b724a/bishengir/test/Dialect/HFusion/hfusion-simplify-ops.mlir",
+  "issue": 1025,
+  "source_kind": "linked MR regression input",
+  "upstream_file": "evidence/repairs/issue-1025-mr-4137/tests/bishengir/test/Dialect/HFusion/hfusion-simplify-ops.mlir",
+  "split_index": 2,
+  "stage": "-convert-hfusion-to-hivm",
+  "relation": "Supplemental local compile on pinned toolchain; original regression pass and target are recorded with upstream test.",
+  "translation": {
+    "status": "unsupported",
+    "function": "pair",
+    "diagnostics": [
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":3:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":4:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":5:10)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":6:10)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "func.return",
+        "location": "loc(\"<stdin>\":7:5)",
+        "reason": "The calling convention for returned SSA data is unspecified."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      5,
+      6
+    ],
+    "status": "unsupported",
+    "diagnostics": [
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":5:10)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "hivm.hir.vcast",
+        "location": "loc(\"<stdin>\":6:10)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      }
+    ]
+  },
+  "entry_for_projection": "pair"
+}

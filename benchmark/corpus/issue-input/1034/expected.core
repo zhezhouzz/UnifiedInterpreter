@@ -1,0 +1,7 @@
+run {
+  setflag[PIPE_FIX, PIPE_MTE1](EVENT_ID0);
+  waitflag[PIPE_FIX, PIPE_MTE1](EVENT_ID0);
+  setflag[PIPE_M, PIPE_MTE1](EVENT_ID0);
+  setflag[PIPE_M, PIPE_MTE1](EVENT_ID1);
+  return()
+}

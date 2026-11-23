@@ -1,0 +1,10 @@
+{
+  "whole": [
+    {
+      "op": "scf.while",
+      "location": "loc(\"<stdin>\":5:12)",
+      "reason": "Data-dependent trip count and yielded state need a while translation."
+    }
+  ],
+  "slice": []
+}

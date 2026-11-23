@@ -1,0 +1,55 @@
+{
+  "whole": [
+    {
+      "op": "hivm.hir.set_ffts_base_addr",
+      "location": "loc(\"<stdin>\":5:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":12:14)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.nd2nz",
+      "location": "loc(\"<stdin>\":13:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.nd2nz",
+      "location": "loc(\"<stdin>\":16:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.mmadL1",
+      "location": "loc(\"<stdin>\":24:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.fixpipe",
+      "location": "loc(\"<stdin>\":29:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":31:16)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "tensor.empty",
+      "location": "loc(\"<stdin>\":35:10)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "tensor.insert",
+      "location": "loc(\"<stdin>\":36:17)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "tensor.extract",
+      "location": "loc(\"<stdin>\":37:18)",
+      "reason": "No core elaboration rule for this operation."
+    }
+  ],
+  "slice": []
+}

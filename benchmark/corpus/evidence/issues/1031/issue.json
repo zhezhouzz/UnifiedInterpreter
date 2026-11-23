@@ -1,0 +1,8 @@
+{
+  "title": "[Bug]: HFusion flattener generates invalid IR for rank-reducing slices",
+  "iid": 1031,
+  "updated_at": "2026-11-20T21:02:10.256+08:00",
+  "state": "closed",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1031",
+  "linked_mrs": []
+}

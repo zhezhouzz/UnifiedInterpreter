@@ -1,0 +1,15 @@
+{
+  "issue": 1024,
+  "mr": "5314",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/5314",
+  "commit": "0f6817a4f7a6370efb4399f5be3576247ba2a541",
+  "parent": "3622af71226c6dd58c17945726a32cf9a10ee910",
+  "title": "[Vector] fix: preserve lane-zero mask proofs through shape-only UCCs",
+  "tests": [
+    "bishengir/test/Conversion/VectorToHIVMAVE/strided-transfer-write-invalid.mlir",
+    "bishengir/test/Conversion/VectorToHIVMAVE/strided-transfer-write.mlir",
+    "bishengir/test/Dialect/HIVMAVE/scatter-layout.mlir",
+    "bishengir/test/Dialect/HIVMAVE/scatter-op-invalid.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

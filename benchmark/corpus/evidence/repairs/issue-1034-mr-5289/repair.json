@@ -1,0 +1,12 @@
+{
+  "issue": 1034,
+  "mr": "5289",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/5289",
+  "commit": "cc7eb3c361c739d8973fbc143f97cf153a7aac03",
+  "parent": "d3ae45dad769aad4567e480d06411b227e88ba36",
+  "title": "[HIVM][ConvertLayout] fix: propagate shared scf.if yields",
+  "tests": [
+    "bishengir/test/Dialect/HIVM/propagate-convert-layout-shared-if-yield.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

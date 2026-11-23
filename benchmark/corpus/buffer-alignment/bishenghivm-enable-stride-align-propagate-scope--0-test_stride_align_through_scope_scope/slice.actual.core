@@ -1,0 +1,4 @@
+run {
+  x0 := compute[unit_store@PIPE_MTE3]();
+  return()
+}

@@ -1,0 +1,23 @@
+module {
+  func.func @test_mem_specalloc_max(%src1 : memref<16384xi64, #hivm.address_space<gm>>,
+                                    %src2 : memref<16384xi32, #hivm.address_space<gm>>,
+                                    %dst : memref<16384xi32, #hivm.address_space<gm>>) {
+    %alloc = memref.alloc() : memref<16384xi64, #hivm.address_space<ub>>
+    %alloc_0 = memref.alloc() : memref<16384xi32, #hivm.address_space<ub>>
+    %alloc_1 = memref.alloc() : memref<0xi64, #hivm.address_space<ub>>
+    hivm.hir.load ins(%src1 : memref<16384xi64, #hivm.address_space<gm>>)
+                  outs(%alloc : memref<16384xi64, #hivm.address_space<ub>>)
+    hivm.hir.vcast ins(%alloc : memref<16384xi64, #hivm.address_space<ub>>)
+                  outs(%alloc_0 : memref<16384xi32, #hivm.address_space<ub>>)
+                  temp_buffer (%alloc_1 : memref<0xi64, #hivm.address_space<ub>>) round_mode = <truncwithoverflow>
+    %alloc_2 = memref.alloc() : memref<16384xi32, #hivm.address_space<ub>>
+    hivm.hir.load ins(%src2 : memref<16384xi32, #hivm.address_space<gm>>)
+                  outs(%alloc_2 : memref<16384xi32, #hivm.address_space<ub>>)
+    %alloc_3 = memref.alloc() : memref<16384xi32, #hivm.address_space<ub>>
+    hivm.hir.vadd ins(%alloc_0, %alloc_2 : memref<16384xi32, #hivm.address_space<ub>>, memref<16384xi32, #hivm.address_space<ub>>)
+                  outs(%alloc_3 : memref<16384xi32, #hivm.address_space<ub>>)
+    hivm.hir.store ins(%alloc_3 : memref<16384xi32,#hivm.address_space<ub>>)
+                   outs(%dst: memref<16384xi32,#hivm.address_space<gm>>)
+    return
+  }
+}

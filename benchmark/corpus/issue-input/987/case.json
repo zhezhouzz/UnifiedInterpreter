@@ -1,0 +1,108 @@
+{
+  "group": "issue-input",
+  "id": "987",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2"
+  ],
+  "projection": [
+    {
+      "line": 13,
+      "operation": "hivm.hir.set_flag[<PIPE_M>, <PIPE_MTE1>, <EVENT_ID0>]"
+    },
+    {
+      "line": 14,
+      "operation": "hivm.hir.set_flag[<PIPE_M>, <PIPE_MTE1>, <EVENT_ID1>]"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_M",
+      "PIPE_MTE1"
+    ],
+    "events": [
+      "EVENT_ID0",
+      "EVENT_ID1"
+    ],
+    "units": []
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/bde7b26693ebd2c8d4afe3b378d67a8790120dad/bishengir/test/Conversion/HIVMToStandard/RegBase/convert-hivm-to-standard-ascend960.mlir",
+  "issue": 987,
+  "source_kind": "linked MR regression input",
+  "upstream_file": "evidence/repairs/issue-987-mr-4912/tests/bishengir/test/Conversion/HIVMToStandard/RegBase/convert-hivm-to-standard-ascend960.mlir",
+  "split_index": 3,
+  "stage": "-hivm-graph-sync-solver=solver-version=v2",
+  "relation": "Supplemental local compile on pinned toolchain; original regression pass and target are recorded with upstream test.",
+  "translation": {
+    "status": "unsupported",
+    "function": "test_mmadmxL1_transpose_with_config",
+    "diagnostics": [
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":3:14)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":4:16)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":5:16)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":6:16)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":7:16)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":8:16)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":9:16)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.mmadmxL1",
+        "location": "loc(\"<stdin>\":15:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.mmadmxL1",
+        "location": "loc(\"<stdin>\":16:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.mmadmxL1",
+        "location": "loc(\"<stdin>\":17:5)",
+        "reason": "No core elaboration rule for this operation."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      13,
+      14
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "test_mmadmxL1_transpose_with_config"
+}

@@ -1,0 +1,58 @@
+{
+  "group": "handwritten",
+  "id": "lost-release",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-canonicalize"
+  ],
+  "projection": [
+    {
+      "line": 7,
+      "operation": "hivm.hir.vabs ins(%0 : memref<32xf32, #hivm.address_space<ub>>) outs(%1 : memref<32xf32, #hivm.address_space<ub>>)"
+    },
+    {
+      "line": 8,
+      "operation": "hivm.hir.set_flag[<PIPE_V>, <PIPE_MTE2>, <EVENT_ID0>]"
+    },
+    {
+      "line": 9,
+      "operation": "hivm.hir.load ins(%arg0 : memref<32xf32, #hivm.address_space<gm>>) outs(%0 : memref<32xf32, #hivm.address_space<ub>>)"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_MTE2",
+      "PIPE_V"
+    ],
+    "events": [
+      "EVENT_ID0"
+    ],
+    "units": [
+      "unit_load",
+      "unit_vabs"
+    ]
+  },
+  "stage": "explicit flags in post-insertion-style input; canonicalize only",
+  "origin": "authored protocol litmus",
+  "property": "Look for overwrite start before old vector operation completes.",
+  "translation": {
+    "status": "translated",
+    "function": "lost_release",
+    "diagnostics": []
+  },
+  "expectation": {
+    "scope": "whole straight-line protocol",
+    "method": "independently authored operation sequence",
+    "matches_full_output": true
+  },
+  "slice_translation": {
+    "lines": [
+      7,
+      9
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "lost_release"
+}

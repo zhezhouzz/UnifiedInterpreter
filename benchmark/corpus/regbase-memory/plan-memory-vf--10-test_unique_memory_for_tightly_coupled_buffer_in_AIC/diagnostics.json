@@ -1,0 +1,25 @@
+{
+  "whole": [
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":14:14)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "annotation.mark",
+      "location": "loc(\"<stdin>\":15:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "arith.cmpi",
+      "location": "loc(\"<stdin>\":16:10)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "scf.if",
+      "location": "loc(\"<stdin>\":17:10)",
+      "reason": "Branch guards, yields and SSA joins need a conditional translation."
+    }
+  ],
+  "slice": []
+}

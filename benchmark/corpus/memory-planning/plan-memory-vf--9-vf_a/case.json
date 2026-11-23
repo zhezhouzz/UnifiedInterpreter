@@ -1,0 +1,77 @@
+{
+  "group": "memory-planning",
+  "id": "plan-memory-vf--9-vf_a",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "projection": [
+    {
+      "line": 12,
+      "operation": "hivm.hir.load ins(%arg0 : memref<64xf32, #hivm.address_space<gm>>) outs(%alloc : memref<64xf32, #hivm.address_space<cbuf>>)"
+    },
+    {
+      "line": 13,
+      "operation": "hivm.hir.set_flag[<PIPE_MTE2>, <PIPE_S>, <EVENT_ID0>]"
+    },
+    {
+      "line": 14,
+      "operation": "hivm.hir.wait_flag[<PIPE_MTE2>, <PIPE_S>, <EVENT_ID0>]"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_MTE2",
+      "PIPE_S"
+    ],
+    "events": [
+      "EVENT_ID0"
+    ],
+    "units": [
+      "unit_load"
+    ]
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/plan-memory-vf.mlir",
+  "upstream_path": "bishengir/test/Dialect/HIVM/plan-memory-vf.mlir",
+  "split_index": 9,
+  "stage": "intra-core sync pass",
+  "function": "vf_a",
+  "translation": {
+    "status": "unsupported",
+    "function": "test_tightly_coupled_buffer_in_AIC",
+    "diagnostics": [
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":10:14)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "annotation.mark",
+        "location": "loc(\"<stdin>\":11:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.debug",
+        "location": "loc(\"<stdin>\":15:5)",
+        "reason": "No core elaboration rule for this operation."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      12,
+      14
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "test_tightly_coupled_buffer_in_AIC"
+}

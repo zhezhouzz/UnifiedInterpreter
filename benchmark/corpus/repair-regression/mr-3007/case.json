@@ -1,0 +1,107 @@
+{
+  "group": "repair-regression",
+  "id": "mr-3007",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-hivm-insert-fixpipe",
+    "-hivm-inline-fixpipe"
+  ],
+  "projection": [
+    {
+      "line": 10,
+      "operation": "%5 = hivm.hir.vabs ins(%3 : tensor<16x16xf32>) outs(%4 : tensor<16x16xf32>) -> tensor<16x16xf32>"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_V"
+    ],
+    "events": [],
+    "units": [
+      "unit_vabs"
+    ]
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/4241780cc10028c6502c32de14cc102e26f94544/bishengir/test/Dialect/HIVM/Regbase/inline-fixpipe-enable-fixpipe-nz2nz.mlir",
+  "stage": "repair test first optimization; see argv",
+  "split_index": 4,
+  "upstream_path": "bishengir/test/Dialect/HIVM/Regbase/inline-fixpipe-enable-fixpipe-nz2nz.mlir",
+  "repair": {
+    "issue": null,
+    "mr": "3007",
+    "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/3007",
+    "commit": "4241780cc10028c6502c32de14cc102e26f94544",
+    "parent": "dcb04bb773917ececadcd39b5c70ab839b0e4a66",
+    "title": "[AscendNPU IR][CV][InsertFixpipe] feat: not to replace l0c use",
+    "tests": [
+      "bishengir/test/Dialect/HIVM/Regbase/inline-fixpipe-enable-fixpipe-nz2nz.mlir",
+      "bishengir/test/Dialect/HIVM/Regbase/inline-fixpipe.mlir",
+      "bishengir/test/Dialect/HIVM/dont-insert-fixpipe-for-scf-for-mmad-l0c.mlir",
+      "bishengir/test/Dialect/HIVM/inline-fixpipe-enable-fixpipe-nz2nz.mlir",
+      "bishengir/test/Dialect/HIVM/inline-fixpipe.mlir",
+      "bishengir/test/Dialect/HIVM/insert-fixpipe-for-scf-if-mmad.mlir",
+      "bishengir/test/Dialect/HIVM/insert-fixpipe-mix-if-normalized-mmad.mlir"
+    ],
+    "diff_scope": "merge-base to pinned MR head"
+  },
+  "translation": {
+    "status": "unsupported",
+    "function": "dot_abs",
+    "diagnostics": [
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":5:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.mmadL1",
+        "location": "loc(\"<stdin>\":6:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":7:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.fixpipe",
+        "location": "loc(\"<stdin>\":8:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":9:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.vabs",
+        "location": "loc(\"<stdin>\":10:10)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "func.return",
+        "location": "loc(\"<stdin>\":11:5)",
+        "reason": "The calling convention for returned SSA data is unspecified."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      10,
+      10
+    ],
+    "status": "unsupported",
+    "diagnostics": [
+      {
+        "op": "hivm.hir.vabs",
+        "location": "loc(\"<stdin>\":10:10)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      }
+    ]
+  },
+  "entry_for_projection": "dot_abs"
+}

@@ -1,0 +1,8 @@
+{
+  "title": "[Feature] Teach hfusion-flatten-ops to collapse arith.select on tensors",
+  "iid": 1053,
+  "updated_at": "2026-11-23T17:12:39.521+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1053",
+  "linked_mrs": []
+}

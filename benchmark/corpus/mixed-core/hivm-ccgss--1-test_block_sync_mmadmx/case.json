@@ -1,0 +1,136 @@
+{
+  "group": "mixed-core",
+  "id": "hivm-ccgss--1-test_block_sync_mmadmx",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "projection": [
+    {
+      "line": 38,
+      "operation": "hivm.hir.wait_flag[<PIPE_FIX>, <PIPE_MTE2>, <EVENT_ID0>]"
+    },
+    {
+      "line": 39,
+      "operation": "hivm.hir.load ins(%arg4 : memref<1024xf32, #hivm.address_space<gm>>) outs(%alloc_2 : memref<1024xf32, #hivm.address_space<ub>>)"
+    },
+    {
+      "line": 40,
+      "operation": "hivm.hir.set_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]"
+    },
+    {
+      "line": 41,
+      "operation": "hivm.hir.wait_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]"
+    },
+    {
+      "line": 42,
+      "operation": "hivm.hir.vadd ins(%alloc_2, %alloc_3 : memref<1024xf32, #hivm.address_space<ub>>, memref<1024xf32, #hivm.address_space<ub>>) outs(%alloc_2 : memref<1024xf32, #hivm.address_space<ub>>)"
+    },
+    {
+      "line": 43,
+      "operation": "hivm.hir.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]"
+    },
+    {
+      "line": 44,
+      "operation": "hivm.hir.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]"
+    },
+    {
+      "line": 45,
+      "operation": "hivm.hir.store ins(%alloc_2 : memref<1024xf32, #hivm.address_space<ub>>) outs(%arg5 : memref<1024xf32, #hivm.address_space<gm>>)"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_FIX",
+      "PIPE_MTE2",
+      "PIPE_MTE3",
+      "PIPE_V"
+    ],
+    "events": [
+      "EVENT_ID0"
+    ],
+    "units": [
+      "unit_load",
+      "unit_store",
+      "unit_vadd"
+    ]
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/SyncSolver/hivm-ccgss.mlir",
+  "upstream_path": "bishengir/test/Dialect/HIVM/SyncSolver/hivm-ccgss.mlir",
+  "split_index": 1,
+  "stage": "intra-core sync pass",
+  "function": "test_block_sync_mmadmx",
+  "translation": {
+    "status": "unsupported",
+    "function": "test_block_sync_mmadmx",
+    "diagnostics": [
+      {
+        "op": "hivm.hir.set_ffts_base_addr",
+        "location": "loc(\"<stdin>\":6:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":14:14)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.nd2nz",
+        "location": "loc(\"<stdin>\":15:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.nd2nz",
+        "location": "loc(\"<stdin>\":18:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.nd2nz",
+        "location": "loc(\"<stdin>\":20:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.nd2nz",
+        "location": "loc(\"<stdin>\":23:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.mmadmxL1",
+        "location": "loc(\"<stdin>\":29:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.fixpipe",
+        "location": "loc(\"<stdin>\":34:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":36:16)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":37:16)",
+        "reason": "No core elaboration rule for this operation."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      38,
+      45
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "test_block_sync_mmadmx"
+}

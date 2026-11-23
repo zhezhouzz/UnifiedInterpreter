@@ -1,0 +1,72 @@
+[
+  {
+    "path": "tutorial/basic/001-vector_add.py",
+    "commit": "d6986ddc6f21ebe5e36805c2c03bd4a481773775",
+    "url": "https://github.com/Ascend/triton-ascend-ops/blob/d6986ddc6f21ebe5e36805c2c03bd4a481773775/tutorial/basic/001-vector_add.py"
+  },
+  {
+    "path": "tutorial/basic/002-vector_cmp.py",
+    "commit": "d6986ddc6f21ebe5e36805c2c03bd4a481773775",
+    "url": "https://github.com/Ascend/triton-ascend-ops/blob/d6986ddc6f21ebe5e36805c2c03bd4a481773775/tutorial/basic/002-vector_cmp.py"
+  },
+  {
+    "path": "tutorial/basic/003-ub_overflow.py",
+    "commit": "d6986ddc6f21ebe5e36805c2c03bd4a481773775",
+    "url": "https://github.com/Ascend/triton-ascend-ops/blob/d6986ddc6f21ebe5e36805c2c03bd4a481773775/tutorial/basic/003-ub_overflow.py"
+  },
+  {
+    "path": "tutorial/basic/004-discrete_memory_access.py",
+    "commit": "d6986ddc6f21ebe5e36805c2c03bd4a481773775",
+    "url": "https://github.com/Ascend/triton-ascend-ops/blob/d6986ddc6f21ebe5e36805c2c03bd4a481773775/tutorial/basic/004-discrete_memory_access.py"
+  },
+  {
+    "path": "tutorial/basic/005-load_order.py",
+    "commit": "d6986ddc6f21ebe5e36805c2c03bd4a481773775",
+    "url": "https://github.com/Ascend/triton-ascend-ops/blob/d6986ddc6f21ebe5e36805c2c03bd4a481773775/tutorial/basic/005-load_order.py"
+  },
+  {
+    "path": "tutorial/basic/006-tiling.py",
+    "commit": "d6986ddc6f21ebe5e36805c2c03bd4a481773775",
+    "url": "https://github.com/Ascend/triton-ascend-ops/blob/d6986ddc6f21ebe5e36805c2c03bd4a481773775/tutorial/basic/006-tiling.py"
+  },
+  {
+    "path": "tutorial/best_practice/001-assign_req_to_token_pool.py",
+    "commit": "d6986ddc6f21ebe5e36805c2c03bd4a481773775",
+    "url": "https://github.com/Ascend/triton-ascend-ops/blob/d6986ddc6f21ebe5e36805c2c03bd4a481773775/tutorial/best_practice/001-assign_req_to_token_pool.py"
+  },
+  {
+    "path": "tutorial/best_practice/002-decode_grouped_attention.py",
+    "commit": "d6986ddc6f21ebe5e36805c2c03bd4a481773775",
+    "url": "https://github.com/Ascend/triton-ascend-ops/blob/d6986ddc6f21ebe5e36805c2c03bd4a481773775/tutorial/best_practice/002-decode_grouped_attention.py"
+  },
+  {
+    "path": "tutorial/best_practice/003-fused-cat-slice-conv1d.py",
+    "commit": "d6986ddc6f21ebe5e36805c2c03bd4a481773775",
+    "url": "https://github.com/Ascend/triton-ascend-ops/blob/d6986ddc6f21ebe5e36805c2c03bd4a481773775/tutorial/best_practice/003-fused-cat-slice-conv1d.py"
+  },
+  {
+    "path": "tutorial/best_practice/004-gather_scatter.py",
+    "commit": "d6986ddc6f21ebe5e36805c2c03bd4a481773775",
+    "url": "https://github.com/Ascend/triton-ascend-ops/blob/d6986ddc6f21ebe5e36805c2c03bd4a481773775/tutorial/best_practice/004-gather_scatter.py"
+  },
+  {
+    "path": "tutorial/best_practice/005-binned_gather_scatter.py",
+    "commit": "d6986ddc6f21ebe5e36805c2c03bd4a481773775",
+    "url": "https://github.com/Ascend/triton-ascend-ops/blob/d6986ddc6f21ebe5e36805c2c03bd4a481773775/tutorial/best_practice/005-binned_gather_scatter.py"
+  },
+  {
+    "path": "tutorial/best_practice/006-padded_gather_scatter.py",
+    "commit": "d6986ddc6f21ebe5e36805c2c03bd4a481773775",
+    "url": "https://github.com/Ascend/triton-ascend-ops/blob/d6986ddc6f21ebe5e36805c2c03bd4a481773775/tutorial/best_practice/006-padded_gather_scatter.py"
+  },
+  {
+    "path": "tutorial/op_extension/001-insert_slice.py",
+    "commit": "d6986ddc6f21ebe5e36805c2c03bd4a481773775",
+    "url": "https://github.com/Ascend/triton-ascend-ops/blob/d6986ddc6f21ebe5e36805c2c03bd4a481773775/tutorial/op_extension/001-insert_slice.py"
+  },
+  {
+    "path": "tutorial/op_extension/002-extract_slice.py",
+    "commit": "d6986ddc6f21ebe5e36805c2c03bd4a481773775",
+    "url": "https://github.com/Ascend/triton-ascend-ops/blob/d6986ddc6f21ebe5e36805c2c03bd4a481773775/tutorial/op_extension/002-extract_slice.py"
+  }
+]

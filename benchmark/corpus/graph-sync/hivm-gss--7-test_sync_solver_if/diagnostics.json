@@ -1,0 +1,10 @@
+{
+  "whole": [
+    {
+      "op": "scf.if",
+      "location": "loc(\"<stdin>\":13:5)",
+      "reason": "Branch guards, yields and SSA joins need a conditional translation."
+    }
+  ],
+  "slice": []
+}

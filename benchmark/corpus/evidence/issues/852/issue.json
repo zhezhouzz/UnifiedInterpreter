@@ -1,0 +1,8 @@
+{
+  "title": "[Bug]: MultiBuffer 流水场景下 CrossCoreGSS 跨核事件复用可能导致计数溢出及 AICore 间歇性超时",
+  "iid": 852,
+  "updated_at": "2026-11-02T15:35:53.135+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/852",
+  "linked_mrs": []
+}

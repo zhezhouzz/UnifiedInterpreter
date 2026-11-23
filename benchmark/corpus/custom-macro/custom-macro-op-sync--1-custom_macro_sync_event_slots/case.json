@@ -1,0 +1,62 @@
+{
+  "group": "custom-macro",
+  "id": "custom-macro-op-sync--1-custom_macro_sync_event_slots",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "projection": [
+    {
+      "line": 5,
+      "operation": "hivm.hir.set_flag[<PIPE_MTE2>, <PIPE_MTE1>, <EVENT_ID1>]"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_MTE1",
+      "PIPE_MTE2"
+    ],
+    "events": [
+      "EVENT_ID1"
+    ],
+    "units": []
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/IR/custom-macro-op-sync.mlir",
+  "upstream_path": "bishengir/test/Dialect/HIVM/IR/custom-macro-op-sync.mlir",
+  "split_index": 1,
+  "stage": "intra-core sync pass",
+  "function": "custom_macro_sync_event_slots",
+  "translation": {
+    "status": "unsupported",
+    "function": "custom_macro_sync_event_slots",
+    "diagnostics": [
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":4:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.custom_macro",
+        "location": "loc(\"<stdin>\":7:10)",
+        "reason": "No core elaboration rule for this operation."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      5,
+      5
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "custom_macro_sync_event_slots"
+}

@@ -1,0 +1,86 @@
+{
+  "group": "unit-flag",
+  "id": "hivm-gss-unit-flag-control-flow--10-if_branch_m_outer_f_setwait",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "projection": [
+    {
+      "line": 21,
+      "operation": "hivm.hir.wait_flag[<PIPE_M>, <PIPE_MTE1>, <EVENT_ID0>]"
+    },
+    {
+      "line": 22,
+      "operation": "hivm.hir.wait_flag[<PIPE_M>, <PIPE_MTE1>, <EVENT_ID1>]"
+    },
+    {
+      "line": 23,
+      "operation": "hivm.hir.set_flag[<PIPE_M>, <PIPE_FIX>, <EVENT_ID0>]"
+    },
+    {
+      "line": 24,
+      "operation": "hivm.hir.wait_flag[<PIPE_M>, <PIPE_FIX>, <EVENT_ID0>]"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_FIX",
+      "PIPE_M",
+      "PIPE_MTE1"
+    ],
+    "events": [
+      "EVENT_ID0",
+      "EVENT_ID1"
+    ],
+    "units": []
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/SyncSolver/hivm-gss-unit-flag-control-flow.mlir",
+  "upstream_path": "bishengir/test/Dialect/HIVM/SyncSolver/hivm-gss-unit-flag-control-flow.mlir",
+  "split_index": 10,
+  "stage": "intra-core sync pass",
+  "function": "if_branch_m_outer_f_setwait",
+  "translation": {
+    "status": "unsupported",
+    "function": "if_branch_m_outer_f_setwait",
+    "diagnostics": [
+      {
+        "op": "hivm.hir.nd2nz",
+        "location": "loc(\"<stdin>\":10:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.nd2nz",
+        "location": "loc(\"<stdin>\":12:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "scf.if",
+        "location": "loc(\"<stdin>\":18:5)",
+        "reason": "Branch guards, yields and SSA joins need a conditional translation."
+      },
+      {
+        "op": "hivm.hir.fixpipe",
+        "location": "loc(\"<stdin>\":25:5)",
+        "reason": "No core elaboration rule for this operation."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      21,
+      24
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "if_branch_m_outer_f_setwait"
+}

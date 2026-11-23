@@ -1,0 +1,4 @@
+run {
+  work_6 := compute[unit_vmin@PIPE_V]();
+  return()
+}

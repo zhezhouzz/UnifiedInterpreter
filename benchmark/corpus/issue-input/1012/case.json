@@ -1,0 +1,78 @@
+{
+  "group": "issue-input",
+  "id": "1012",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2"
+  ],
+  "projection": [
+    {
+      "line": 4,
+      "operation": "hivm.hir.load ins(%arg0 : memref<16x16xf32, #hivm.address_space<gm>>) outs(%alloc : memref<16x16xf32, #hivm.address_space<ub>>)"
+    },
+    {
+      "line": 5,
+      "operation": "hivm.hir.set_flag[<PIPE_MTE2>, <PIPE_MTE3>, <EVENT_ID0>]"
+    },
+    {
+      "line": 6,
+      "operation": "hivm.hir.wait_flag[<PIPE_MTE2>, <PIPE_MTE3>, <EVENT_ID0>]"
+    },
+    {
+      "line": 7,
+      "operation": "hivm.hir.store ins(%alloc : memref<16x16xf32, #hivm.address_space<ub>>) outs(%arg1 : memref<16x16xf32, #hivm.address_space<gm>>)"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_MTE2",
+      "PIPE_MTE3"
+    ],
+    "events": [
+      "EVENT_ID0"
+    ],
+    "units": [
+      "unit_load",
+      "unit_store"
+    ]
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/650fcce691dac5643bc195af3bc008eaf873f387/bishengir/test/Dialect/HIVM/hivm-v2-pipeline-sync.mlir",
+  "issue": 1012,
+  "source_kind": "linked MR regression input",
+  "upstream_file": "evidence/repairs/issue-1012-mr-5074/tests/bishengir/test/Dialect/HIVM/hivm-v2-pipeline-sync.mlir",
+  "split_index": 0,
+  "stage": "-hivm-graph-sync-solver=solver-version=v2",
+  "relation": "Supplemental local compile on pinned toolchain; original regression pass and target are recorded with upstream test.",
+  "translation": {
+    "status": "unsupported",
+    "function": "copy",
+    "diagnostics": [
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":3:14)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.pipe_barrier",
+        "location": "loc(\"<stdin>\":8:5)",
+        "reason": "The axiomatic syntax has no pipe barrier. Replacing it with a flag changes the protocol."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      4,
+      7
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "copy"
+}

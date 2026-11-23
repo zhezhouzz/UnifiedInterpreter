@@ -1,0 +1,109 @@
+{
+  "group": "memory-planning",
+  "id": "plan-memory--17-test_infer_plan_memory_if_yield",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "projection": [
+    {
+      "line": 9,
+      "operation": "hivm.hir.load ins(%arg0 : memref<16x16x16xf16, #hivm.address_space<gm>>) outs(%alloc : memref<16x16x16xf16, #hivm.address_space<ub>>)"
+    },
+    {
+      "line": 10,
+      "operation": "hivm.hir.load ins(%arg1 : memref<16x16x16xf16, #hivm.address_space<gm>>) outs(%alloc_1 : memref<16x16x16xf16, #hivm.address_space<ub>>)"
+    },
+    {
+      "line": 11,
+      "operation": "hivm.hir.load ins(%arg2 : memref<16x16x16xf16, #hivm.address_space<gm>>) outs(%alloc_3 : memref<16x16x16xf16, #hivm.address_space<ub>>)"
+    },
+    {
+      "line": 12,
+      "operation": "hivm.hir.load ins(%arg3 : memref<16x16x16xf16, #hivm.address_space<gm>>) outs(%alloc_4 : memref<16x16x16xf16, #hivm.address_space<ub>>)"
+    },
+    {
+      "line": 13,
+      "operation": "hivm.hir.set_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]"
+    },
+    {
+      "line": 14,
+      "operation": "hivm.hir.wait_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_MTE2",
+      "PIPE_V"
+    ],
+    "events": [
+      "EVENT_ID0"
+    ],
+    "units": [
+      "unit_load"
+    ]
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/plan-memory.mlir",
+  "upstream_path": "bishengir/test/Dialect/HIVM/plan-memory.mlir",
+  "split_index": 17,
+  "stage": "intra-core sync pass",
+  "function": "test_infer_plan_memory_if_yield",
+  "translation": {
+    "status": "unsupported",
+    "function": "test_infer_plan_memory_if_yield",
+    "diagnostics": [
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":3:14)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":4:16)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":5:16)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":6:16)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":7:16)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":8:16)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "scf.if",
+        "location": "loc(\"<stdin>\":15:10)",
+        "reason": "Branch guards, yields and SSA joins need a conditional translation."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      9,
+      14
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "test_infer_plan_memory_if_yield"
+}

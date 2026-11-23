@@ -1,0 +1,6 @@
+run {
+  x0 := compute[unit_vabs@PIPE_V]();
+  setflag[PIPE_V, PIPE_MTE2](EVENT_ID0);
+  x2 := compute[unit_load@PIPE_MTE2]();
+  return()
+}

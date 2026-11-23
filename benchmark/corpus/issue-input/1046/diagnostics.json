@@ -1,0 +1,25 @@
+{
+  "whole": [
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":87:14)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":88:16)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.nd2nz",
+      "location": "loc(\"<stdin>\":89:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.l12l0",
+      "location": "loc(\"<stdin>\":92:5)",
+      "reason": "No core elaboration rule for this operation."
+    }
+  ],
+  "slice": []
+}

@@ -1,0 +1,77 @@
+{
+  "group": "unit-flag",
+  "id": "hivm-gss-unit-flag-control-flow--2-if_true_branch_mf_uf",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "projection": [
+    {
+      "line": 15,
+      "operation": "hivm.hir.wait_flag[<PIPE_MTE2>, <PIPE_MTE1>, <EVENT_ID0>]"
+    },
+    {
+      "line": 16,
+      "operation": "hivm.hir.set_flag[<PIPE_M>, <PIPE_MTE1>, <EVENT_ID0>]"
+    },
+    {
+      "line": 17,
+      "operation": "hivm.hir.set_flag[<PIPE_M>, <PIPE_MTE1>, <EVENT_ID1>]"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_M",
+      "PIPE_MTE1",
+      "PIPE_MTE2"
+    ],
+    "events": [
+      "EVENT_ID0",
+      "EVENT_ID1"
+    ],
+    "units": []
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/SyncSolver/hivm-gss-unit-flag-control-flow.mlir",
+  "upstream_path": "bishengir/test/Dialect/HIVM/SyncSolver/hivm-gss-unit-flag-control-flow.mlir",
+  "split_index": 2,
+  "stage": "intra-core sync pass",
+  "function": "if_true_branch_mf_uf",
+  "translation": {
+    "status": "unsupported",
+    "function": "if_true_branch_mf_uf",
+    "diagnostics": [
+      {
+        "op": "hivm.hir.nd2nz",
+        "location": "loc(\"<stdin>\":10:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.nd2nz",
+        "location": "loc(\"<stdin>\":12:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "scf.if",
+        "location": "loc(\"<stdin>\":18:5)",
+        "reason": "Branch guards, yields and SSA joins need a conditional translation."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      15,
+      17
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "if_true_branch_mf_uf"
+}

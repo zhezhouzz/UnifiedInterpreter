@@ -1,0 +1,55 @@
+{
+  "whole": [
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":3:14)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":4:16)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":5:16)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":6:16)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":7:16)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":8:16)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":9:16)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.mmadmxL1",
+      "location": "loc(\"<stdin>\":15:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.mmadmxL1",
+      "location": "loc(\"<stdin>\":16:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.mmadmxL1",
+      "location": "loc(\"<stdin>\":17:5)",
+      "reason": "No core elaboration rule for this operation."
+    }
+  ],
+  "slice": []
+}

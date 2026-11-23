@@ -1,0 +1,12 @@
+{
+  "issue": null,
+  "mr": "2994",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/2994",
+  "commit": "1e2a10ed0dd83d4f9f07ff7689667f8c2a9d8ee8",
+  "parent": "1330ce5170ea27d7416d025faf56ab2d1400f519",
+  "title": "[HIVM] Normalize for-carried matmul with side users",
+  "tests": [
+    "bishengir/test/Dialect/HIVM/normalize-matmul.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

@@ -1,0 +1,153 @@
+{
+  "group": "issue-input",
+  "id": "1026",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-convert-hfusion-to-hivm"
+  ],
+  "projection": [
+    {
+      "line": 7,
+      "operation": "%1 = hivm.hir.vbrc {hivm.tcore_type = #hivm.tcore_type<CUBE>} ins(%cst : f32) outs(%0 : tensor<2x1x16x8xf32>) -> tensor<2x1x16x8xf32>"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_V"
+    ],
+    "events": [],
+    "units": [
+      "unit_vbrc"
+    ]
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/3b682d4956d76ec6115fa01dc8540d48960950f1/bishengir/test/Dialect/HIVM/propagate-convert-layout-cbuf-reshape.mlir",
+  "issue": 1026,
+  "source_kind": "linked MR regression input",
+  "upstream_file": "evidence/repairs/issue-1026-mr-5303/tests/bishengir/test/Dialect/HIVM/propagate-convert-layout-cbuf-reshape.mlir",
+  "split_index": 4,
+  "stage": "-convert-hfusion-to-hivm",
+  "relation": "Supplemental local compile on pinned toolchain; original regression pass and target are recorded with upstream test.",
+  "dispatch_assumption": "The vbrc timing sketch assumes UB after lowering; tensor or unassigned destinations require a target decision.",
+  "translation": {
+    "status": "unsupported",
+    "function": "packed_column_and_row",
+    "diagnostics": [
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":6:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.vbrc",
+        "location": "loc(\"<stdin>\":7:10)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":8:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.vbrc",
+        "location": "loc(\"<stdin>\":9:10)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":10:14)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "bufferization.to_tensor",
+        "location": "loc(\"<stdin>\":11:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.copy",
+        "location": "loc(\"<stdin>\":12:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "tensor.extract_slice",
+        "location": "loc(\"<stdin>\":13:24)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.convert_layout",
+        "location": "loc(\"<stdin>\":14:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "tensor.insert_slice",
+        "location": "loc(\"<stdin>\":15:23)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":16:16)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "bufferization.to_tensor",
+        "location": "loc(\"<stdin>\":17:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.copy",
+        "location": "loc(\"<stdin>\":18:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "tensor.extract_slice",
+        "location": "loc(\"<stdin>\":19:26)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "tensor.insert_slice",
+        "location": "loc(\"<stdin>\":20:25)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.convert_layout",
+        "location": "loc(\"<stdin>\":21:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":22:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.mmadL1",
+        "location": "loc(\"<stdin>\":23:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "func.return",
+        "location": "loc(\"<stdin>\":24:5)",
+        "reason": "The calling convention for returned SSA data is unspecified."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      7,
+      7
+    ],
+    "status": "unsupported",
+    "diagnostics": [
+      {
+        "op": "hivm.hir.vbrc",
+        "location": "loc(\"<stdin>\":7:10)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      }
+    ]
+  },
+  "entry_for_projection": "packed_column_and_row"
+}

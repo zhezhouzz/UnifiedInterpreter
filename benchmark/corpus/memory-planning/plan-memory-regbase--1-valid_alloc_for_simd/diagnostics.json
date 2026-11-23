@@ -1,0 +1,35 @@
+{
+  "whole": [
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":4:14)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":5:16)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "memref.load",
+      "location": "loc(\"<stdin>\":11:10)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "memref.load",
+      "location": "loc(\"<stdin>\":13:10)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "arith.mulf",
+      "location": "loc(\"<stdin>\":14:10)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "func.return",
+      "location": "loc(\"<stdin>\":15:5)",
+      "reason": "The calling convention for returned SSA data is unspecified."
+    }
+  ],
+  "slice": []
+}

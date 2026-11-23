@@ -1,0 +1,21 @@
+{
+  "issue": 1008,
+  "mr": "5285",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/5285",
+  "commit": "1b11119553df3c52166fbcada24e1ec0e73bf2f5",
+  "parent": "3a4b39cf3e8fd3fd93b42bf2d0f4f94756146f8a",
+  "title": "[HIVM] feat: Enable Cube layout optimization on A2 and A3",
+  "tests": [
+    "bishengir/test/Dialect/HFusion/hfusion-adapt-triton-kernel.mlir",
+    "bishengir/test/Dialect/HIVM/a3-layout-optimization.mlir",
+    "bishengir/test/Dialect/HIVM/auto-mark-matmul-collapse.mlir",
+    "bishengir/test/Dialect/HIVM/combine-optimized-convert-layout.mlir",
+    "bishengir/test/Dialect/HIVM/hivm-pipeline-skip-bind-sub-block.mlir",
+    "bishengir/test/Dialect/HIVM/inject-block-sync.mlir",
+    "bishengir/test/Dialect/HIVM/insert-convert-layout.mlir",
+    "bishengir/test/Dialect/HIVM/propagate-convert-layout-cbuf-reshape.mlir",
+    "bishengir/test/Dialect/HIVM/propagate-convert-layout-load-reshape.mlir",
+    "bishengir/test/bishengir-compile/triton/device-debug/mixed-layout-print.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

@@ -1,0 +1,101 @@
+{
+  "group": "memory-planning",
+  "id": "plan-memory-regbase--1-valid_alloc_for_simd",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "projection": [
+    {
+      "line": 6,
+      "operation": "hivm.hir.load ins(%arg0 : memref<61440xf16, #hivm.address_space<gm>>) outs(%alloc : memref<61440xf16, #hivm.address_space<ub>>)"
+    },
+    {
+      "line": 7,
+      "operation": "hivm.hir.set_flag[<PIPE_MTE2>, <PIPE_S>, <EVENT_ID1>]"
+    },
+    {
+      "line": 8,
+      "operation": "hivm.hir.load ins(%arg1 : memref<61440xf16, #hivm.address_space<gm>>) outs(%alloc_0 : memref<61440xf16, #hivm.address_space<ub>>)"
+    },
+    {
+      "line": 9,
+      "operation": "hivm.hir.set_flag[<PIPE_MTE2>, <PIPE_S>, <EVENT_ID0>]"
+    },
+    {
+      "line": 10,
+      "operation": "hivm.hir.wait_flag[<PIPE_MTE2>, <PIPE_S>, <EVENT_ID1>]"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_MTE2",
+      "PIPE_S"
+    ],
+    "events": [
+      "EVENT_ID0",
+      "EVENT_ID1"
+    ],
+    "units": [
+      "unit_load"
+    ]
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/plan-memory-regbase.mlir",
+  "upstream_path": "bishengir/test/Dialect/HIVM/plan-memory-regbase.mlir",
+  "split_index": 1,
+  "stage": "intra-core sync pass",
+  "function": "valid_alloc_for_simd",
+  "translation": {
+    "status": "unsupported",
+    "function": "valid_alloc_for_simd",
+    "diagnostics": [
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":4:14)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":5:16)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.load",
+        "location": "loc(\"<stdin>\":11:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.load",
+        "location": "loc(\"<stdin>\":13:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "arith.mulf",
+        "location": "loc(\"<stdin>\":14:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "func.return",
+        "location": "loc(\"<stdin>\":15:5)",
+        "reason": "The calling convention for returned SSA data is unspecified."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      6,
+      10
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "valid_alloc_for_simd"
+}

@@ -1,0 +1,84 @@
+{
+  "group": "repair-regression",
+  "id": "issue-1008-mr-5285",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-adapt-triton-kernel"
+  ],
+  "projection": [
+    {
+      "line": 14,
+      "operation": "%4 = hivm.hir.vadd ins(%extracted_slice, %cst : tensor<32x64xf32>, f32) outs(%0 : tensor<32x64xf32>) -> tensor<32x64xf32>"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_V"
+    ],
+    "events": [],
+    "units": [
+      "unit_vadd"
+    ]
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/1b11119553df3c52166fbcada24e1ec0e73bf2f5/bishengir/test/Dialect/HFusion/hfusion-adapt-triton-kernel.mlir",
+  "stage": "repair test first optimization; see argv",
+  "split_index": 9,
+  "upstream_path": "bishengir/test/Dialect/HFusion/hfusion-adapt-triton-kernel.mlir",
+  "repair": {
+    "issue": 1008,
+    "mr": "5285",
+    "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/5285",
+    "commit": "1b11119553df3c52166fbcada24e1ec0e73bf2f5",
+    "parent": "3a4b39cf3e8fd3fd93b42bf2d0f4f94756146f8a",
+    "title": "[HIVM] feat: Enable Cube layout optimization on A2 and A3",
+    "tests": [
+      "bishengir/test/Dialect/HFusion/hfusion-adapt-triton-kernel.mlir",
+      "bishengir/test/Dialect/HIVM/a3-layout-optimization.mlir",
+      "bishengir/test/Dialect/HIVM/auto-mark-matmul-collapse.mlir",
+      "bishengir/test/Dialect/HIVM/combine-optimized-convert-layout.mlir",
+      "bishengir/test/Dialect/HIVM/hivm-pipeline-skip-bind-sub-block.mlir",
+      "bishengir/test/Dialect/HIVM/inject-block-sync.mlir",
+      "bishengir/test/Dialect/HIVM/insert-convert-layout.mlir",
+      "bishengir/test/Dialect/HIVM/propagate-convert-layout-cbuf-reshape.mlir",
+      "bishengir/test/Dialect/HIVM/propagate-convert-layout-load-reshape.mlir",
+      "bishengir/test/bishengir-compile/triton/device-debug/mixed-layout-print.mlir"
+    ],
+    "diff_scope": "merge-base to pinned MR head"
+  },
+  "translation": {
+    "status": "unsupported",
+    "function": "matmul_mix_aiv_with_bind_sub_block_tag",
+    "diagnostics": [
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":8:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "scf.for",
+        "location": "loc(\"<stdin>\":9:5)",
+        "reason": "Loop bounds, iteration bindings and carried aliases need a loop translation."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      14,
+      14
+    ],
+    "status": "unsupported",
+    "diagnostics": [
+      {
+        "op": "hivm.hir.vadd",
+        "location": "loc(\"<stdin>\":14:12)",
+        "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+      }
+    ]
+  },
+  "entry_for_projection": "matmul_mix_aiv_with_bind_sub_block_tag"
+}

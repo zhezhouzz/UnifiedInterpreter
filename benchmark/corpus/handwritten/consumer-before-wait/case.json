@@ -1,0 +1,62 @@
+{
+  "group": "handwritten",
+  "id": "consumer-before-wait",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-canonicalize"
+  ],
+  "projection": [
+    {
+      "line": 7,
+      "operation": "hivm.hir.load ins(%arg0 : memref<32xf32, #hivm.address_space<gm>>) outs(%0 : memref<32xf32, #hivm.address_space<ub>>)"
+    },
+    {
+      "line": 8,
+      "operation": "hivm.hir.set_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]"
+    },
+    {
+      "line": 9,
+      "operation": "hivm.hir.vabs ins(%0 : memref<32xf32, #hivm.address_space<ub>>) outs(%1 : memref<32xf32, #hivm.address_space<ub>>)"
+    },
+    {
+      "line": 10,
+      "operation": "hivm.hir.wait_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_MTE2",
+      "PIPE_V"
+    ],
+    "events": [
+      "EVENT_ID0"
+    ],
+    "units": [
+      "unit_load",
+      "unit_vabs"
+    ]
+  },
+  "stage": "explicit flags in post-insertion-style input; canonicalize only",
+  "origin": "authored protocol litmus",
+  "property": "A later wait does not retroactively order the earlier consumer.",
+  "translation": {
+    "status": "translated",
+    "function": "consumer_before_wait",
+    "diagnostics": []
+  },
+  "expectation": {
+    "scope": "whole straight-line protocol",
+    "method": "independently authored operation sequence",
+    "matches_full_output": true
+  },
+  "slice_translation": {
+    "lines": [
+      7,
+      10
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "consumer_before_wait"
+}

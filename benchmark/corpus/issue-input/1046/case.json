@@ -1,0 +1,77 @@
+{
+  "group": "issue-input",
+  "id": "1046",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2"
+  ],
+  "projection": [
+    {
+      "line": 90,
+      "operation": "hivm.hir.set_flag[<PIPE_MTE2>, <PIPE_MTE1>, <EVENT_ID0>]"
+    },
+    {
+      "line": 91,
+      "operation": "hivm.hir.wait_flag[<PIPE_MTE2>, <PIPE_MTE1>, <EVENT_ID0>]"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_MTE1",
+      "PIPE_MTE2"
+    ],
+    "events": [
+      "EVENT_ID0"
+    ],
+    "units": []
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/d04e61b57b7258f0bd97c9f2b7ef035c658dcde3/bishengir/test/Dialect/HIVM/l12l0-layout.mlir",
+  "issue": 1046,
+  "source_kind": "linked MR regression input",
+  "upstream_file": "evidence/repairs/issue-1046-mr-5251/tests/bishengir/test/Dialect/HIVM/l12l0-layout.mlir",
+  "split_index": 0,
+  "stage": "-hivm-graph-sync-solver=solver-version=v2",
+  "relation": "Supplemental local compile on pinned toolchain; original regression pass and target are recorded with upstream test.",
+  "translation": {
+    "status": "unsupported",
+    "function": "transpose_hint",
+    "diagnostics": [
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":87:14)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":88:16)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.nd2nz",
+        "location": "loc(\"<stdin>\":89:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.l12l0",
+        "location": "loc(\"<stdin>\":92:5)",
+        "reason": "No core elaboration rule for this operation."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      90,
+      91
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "transpose_hint"
+}

@@ -1,0 +1,35 @@
+{
+  "whole": [
+    {
+      "op": "memref.alloc",
+      "location": "loc(\"<stdin>\":6:14)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "bufferization.to_tensor",
+      "location": "loc(\"<stdin>\":7:10)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "bufferization.to_tensor",
+      "location": "loc(\"<stdin>\":8:10)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "scf.if",
+      "location": "loc(\"<stdin>\":11:10)",
+      "reason": "Branch guards, yields and SSA joins need a conditional translation."
+    },
+    {
+      "op": "hivm.hir.store",
+      "location": "loc(\"<stdin>\":25:5)",
+      "reason": "Tensor-stage data operation requires bufferization before dispatch mapping."
+    },
+    {
+      "op": "annotation.mark",
+      "location": "loc(\"<stdin>\":26:5)",
+      "reason": "No core elaboration rule for this operation."
+    }
+  ],
+  "slice": []
+}

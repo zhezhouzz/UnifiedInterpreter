@@ -1,0 +1,5 @@
+run {
+  a := read[mem](CELL_0);
+  write[mem](CELL_1, a);
+  return()
+}

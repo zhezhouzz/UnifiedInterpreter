@@ -1,0 +1,96 @@
+{
+  "group": "mixed-core",
+  "id": "hivm-dccgss--3-kern3_backup",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "projection": [
+    {
+      "line": 26,
+      "operation": "hivm.hir.wait_flag[<PIPE_M>, <PIPE_MTE1>, <EVENT_ID0>]"
+    },
+    {
+      "line": 27,
+      "operation": "hivm.hir.wait_flag[<PIPE_M>, <PIPE_MTE1>, <EVENT_ID1>]"
+    },
+    {
+      "line": 28,
+      "operation": "hivm.hir.set_flag[<PIPE_M>, <PIPE_FIX>, <EVENT_ID0>]"
+    },
+    {
+      "line": 29,
+      "operation": "hivm.hir.wait_flag[<PIPE_M>, <PIPE_FIX>, <EVENT_ID0>]"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_FIX",
+      "PIPE_M",
+      "PIPE_MTE1"
+    ],
+    "events": [
+      "EVENT_ID0",
+      "EVENT_ID1"
+    ],
+    "units": []
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/SyncSolver/hivm-dccgss.mlir",
+  "upstream_path": "bishengir/test/Dialect/HIVM/SyncSolver/hivm-dccgss.mlir",
+  "split_index": 3,
+  "stage": "intra-core sync pass",
+  "function": "kern3_backup",
+  "translation": {
+    "status": "unsupported",
+    "function": "kern3_mix_aic",
+    "diagnostics": [
+      {
+        "op": "hivm.hir.anchor",
+        "location": "loc(\"<stdin>\":10:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.nd2nz",
+        "location": "loc(\"<stdin>\":17:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.mmadL1",
+        "location": "loc(\"<stdin>\":25:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.fixpipe",
+        "location": "loc(\"<stdin>\":30:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.anchor",
+        "location": "loc(\"<stdin>\":31:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.anchor",
+        "location": "loc(\"<stdin>\":32:5)",
+        "reason": "No core elaboration rule for this operation."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      26,
+      29
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "kern3_mix_aic"
+}

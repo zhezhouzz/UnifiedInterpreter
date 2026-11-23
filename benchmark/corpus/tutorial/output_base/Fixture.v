@@ -1,0 +1,43 @@
+From Stdlib Require Import List String ZArith.
+From UnifiedInterpreter.CoreLanguage.Axiomatic Require Import Syntax.
+Import ListNotations.
+Open Scope string_scope.
+Local Notation Cmd := (@command unit nat string string unit).
+Definition expected : @shared_program unit nat string string :=
+  Run [(CCompute tt 0%nat (Dispatch "unit_load" (Some (Literal (VPipe "PIPE_MTE2")))) []
+    (CCompute tt 1%nat (Dispatch "unit_load" (Some (Literal (VPipe "PIPE_MTE2")))) []
+    (CCompute tt 2%nat (Dispatch "unit_load" (Some (Literal (VPipe "PIPE_MTE2")))) []
+    (SetFlag tt (Literal (VPipe "PIPE_MTE2")) (Literal (VPipe "PIPE_V")) (Literal (VEvent 0%nat))
+    (WaitFlag tt (Literal (VPipe "PIPE_MTE2")) (Literal (VPipe "PIPE_V")) (Literal (VEvent 0%nat))
+    (CCompute tt 3%nat (Dispatch "unit_vmul" (Some (Literal (VPipe "PIPE_V")))) []
+    (Return tt [])))))) : Cmd)].
+
+Definition slice_actual : @shared_program unit nat string string :=
+  Run [(CCompute tt 0%nat (Dispatch "unit_load" (Some (Literal (VPipe "PIPE_MTE2")))) []
+    (CCompute tt 1%nat (Dispatch "unit_load" (Some (Literal (VPipe "PIPE_MTE2")))) []
+    (CCompute tt 2%nat (Dispatch "unit_load" (Some (Literal (VPipe "PIPE_MTE2")))) []
+    (SetFlag tt (Literal (VPipe "PIPE_MTE2")) (Literal (VPipe "PIPE_V")) (Literal (VEvent 0%nat))
+    (WaitFlag tt (Literal (VPipe "PIPE_MTE2")) (Literal (VPipe "PIPE_V")) (Literal (VEvent 0%nat))
+    (CCompute tt 3%nat (Dispatch "unit_vmul" (Some (Literal (VPipe "PIPE_V")))) []
+    (Return tt [])))))) : Cmd)].
+
+Definition kernel_reference : @shared_program unit nat string string :=
+  Run [(CCompute tt 0%nat (Dispatch "unit_load" (Some (Literal (VPipe "PIPE_MTE2")))) []
+    (CCompute tt 1%nat (Dispatch "unit_load" (Some (Literal (VPipe "PIPE_MTE2")))) []
+    (CCompute tt 2%nat (Dispatch "unit_load" (Some (Literal (VPipe "PIPE_MTE2")))) []
+    (SetFlag tt (Literal (VPipe "PIPE_MTE2")) (Literal (VPipe "PIPE_V")) (Literal (VEvent 0%nat))
+    (WaitFlag tt (Literal (VPipe "PIPE_MTE2")) (Literal (VPipe "PIPE_V")) (Literal (VEvent 0%nat))
+    (CCompute tt 3%nat (Dispatch "unit_vmul" (Some (Literal (VPipe "PIPE_V")))) []
+    (SetFlag tt (Literal (VPipe "PIPE_V")) (Literal (VPipe "PIPE_V")) (Literal (VEvent 90%nat))
+    (WaitFlag tt (Literal (VPipe "PIPE_V")) (Literal (VPipe "PIPE_V")) (Literal (VEvent 90%nat))
+    (CCompute tt 4%nat (Dispatch "unit_vmul" (Some (Literal (VPipe "PIPE_V")))) []
+    (SetFlag tt (Literal (VPipe "PIPE_V")) (Literal (VPipe "PIPE_MTE3")) (Literal (VEvent 0%nat))
+    (WaitFlag tt (Literal (VPipe "PIPE_V")) (Literal (VPipe "PIPE_MTE3")) (Literal (VEvent 0%nat))
+    (CCompute tt 5%nat (Dispatch "unit_store" (Some (Literal (VPipe "PIPE_MTE3")))) []
+    (SetFlag tt (Literal (VPipe "PIPE_MTE2")) (Literal (VPipe "PIPE_MTE2")) (Literal (VEvent 91%nat))
+    (WaitFlag tt (Literal (VPipe "PIPE_MTE2")) (Literal (VPipe "PIPE_MTE2")) (Literal (VEvent 91%nat))
+    (SetFlag tt (Literal (VPipe "PIPE_V")) (Literal (VPipe "PIPE_V")) (Literal (VEvent 91%nat))
+    (WaitFlag tt (Literal (VPipe "PIPE_V")) (Literal (VPipe "PIPE_V")) (Literal (VEvent 91%nat))
+    (SetFlag tt (Literal (VPipe "PIPE_MTE3")) (Literal (VPipe "PIPE_MTE3")) (Literal (VEvent 91%nat))
+    (WaitFlag tt (Literal (VPipe "PIPE_MTE3")) (Literal (VPipe "PIPE_MTE3")) (Literal (VEvent 91%nat))
+    (Return tt [])))))))))))))))))) : Cmd)].

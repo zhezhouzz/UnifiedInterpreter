@@ -1,0 +1,225 @@
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/HIVMVectorizeBuffers.cpp b/bishengir/lib/Dialect/HIVM/Transforms/HIVMVectorizeBuffers.cpp
+index cf41e736d2..e8d64ee603 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/HIVMVectorizeBuffers.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/HIVMVectorizeBuffers.cpp
+@@ -7,10 +7,13 @@
+ //===----------------------------------------------------------------------===//
+ 
+ #include "bishengir/Dialect/HIVM/Transforms/HIVMVectorizeBuffers.h"
++#include "bishengir/Dialect/HACC/Utils/Utils.h"
+ #include "bishengir/Dialect/HIVM/IR/HIVM.h"
++#include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
+ #include "bishengir/Dialect/HIVM/TransformOps/Outline.h"
+ #include "bishengir/Dialect/HIVM/TransformOps/VectorizeLinalg.h"
+ #include "bishengir/Dialect/HIVM/TransformOps/VectorizeResult.h"
++#include "bishengir/Dialect/HIVM/Utils/RegbaseUtils.h"
+ #include "mlir/Dialect/Linalg/IR/Linalg.h"
+ #include "mlir/Dialect/Linalg/TransformOps/DialectExtension.h"
+ #include "mlir/Dialect/Linalg/Transforms/TilingInterfaceImpl.h"
+@@ -19,6 +22,7 @@
+ #include "mlir/Dialect/Tensor/TransformOps/TensorTransformOps.h"
+ #include "mlir/Dialect/Transform/IR/TransformDialect.h"
+ #include "mlir/Dialect/Vector/IR/VectorOps.h"
++#include "mlir/IR/Matchers.h"
+ #include "mlir/IR/PatternMatch.h"
+ #include "mlir/IR/Verifier.h"
+ 
+@@ -26,6 +30,61 @@ using namespace mlir;
+ using namespace mlir::hivm;
+ 
+ namespace {
++static bool supportsScalarBroadcast(Type element) {
++  // A one-element store needs a masked data store after AVE lowering.
++  if (auto integer = dyn_cast<IntegerType>(element))
++    return integer.isSignless() &&
++           llvm::is_contained(ArrayRef<unsigned>{8, 16, 32},
++                              integer.getWidth());
++  return isa<Float16Type, BFloat16Type, Float32Type, Float8E4M3FNType,
++             Float8E5M2Type>(element);
++}
++
++// A generic scalar store would be cloned onto both cores of a MIX kernel.
++// When the AIV already has the scalar and exclusively consumes a fresh
++// singleton UB, a vector broadcast writes the entire allocation on its owner.
++static void promotePrivateVectorInput(memref::StoreOp store) {
++  auto function = store->getParentOfType<func::FuncOp>();
++  if (!function || queryFuncCoreType(function) != TFuncCoreType::MIX ||
++      store->hasAttr(TCoreTypeAttr::name))
++    return;
++  Value dest = store.getMemRef();
++  auto alloc = dest.getDefiningOp<memref::AllocOp>();
++  if (!alloc || alloc->getBlock() != store->getBlock() ||
++      !llvm::hasNItems(dest.getUses(), 2))
++    return;
++  auto type = alloc.getType();
++  if (type.getShape() != ArrayRef<int64_t>{1} ||
++      !type.getLayout().isIdentity() ||
++      getOptionalHIVMAddressSpace(type) != AddressSpace::UB ||
++      !supportsScalarBroadcast(type.getElementType()) ||
++      !matchPattern(store.getIndices().front(), m_Zero()))
++    return;
++  auto isLocalVF = [&](Operation *user) {
++    return user->getBlock() == store->getBlock() && isVFCall(user);
++  };
++  Value scalar = store.getValue();
++  auto arg = dyn_cast<BlockArgument>(scalar);
++  bool available = (arg && arg.getOwner() == &function.front()) ||
++                   scalar.getDefiningOp<arith::ConstantOp>() ||
++                   llvm::any_of(scalar.getUsers(), isLocalVF);
++  // The call can publish the buffer address. Initialize it before the call
++  // and in the allocation's block so the address is fresh on every iteration.
++  auto initializedByStore = [&](Operation *user) {
++    return isLocalVF(user) && store->isBeforeInBlock(user);
++  };
++  if (!available || !llvm::any_of(dest.getUsers(), initializedByStore))
++    return;
++  for (Operation *parent = store->getParentOp(); parent != function;
++       parent = parent->getParentOp()) {
++    auto owner = getCoreType(parent);
++    if (failed(owner) || *owner != TCoreType::CUBE_OR_VECTOR)
++      return;
++  }
++  IRRewriter rewriter(store);
++  rewriter.replaceOpWithNewOp<VBrcOp>(store, TypeRange{}, scalar, dest);
++}
++
+ bool isBufferMovement(Operation &operation) {
+   auto structured = dyn_cast<HIVMStructuredOp>(operation);
+   if (!structured || !structured.hasPureBufferSemantics() ||
+@@ -273,6 +332,8 @@ void annotateBufferFunction(func::FuncOp function) {
+ }
+ 
+ LogicalResult vectorizeBufferFunctions(ModuleOp module) {
++  if (hacc::utils::isAscend960(module))
++    module.walk(promotePrivateVectorInput);
+   Groups groups;
+   auto checked = module.walk([&](Operation *operation) {
+     if (!isBufferMovement(*operation))
+diff --git a/bishengir/test/Dialect/HIVM/Vectorize/hivm-vectorize-private-scalar-input.mlir b/bishengir/test/Dialect/HIVM/Vectorize/hivm-vectorize-private-scalar-input.mlir
+new file mode 100644
+index 0000000000..d1deca6e22
+--- /dev/null
++++ b/bishengir/test/Dialect/HIVM/Vectorize/hivm-vectorize-private-scalar-input.mlir
+@@ -0,0 +1,122 @@
++// RUN: bishengir-opt %s --hacc-append-device-spec=target=Ascend960DT_968B7 --hivm-vectorize-buffers --hivm-v2-split-kernel | FileCheck %s
++// RUN: bishengir-opt %s --hacc-append-device-spec=target=Ascend950PR_950z --hivm-vectorize-buffers | FileCheck %s --check-prefix=A5
++
++!ub = memref<1xf32, #hivm.address_space<ub>>
++!gm = memref<1xf32, #hivm.address_space<gm>>
++!indices = memref<1xindex, #hivm.address_space<ub>>
++!unsigned = memref<1xui8, #hivm.address_space<ub>>
++!wide = memref<1xi64, #hivm.address_space<ub>>
++!pred = memref<1xi1, #hivm.address_space<ub>>
++module attributes {hivm.module_core_type = #hivm.module_core_type<MIX>} {
++  func.func private @consume(%tile: !ub, %scale: f32)
++      attributes {hivm.vector_function, hivm.func_core_type = #hivm.func_core_type<AIV>}
++
++  // The vector side already consumes the scalar. The cube side must not write
++  // its temporary once the vector function starts updating that UB slot.
++  // CHECK-LABEL: func.func @gate_mix_aic(
++  // CHECK-NOT: memref.store
++  // CHECK: return
++  // CHECK-LABEL: func.func @gate_mix_aiv(
++  // CHECK-NOT: memref.store
++  // CHECK: call @{{.*}}({{.*}}) {{.*}}hivm.vector_function
++  // CHECK: call @consume(
++  // A5-LABEL: func.func @gate(
++  // A5: memref.store
++  func.func @gate(%raw: !gm) attributes {hivm.func_core_type = #hivm.func_core_type<MIX>} {
++    %zero = arith.constant 0 : index
++    %p = memref.alloc() : !ub
++    %value = memref.load %raw[%zero] : !gm
++    memref.store %value, %p[%zero] : !ub
++    func.call @consume(%p, %value) {hivm.vector_function} : (!ub, f32) -> ()
++    return
++  }
++
++  // A vector call may publish the buffer address before the caller writes it.
++  // CHECK-LABEL: func.func @after_call_mix_aic(
++  // CHECK: memref.store
++  // CHECK-LABEL: func.func @after_call_mix_aiv(
++  // CHECK: call @consume(
++  // CHECK: memref.store
++  func.func @after_call(%value: f32) attributes {hivm.func_core_type = #hivm.func_core_type<MIX>} {
++    %zero = arith.constant 0 : index
++    %p = memref.alloc() : !ub
++    func.call @consume(%p, %value) {hivm.vector_function} : (!ub, f32) -> ()
++    memref.store %value, %p[%zero] : !ub
++    return
++  }
++
++  // The same call may already have published this allocation on a prior trip.
++  // CHECK-LABEL: func.func @prior_iteration_mix_aic(
++  // CHECK: scf.for
++  // CHECK: memref.store
++  // CHECK-LABEL: func.func @prior_iteration_mix_aiv(
++  // CHECK: memref.store
++  // CHECK: call @consume(
++  func.func @prior_iteration(%n: index, %value: f32) attributes {hivm.func_core_type = #hivm.func_core_type<MIX>} {
++    %zero = arith.constant 0 : index
++    %one = arith.constant 1 : index
++    %p = memref.alloc() : !ub
++    scf.for %i = %zero to %n step %one {
++      memref.store %value, %p[%zero] : !ub
++      func.call @consume(%p, %value) {hivm.vector_function} : (!ub, f32) -> ()
++    }
++    return
++  }
++
++  // A private pointer escapes to another core via a load. Both local reads
++  // see the caller's original scalar store.
++  // CHECK-LABEL: func.func @shared_mix_aic(
++  // CHECK: memref.store {{.*}} : memref<1xf32, #hivm.address_space<ub>>
++  // CHECK: memref.load
++  // CHECK-LABEL: func.func @shared_mix_aiv(
++  // CHECK: memref.store {{.*}} : memref<1xf32, #hivm.address_space<ub>>
++  // CHECK: call @consume(
++  func.func @shared(%out: !gm, %v: f32) attributes {hivm.func_core_type = #hivm.func_core_type<MIX>} {
++    %zero = arith.constant 0 : index
++    %p = memref.alloc() : !ub
++    memref.store %v, %p[%zero] : !ub
++    func.call @consume(%p, %v) {hivm.vector_function} : (!ub, f32) -> ()
++    %x = memref.load %p[%zero] {hivm.tcore_type = #hivm.tcore_type<CUBE>} : !ub
++    memref.store %x, %out[%zero] {hivm.tcore_type = #hivm.tcore_type<CUBE>} : !gm
++    return
++  }
++
++  // These scalar stores have no native masked single-lane broadcast/store.
++  // CHECK-LABEL: func.func @unsupported_types_mix_aiv(
++  // CHECK: memref.store {{.*}} : memref<1xindex
++  // CHECK: memref.store {{.*}} : memref<1xui8
++  // CHECK: memref.store {{.*}} : memref<1xi64
++  // CHECK: memref.store {{.*}} : memref<1xi1,
++  func.func private @use_scalars(!indices, !unsigned, !wide, !pred)
++      attributes {hivm.vector_function, hivm.func_core_type = #hivm.func_core_type<AIV>}
++  func.func @unsupported_types(%index: index, %unsigned: ui8, %wide: i64, %pred: i1)
++      attributes {hivm.func_core_type = #hivm.func_core_type<MIX>} {
++    %zero = arith.constant 0 : index
++    %p = memref.alloc() : !indices
++    %u = memref.alloc() : !unsigned
++    %w = memref.alloc() : !wide
++    %b = memref.alloc() : !pred
++    memref.store %index, %p[%zero] : !indices
++    memref.store %unsigned, %u[%zero] : !unsigned
++    memref.store %wide, %w[%zero] : !wide
++    memref.store %pred, %b[%zero] : !pred
++    func.call @use_scalars(%p, %u, %w, %b) {hivm.vector_function} : (!indices, !unsigned, !wide, !pred) -> ()
++    return
++  }
++
++  // CHECK-LABEL: func.func @cube_owned_mix_aic(
++  // CHECK: memref.store
++  // CHECK-LABEL: func.func @cube_owned_mix_aiv(
++  // CHECK-NOT: memref.store
++  // CHECK: call @consume(
++  func.func @cube_owned(%value: f32) attributes {hivm.func_core_type = #hivm.func_core_type<MIX>} {
++    %zero = arith.constant 0 : index
++    %p = memref.alloc() : !ub
++    scope.scope : () -> () {
++      memref.store %value, %p[%zero] : !ub
++      func.call @consume(%p, %value) {hivm.vector_function} : (!ub, f32) -> ()
++      scope.return
++    } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
++    return
++  }
++}

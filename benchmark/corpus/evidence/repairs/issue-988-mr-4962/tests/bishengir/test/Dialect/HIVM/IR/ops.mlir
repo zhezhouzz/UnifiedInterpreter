@@ -1,0 +1,524 @@
+// RUN: bishengir-opt -allow-unregistered-dialect %s -split-input-file | FileCheck %s
+// Verify the printed output can be parsed.
+// RUN: bishengir-opt -allow-unregistered-dialect %s -split-input-file | bishengir-opt -allow-unregistered-dialect | FileCheck %s
+// Verify the generic form can be parsed.
+// RUN: bishengir-opt -allow-unregistered-dialect -mlir-print-op-generic %s -split-input-file | bishengir-opt -allow-unregistered-dialect | FileCheck %s
+
+// -----
+// CHECK-LABEL: get_block_idx
+func.func @test_get_block_idx() {
+  %0 = hivm.hir.get_block_idx -> i64
+  return
+}
+
+// -----
+// CHECK-LABEL: get_coreid
+func.func @test_get_coreid() {
+  %0 = hivm.hir.get_coreid -> i64
+  return
+}
+
+// -----
+// CHECK-LABEL: set_cond
+func.func @test_set_cond() {
+  %c64 = arith.constant 64 : i64
+  hivm.hir.set_cond %c64 : i64
+  return
+}
+
+// -----
+// CHECK-LABEL: test_mmadL0
+func.func @test_mmadL0() {
+  %ma = memref.alloc() : memref<256x128xf16>
+  %mb = memref.alloc() : memref<128x256xf16>
+  %mc = memref.alloc() : memref<256x256xf32>
+  %c0 = arith.constant 0 : i1
+  %c1 = arith.constant 1 : i1
+  %c128 = arith.constant 128 : index
+  %c256 = arith.constant 256 : index
+  hivm.hir.mmadL0 ins(%ma, %mb, %c256, %c128, %c256, %c0, %c0, %c1 :
+                        memref<256x128xf16>, memref<128x256xf16>, index, index, index, i1, i1, i1)
+                  outs(%mc : memref<256x256xf32>)
+  hivm.hir.mmadL0 {enable_HF32}
+                 ins(%ma, %mb, %c256, %c128, %c256, %c0, %c1, %c1 :
+                       memref<256x128xf16>, memref<128x256xf16>, index, index, index, i1, i1, i1)
+                 outs(%mc : memref<256x256xf32>)
+  hivm.hir.mmadL0 {enable_I4}
+                 ins(%ma, %mb, %c256, %c128, %c256, %c1, %c0, %c0 :
+                       memref<256x128xf16>, memref<128x256xf16>, index, index, index, i1, i1, i1)
+                 outs(%mc : memref<256x256xf32>)
+  return
+}
+
+// -----
+// CHECK-LABEL: test_mmadL1
+func.func @test_mmadL1() {
+  %ma = memref.alloc() : memref<256x128xf16>
+  %mb = memref.alloc() : memref<128x256xf16>
+  %mc = memref.alloc() : memref<256x256xf32>
+  %c256 = arith.constant 256 : index
+  %c128 = arith.constant 128 : index
+  %init = arith.constant 1 : i1
+  hivm.hir.mmadL1 ins(%ma, %mb, %init, %c256, %c128, %c256 :
+                        memref<256x128xf16>, memref<128x256xf16>, i1, index, index, index)
+                  outs(%mc : memref<256x256xf32>)
+
+  %ma_t = memref.alloc() : memref<128x256xf16>
+  hivm.hir.mmadL1 {a_transpose}
+                 ins(%ma_t, %mb, %init, %c256, %c128, %c256 :
+                       memref<128x256xf16>, memref<128x256xf16>, i1, index, index, index)
+                 outs(%mc : memref<256x256xf32>)
+
+  %mb_t = memref.alloc() : memref<256x128xf16>
+  hivm.hir.mmadL1 {b_transpose}
+                 ins(%ma, %mb_t, %init, %c256, %c128, %c256 :
+                       memref<256x128xf16>, memref<256x128xf16>, i1, index, index, index)
+                 outs(%mc : memref<256x256xf32>)
+
+  hivm.hir.mmadL1 {a_transpose, b_transpose}
+                 ins(%ma_t, %mb_t, %init, %c256, %c128, %c256 :
+                       memref<128x256xf16>, memref<256x128xf16>, i1, index, index, index)
+                 outs(%mc : memref<256x256xf32>)
+
+  %ma_f32 = memref.alloc() : memref<256x128xf32>
+  %mb_f32 = memref.alloc() : memref<128x256xf32>
+  hivm.hir.mmadL1 ins(%ma_f32, %mb_f32, %init, %c256, %c128, %c256 :
+                        memref<256x128xf32>, memref<128x256xf32>, i1, index, index, index)
+                  outs(%mc : memref<256x256xf32>)
+
+  %ma_i8 = tensor.empty() : tensor<256x128xi8>
+  %mb_i8 = tensor.empty() : tensor<128x256xi8>
+  %mc_i32 = tensor.empty() : tensor<256x256xi32>
+  %res_i32 = hivm.hir.mmadL1
+      ins(%ma_i8, %mb_i8, %init, %c256, %c128, %c256 :
+          tensor<256x128xi8>, tensor<128x256xi8>, i1, index, index, index)
+      outs(%mc_i32 : tensor<256x256xi32>) -> tensor<256x256xi32>
+  "some_use"(%res_i32) : (tensor<256x256xi32>) -> ()
+  return
+}
+
+// -----
+// CHECK-LABEL: test_mmadL1_hetero_types_a6
+// Ascend960 accepts the mixed-precision A/B element-type pairs for which
+// cce_aicore_intrinsics.h provides a matching `mad` overload.
+module attributes {hacc.target = #hacc.target<"Ascend960">} {
+  func.func @test_mmadL1_hetero_types_a6() {
+    %mc = memref.alloc() : memref<256x256xf32>
+    %c256 = arith.constant 256 : index
+    %c128 = arith.constant 128 : index
+    %init = arith.constant 1 : i1
+
+    %ma_bf16 = memref.alloc() : memref<256x128xbf16>
+    %ma_f16 = memref.alloc() : memref<256x128xf16>
+    %mb_e4m3 = memref.alloc() : memref<128x256xf8E4M3FN>
+    %mb_e5m2 = memref.alloc() : memref<128x256xf8E5M2>
+    %mb_i8 = memref.alloc() : memref<128x256xi8>
+    %ma_e4m3 = memref.alloc() : memref<256x128xf8E4M3FN>
+    %ma_e5m2 = memref.alloc() : memref<256x128xf8E5M2>
+
+    hivm.hir.mmadL1 ins(%ma_bf16, %mb_e4m3, %init, %c256, %c128, %c256 :
+                          memref<256x128xbf16>, memref<128x256xf8E4M3FN>, i1, index, index, index)
+                    outs(%mc : memref<256x256xf32>)
+    hivm.hir.mmadL1 ins(%ma_f16, %mb_e4m3, %init, %c256, %c128, %c256 :
+                          memref<256x128xf16>, memref<128x256xf8E4M3FN>, i1, index, index, index)
+                    outs(%mc : memref<256x256xf32>)
+    hivm.hir.mmadL1 ins(%ma_bf16, %mb_i8, %init, %c256, %c128, %c256 :
+                          memref<256x128xbf16>, memref<128x256xi8>, i1, index, index, index)
+                    outs(%mc : memref<256x256xf32>)
+    hivm.hir.mmadL1 ins(%ma_f16, %mb_i8, %init, %c256, %c128, %c256 :
+                          memref<256x128xf16>, memref<128x256xi8>, i1, index, index, index)
+                    outs(%mc : memref<256x256xf32>)
+    hivm.hir.mmadL1 ins(%ma_e4m3, %mb_e5m2, %init, %c256, %c128, %c256 :
+                          memref<256x128xf8E4M3FN>, memref<128x256xf8E5M2>, i1, index, index, index)
+                    outs(%mc : memref<256x256xf32>)
+    hivm.hir.mmadL1 ins(%ma_e5m2, %mb_e4m3, %init, %c256, %c128, %c256 :
+                          memref<256x128xf8E5M2>, memref<128x256xf8E4M3FN>, i1, index, index, index)
+                    outs(%mc : memref<256x256xf32>)
+
+    // Packed 4-bit (s4) B buffer: bf16/f16 x s4 -> f32 and s8 x s4 -> i32.
+    %mb_i4 = memref.alloc() : memref<128x256xi4>
+    %ma_s8 = memref.alloc() : memref<256x128xi8>
+    %mc_s32 = memref.alloc() : memref<256x256xi32>
+    hivm.hir.mmadL1 ins(%ma_bf16, %mb_i4, %init, %c256, %c128, %c256 :
+                          memref<256x128xbf16>, memref<128x256xi4>, i1, index, index, index)
+                    outs(%mc : memref<256x256xf32>)
+    hivm.hir.mmadL1 ins(%ma_f16, %mb_i4, %init, %c256, %c128, %c256 :
+                          memref<256x128xf16>, memref<128x256xi4>, i1, index, index, index)
+                    outs(%mc : memref<256x256xf32>)
+    hivm.hir.mmadL1 {enable_I4}
+        ins(%ma_s8, %mb_i4, %init, %c256, %c128, %c256 :
+            memref<256x128xi8>, memref<128x256xi4>, i1, index, index, index)
+        outs(%mc_s32 : memref<256x256xi32>)
+    return
+  }
+}
+
+// -----
+// CHECK-LABEL: test_mmadL1_hetero_types_a6_tensor
+// Same element-type pairs through the tensor (DPS) form, with a bias operand.
+module attributes {hacc.target = #hacc.target<"Ascend960">} {
+  func.func @test_mmadL1_hetero_types_a6_tensor() {
+    %ma = tensor.empty() : tensor<256x128xbf16>
+    %mb = tensor.empty() : tensor<128x256xf8E4M3FN>
+    %mc = tensor.empty() : tensor<256x256xf32>
+    %bias = tensor.empty() : tensor<256xf32>
+    %c256 = arith.constant 256 : index
+    %c128 = arith.constant 128 : index
+    %init = arith.constant 1 : i1
+    %res = hivm.hir.mmadL1
+        ins(%ma, %mb, %init, %c256, %c128, %c256, %bias :
+            tensor<256x128xbf16>, tensor<128x256xf8E4M3FN>, i1, index, index,
+            index, tensor<256xf32>)
+        outs(%mc : tensor<256x256xf32>) -> tensor<256x256xf32>
+    "some_use"(%res) : (tensor<256x256xf32>) -> ()
+    return
+  }
+}
+
+// -----
+// CHECK-LABEL: test_mmadL1_with_k_init
+func.func @test_mmadL1_with_k_init() {
+  %mc = memref.alloc() : memref<256x256xf32>
+  %start = arith.constant 0 : index
+  %end = arith.constant 1024 : index
+  %step = arith.constant 128 : index
+  %c256 = arith.constant 256 : index
+  %c128 = arith.constant 128 : index
+  scf.for %arg0 = %start to %end step %step {
+    // Data loaded to L1
+    %ma = memref.alloc() : memref<256x128xf16>
+    %mb = memref.alloc() : memref<128x256xf16>
+    // L0C data is cleared for the first iteration
+    %init_condition = arith.cmpi eq, %arg0, %start : index
+    hivm.hir.mmadL1 ins(%ma, %mb, %init_condition, %c256, %c128, %c256 :
+                          memref<256x128xf16>, memref<128x256xf16>, i1, index, index, index)
+                    outs(%mc : memref<256x256xf32>)
+  }
+
+  return
+}
+
+// -----
+// CHECK-LABEL: test_mmadL1_with_k_init_tensor
+func.func @test_mmadL1_with_k_init_tensor() {
+  %mc = tensor.empty() : tensor<256x256xf32>
+  %start = arith.constant 0 : index
+  %end = arith.constant 1024 : index
+  %step = arith.constant 128 : index
+  %c256 = arith.constant 256 : index
+  %c128 = arith.constant 128 : index
+  %scf_ret = scf.for %arg0 = %start to %end step %step iter_args(%mC_iter = %mc) -> (tensor<256x256xf32>) {
+    // Data loaded to L1
+    %ma = tensor.empty() : tensor<256x128xf16>
+    %mb = tensor.empty() : tensor<128x256xf16>
+    // L0C data is cleared for the first iteration
+    %init_condition = arith.cmpi eq, %arg0, %start : index
+    %res = hivm.hir.mmadL1 ins(%ma, %mb, %init_condition, %c256, %c128, %c256 :
+                                 tensor<256x128xf16>, tensor<128x256xf16>, i1, index, index, index)
+                           outs(%mC_iter : tensor<256x256xf32>) -> tensor<256x256xf32>
+    scf.yield %res : tensor<256x256xf32>
+  }
+
+  return
+}
+
+// -----
+// CHECK-LABEL: test_batchMmadL1
+func.func @test_batchMmadL1() {
+  %ma = memref.alloc() : memref<2x256x128xf16>
+  %mb = memref.alloc() : memref<2x128x256xf16>
+  %mc = memref.alloc() : memref<2x256x256xf32>
+  %c256 = arith.constant 256 : index
+  %c128 = arith.constant 128 : index
+  %init = arith.constant 1 : i1
+  hivm.hir.batchMmadL1 ins(%ma, %mb, %init, %c256, %c128, %c256 :
+                        memref<2x256x128xf16>, memref<2x128x256xf16>, i1, index, index, index)
+                  outs(%mc : memref<2x256x256xf32>)
+  return
+}
+
+// -----
+// CHECK-LABEL: test_convert_layout
+// CHECK: hivm.hir.convert_layout
+#dot_a_layout = #hivm.data_layout<dotA_ND, transpose = false>
+#nZ_layout = #hivm.data_layout<nZ>
+func.func @test_convert_layout(%arg : memref<128x128xf16, strided<[?, ?], offset: ?>>) {
+  %alloc = memref.alloc() : memref<128x128xf16>
+  memref.copy %arg, %alloc : memref<128x128xf16, strided<[?, ?], offset: ?>> to memref<128x128xf16>
+  %alloc_new_layout = hivm.hir.convert_layout %alloc output_shape [8, 8, 16, 16] {srcLayout = #dot_a_layout, dstLayout = #nZ_layout} : (memref<128x128xf16>) -> memref<8x8x16x16xf16>
+  "some_use"(%alloc_new_layout) : (memref<8x8x16x16xf16>) -> ()
+  return
+}
+
+// -----
+// CHECK-LABEL: test_matmul_basic
+func.func @test_matmul_basic(%A_gm : memref<16x16xf16, #hivm.address_space<gm>>,
+                             %B_gm :  memref<16x16xf16, #hivm.address_space<gm>>,
+                             %res_gm :memref<16x16xf16, #hivm.address_space<gm>>) {
+  hivm.hir.matmul
+     ins(%A_gm, %B_gm:
+         memref<16x16xf16, #hivm.address_space<gm>>, memref<16x16xf16, #hivm.address_space<gm>>)
+     outs(%res_gm : memref<16x16xf16, #hivm.address_space<gm>>)
+     descale_mode = #hivm.descale_mode<DescaleNull>
+  return
+}
+
+// -----
+// CHECK-LABEL: test_matmul_descale_perchannel
+func.func @test_matmul_descale_perchannel(%A_gm : memref<16x16xf16, #hivm.address_space<gm>>,
+                               %B_gm :  memref<16x16xf16, #hivm.address_space<gm>>,
+                               %bias_gm : memref<16xf16, #hivm.address_space<gm>>,
+                               %descale_perchannel_gm :  memref<16xf16, #hivm.address_space<gm>>,
+                               %res_gm :memref<16x16xf16, #hivm.address_space<gm>> ) {
+  hivm.hir.matmul
+       ins(%A_gm, %B_gm:
+           memref<16x16xf16, #hivm.address_space<gm>>, memref<16x16xf16, #hivm.address_space<gm>>)
+       outs(%res_gm : memref<16x16xf16, #hivm.address_space<gm>>)
+       bias = %bias_gm : memref<16xf16, #hivm.address_space<gm>>
+       descale = %descale_perchannel_gm :  memref<16xf16, #hivm.address_space<gm>>
+       descale_mode = #hivm.descale_mode<DescalePerChannel>
+  return
+}
+
+
+
+// -----
+// CHECK-LABEL: test_matmul_descale_pertensor
+func.func @test_matmul_descale_pertensor(%A_gm : memref<16x16xf16, #hivm.address_space<gm>>,
+                               %B_gm :  memref<16x16xf16, #hivm.address_space<gm>>,
+                               %bias_gm : memref<16xf16, #hivm.address_space<gm>>,
+                               %descale_pertensor_gm :  memref<1xf16, #hivm.address_space<gm>>,
+                               %res_gm :memref<16x16xf16, #hivm.address_space<gm>> ) {
+    hivm.hir.matmul
+         ins(%A_gm, %B_gm:
+             memref<16x16xf16, #hivm.address_space<gm>>, memref<16x16xf16, #hivm.address_space<gm>>)
+         outs(%res_gm : memref<16x16xf16, #hivm.address_space<gm>>)
+         bias = %bias_gm : memref<16xf16, #hivm.address_space<gm>>
+         descale = %descale_pertensor_gm :  memref<1xf16, #hivm.address_space<gm>>
+         descale_mode = #hivm.descale_mode<DescalePerTensor>
+  return
+}
+
+// -----
+// CHECK-LABEL: test_mix_matmul_workspace_add_0_300_mix_aiv
+module  {
+  func.func @test_mix_matmul_workspace_add_0_300_mix_aiv(%arg0: i64 {hfusion.ffts_base_address},
+                                                     %arg1: memref<1024x1024xf16, #hivm.address_space<gm>>,
+                                                     %arg2: memref<1024x1024xf16, #hivm.address_space<gm>>,
+                                                     %arg3: memref<1024x1024xf16, #hivm.address_space<gm>>,
+                                                     %arg4: memref<1024x1024xf16, #hivm.address_space<gm>>,
+                                                     %arg5: memref<1024x1024xf16, #hivm.address_space<gm>>)
+                                                     attributes {hacc.entry, hacc.function_kind = #hacc.function_kind<DEVICE>,
+                                                                 hacc.tiling_func = "matmul_add_0_tiling_func",
+                                                                 hacc.block_dim = 20 : i64,
+                                                                 hfusion.fusion_kind = #hfusion.fusion_kind<MIX_CV>,
+                                                                 hivm.func_core_type = #hivm.func_core_type<AIV>} {
+    %c0_i64 = arith.constant 0 : i64
+    %c1_i64 = arith.constant 1 : i64
+    %c4_i64 = arith.constant 4 : i64
+    %c64_i64 = arith.constant 64 : i64
+    %c128_i64 = arith.constant 128 : i64
+    %c256_i64 = arith.constant 256 : i64
+    hivm.hir.set_ffts_base_addr %arg0
+    hivm.hir.mix_matmul {post_vector_func = "bishengir_gen_vector_epilogue_func"}
+      ins(%arg1, %arg2 :
+          memref<1024x1024xf16, #hivm.address_space<gm>>, memref<1024x1024xf16, #hivm.address_space<gm>>)
+      post_vector_func_ins(%arg3 : memref<1024x1024xf16, #hivm.address_space<gm>>)
+      workspace_ins(%arg4 : memref<1024x1024xf16, #hivm.address_space<gm>>)
+      outs(%arg5 : memref<1024x1024xf16, #hivm.address_space<gm>>)
+      block_sizes(%c128_i64, %c256_i64, %c256_i64 : i64, i64, i64)
+      process_sizes(%c128_i64, %c256_i64, %c64_i64 : i64, i64, i64)
+      swizzle_offset = %c1_i64 : i64
+      swizzle_direction = %c0_i64 : i64
+      epilogue_p_tiles = %c4_i64 : i64
+    return
+  }
+}
+
+// -----
+module {
+  func.func @test_mix_matmul(%A_gm : memref<16x16xf16, #hivm.address_space<gm>>,
+                         %B_gm :  memref<16x16xf16, #hivm.address_space<gm>>,
+                         %bias_gm : memref<16xf16, #hivm.address_space<gm>>,
+                         %tiling_params_gm : memref<16xf16, #hivm.address_space<gm>>,
+                         %comm_params_gm : memref<16xi64, #hivm.address_space<gm>>,
+                         %res_gm :memref<16x16xf16, #hivm.address_space<gm>>) {
+      hivm.hir.mix_matmul
+         ins(%A_gm, %B_gm:
+             memref<16x16xf16, #hivm.address_space<gm>>, memref<16x16xf16, #hivm.address_space<gm>>)
+         outs(%res_gm : memref<16x16xf16, #hivm.address_space<gm>>)
+         tiling_params = %tiling_params_gm : memref<16xf16, #hivm.address_space<gm>>
+         comm_params = %comm_params_gm : memref<16xi64, #hivm.address_space<gm>>
+      return
+  }
+}
+
+
+// -----
+module {
+  func.func @test_mix_group_matmul(%A_gm : memref<16x16x16xf16, #hivm.address_space<gm>>,
+                                   %B_gm :  memref<16x16xf16, #hivm.address_space<gm>>,
+                                   %tokens_per_expert_gm :  memref<16xi64, #hivm.address_space<gm>>,
+                                   %bias_gm : memref<16xf16, #hivm.address_space<gm>>,
+                                   %tiling_params_gm : memref<16xf16, #hivm.address_space<gm>>,
+                                   %comm_params_gm : memref<16xi64, #hivm.address_space<gm>>,
+                                   %res_gm :memref<16x16xf16, #hivm.address_space<gm>>,
+                                   %post_vector_func_ins: memref<1024x1024xf16, #hivm.address_space<gm>>,
+                                   %post_vector_func_outs: memref<1024x1024xf16, #hivm.address_space<gm>>) {
+      hivm.hir.mix_group_matmul
+         ins(%A_gm, %B_gm, %tokens_per_expert_gm:
+             memref<16x16x16xf16, #hivm.address_space<gm>>, memref<16x16xf16, #hivm.address_space<gm>>,
+             memref<16xi64, #hivm.address_space<gm>>)
+         post_vector_func_ins(%post_vector_func_ins : memref<1024x1024xf16, #hivm.address_space<gm>>)
+         post_vector_func_outs(%post_vector_func_outs : memref<1024x1024xf16, #hivm.address_space<gm>>)
+         outs(%res_gm : memref<16x16xf16, #hivm.address_space<gm>>)
+         tiling_params = %tiling_params_gm : memref<16xf16, #hivm.address_space<gm>>
+         comm_params = %comm_params_gm : memref<16xi64, #hivm.address_space<gm>>
+      return
+  }
+}
+
+// -----
+// CHECK-LABEL: @test_set_ffts_base_addr
+func.func @test_set_ffts_base_addr() {
+  %ffts_base_addr = arith.constant 0 : i64
+  hivm.hir.set_ffts_base_addr %ffts_base_addr
+  return
+}
+
+// -----
+//  CHECK-LABEL: @test_sync_block
+func.func @test_sync_block() {
+  %ffts_base_addr = arith.constant 0 : i64
+  hivm.hir.sync_block[#hivm.sync_block_mode<ALL>, 1 : i16]
+            ffts_base_addr = %ffts_base_addr
+            tcube_pipe=#hivm.pipe<PIPE_FIX>
+            tvector_pipe=#hivm.pipe<PIPE_MTE3>
+  hivm.hir.sync_block[#hivm.sync_block_mode<ALL_CUBE>, 1 : i16]
+            ffts_base_addr = %ffts_base_addr
+            tcube_pipe=#hivm.pipe<PIPE_FIX>
+  hivm.hir.sync_block[#hivm.sync_block_mode<ALL_VECTOR>, 1 : i16]
+            ffts_base_addr = %ffts_base_addr
+            tvector_pipe=#hivm.pipe<PIPE_MTE3>
+  return
+}
+
+// -----
+module {
+  func.func @test_ptr() {
+    %c0_i64 = arith.constant 0 : i64
+    %c16_i64 = arith.constant 16 : i64
+    %c32_i64 = arith.constant 32 : i64
+    %0 = hivm.hir.pointer_cast(%c0_i64) [] : memref<16x16x16xf16, #hivm.address_space<ub>>
+    %1 = hivm.hir.pointer_cast(%c0_i64) : memref<16x16x16xf16, #hivm.address_space<ub>>
+    %2 = hivm.hir.pointer_cast(%c0_i64, %c16_i64) : memref<16x16x16xf16, #hivm.address_space<ub>>
+    %3 = hivm.hir.pointer_cast(%c0_i64, %c16_i64, %c32_i64) : memref<16x16x16xf16, #hivm.address_space<ub>>
+    return
+  }
+}
+
+// -----
+module {
+  // CHECK-LABEL func.func @print_test
+  // CHECK: (%[[ARG1:.*]]: tensor<32xf32>, %[[ARG2:.*]]: memref<32xi8>)
+  // CHECK: hivm.hir.init_debug
+  // CHECK: hivm.hir.debug {debugtype = "print", hex = true, prefix = "Val: ", tcoretype = #hivm.tcore_type<CUBE_OR_VECTOR>} %[[ARG1]] : tensor<32xf32>
+  // CHECK: hivm.hir.debug {debugtype = "print", hex = false, prefix = "", tcoretype = #hivm.tcore_type<CUBE_OR_VECTOR>} %[[ARG2]] : memref<32xi8>
+  // CHECK: hivm.hir.finish_debug
+  func.func @print_test(%arg1 : tensor<32xf32>, %arg2 : memref<32xi8>) {
+    hivm.hir.init_debug
+    hivm.hir.debug {debugtype = "print", hex = true, prefix = "Val: ", tcoretype = #hivm.tcore_type<CUBE_OR_VECTOR>} %arg1 : tensor<32xf32>
+    hivm.hir.debug {debugtype = "print", hex = false, prefix = "", tcoretype = #hivm.tcore_type<CUBE_OR_VECTOR>} %arg2 : memref<32xi8>
+    hivm.hir.finish_debug
+    func.return
+  }
+}
+
+// -----
+// CHECK-LABEL: test_convert_layout_tensor
+// CHECK: hivm.hir.convert_layout
+#dot_a_layout = #hivm.data_layout<dotA_ND, transpose = false>
+#nZ_layout = #hivm.data_layout<nZ>
+func.func @test_convert_layout_tensor(%arg : tensor<128x128xf16>) -> tensor<8x8x16x16xf16> {
+  %alloc_new_layout = hivm.hir.convert_layout %arg output_shape [8, 8, 16, 16] {srcLayout = #dot_a_layout, dstLayout = #nZ_layout}
+                      : (tensor<128x128xf16>) -> tensor<8x8x16x16xf16>
+  return %alloc_new_layout : tensor<8x8x16x16xf16>
+}
+
+// -----
+module {
+  // CHECK-LABEL: func.func @gather_load_test
+  // CHECK: hivm.hir.gather_load
+  func.func @gather_load_test(%base : memref<?xf32>, %indices: tensor<16x400xi32>, %mask: tensor<16x400xi1>, %other: tensor<16x400xf32>) {
+    %c1_i64 = arith.constant 1 : i64
+    %init = tensor.empty() : tensor<16x400xf32>
+    %output = hivm.hir.gather_load  ins(%base : memref<?xf32>, %indices: tensor<16x400xi32>, %c1_i64: i64, %mask: tensor<16x400xi1>, %other: tensor<16x400xf32>) outs(%init : tensor<16x400xf32>) {cache = #hivm.cache_modifier<none>, evict = #hivm.eviction_policy<EvictLast>, isVolatile = false} -> tensor<16x400xf32>
+    return
+  }
+}
+
+// -----
+module {
+  // CHECK-LABEL: func.func @scatter_store_test
+  // CHECK: hivm.hir.scatter_store
+  func.func @scatter_store_test(%base : memref<?xf32>, %indices: tensor<16x400xi32>, %data: tensor<16x400xf32>, %mask: tensor<16x400xi1>) {
+    %c1_i64 = arith.constant 1 : i64
+    hivm.hir.scatter_store  ins(%indices: tensor<16x400xi32>, %data: tensor<16x400xf32>, %c1_i64: i64, %mask: tensor<16x400xi1>) outs(%base : memref<?xf32>) {cache = #hivm.cache_modifier<none>, evict = #hivm.eviction_policy<EvictLast>}
+    return
+  }
+}
+
+// -----
+// CHECK-LABEL: test_load_mx_scale
+// CHECK: hivm.hir.load_scale
+func.func @test_load_mx_scale(
+    %src : memref<16x4xi8, #hivm.address_space<gm>>,
+    %dst : memref<1x1x16x16xi8, #hivm.address_space<cbuf>>) {
+  hivm.hir.load_scale {is_transposed = true}
+      ins(%src : memref<16x4xi8, #hivm.address_space<gm>>)
+      outs(%dst : memref<1x1x16x16xi8, #hivm.address_space<cbuf>>)
+  return
+}
+
+// -----
+// CHECK-LABEL: test_nchw2nc1hwc0
+// CHECK: hivm.hir.nchw2nc1hwc0
+// CHECK-SAME: groups = 2 : i64
+// CHECK-SAME: ins(%[[SRC:.*]] : memref<2x30x3x4xf16, #hivm.address_space<gm>>)
+// CHECK-SAME: outs(%[[DST:.*]] : memref<2x2x3x4x16xf16, #hivm.address_space<cbuf>>)
+func.func @test_nchw2nc1hwc0(
+    %src : memref<2x30x3x4xf16, #hivm.address_space<gm>>,
+    %dst : memref<2x2x3x4x16xf16, #hivm.address_space<cbuf>>) {
+  hivm.hir.nchw2nc1hwc0 {groups = 2 : i64}
+      ins(%src : memref<2x30x3x4xf16, #hivm.address_space<gm>>)
+      outs(%dst : memref<2x2x3x4x16xf16, #hivm.address_space<cbuf>>)
+  return
+}
+
+// -----
+// CHECK-LABEL: test_nchw2c1hwnc0
+// CHECK: hivm.hir.nchw2c1hwnc0
+// CHECK-SAME: groups = 2 : i64
+// CHECK-SAME: ins(%[[SRC:.*]] : memref<30x15x3x3xf16, #hivm.address_space<gm>>)
+// CHECK-SAME: outs(%[[DST:.*]] : memref<1x3x3x32x16xf16, #hivm.address_space<cbuf>>)
+func.func @test_nchw2c1hwnc0(
+    %src : memref<30x15x3x3xf16, #hivm.address_space<gm>>,
+    %dst : memref<1x3x3x32x16xf16, #hivm.address_space<cbuf>>) {
+  hivm.hir.nchw2c1hwnc0 {groups = 2 : i64}
+      ins(%src : memref<30x15x3x3xf16, #hivm.address_space<gm>>)
+      outs(%dst : memref<1x3x3x32x16xf16, #hivm.address_space<cbuf>>)
+  return
+}
+
+// -----
+// CHECK-LABEL: func.func @test_multi_buffer_counter
+func.func @test_multi_buffer_counter() {
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  %c4 = arith.constant 4 : index
+  scf.for %iv = %c0 to %c4 step %c1 {
+    // CHECK: hivm.hir.multi_buffer_counter -> i64
+    %counter = hivm.hir.multi_buffer_counter -> i64
+  }
+  return
+}

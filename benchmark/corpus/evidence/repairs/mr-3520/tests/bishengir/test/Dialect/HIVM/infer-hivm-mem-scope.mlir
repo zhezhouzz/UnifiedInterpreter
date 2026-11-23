@@ -1,0 +1,774 @@
+// RUN: bishengir-opt %s -allow-unregistered-dialect -hivm-infer-mem-scope -split-input-file | FileCheck %s
+
+// CHECK-LABEL: test_infer_mem_scope_basic
+module {
+  func.func @test_infer_mem_scope_basic(%arg0: i32, %arg1: i32, %arg2: i32) attributes {hacc.function_kind = #hacc.function_kind<DEVICE>} {
+    %c128 = arith.constant 128 : index
+    // CHECK: #hivm.address_space<cc>
+    %alloc = memref.alloc() {alignment = 64 : i64} : memref<128x128xf32>
+    %0 = scf.for %arg3 = %arg0 to %arg1 step %arg2 iter_args(%arg4 = %alloc) -> (memref<128x128xf32>)  : i32 {
+      // CHECK: #hivm.address_space<cbuf>
+      %alloc_0 = memref.alloc() : memref<128x128xf16>
+      // CHECK: #hivm.address_space<cbuf>
+      %alloc_1 = memref.alloc() : memref<128x128xf16>
+      %1 = arith.cmpi eq, %arg3, %arg1 : i32
+      hivm.hir.mmadL1 ins(%alloc_0, %alloc_1, %1, %c128, %c128, %c128 : memref<128x128xf16>, memref<128x128xf16>, i1, index, index, index) outs(%arg4 : memref<128x128xf32>)
+      scf.yield %arg4 : memref<128x128xf32>
+    }
+    return
+  }
+}
+
+// -----
+
+// CHECK: test_infer_mem_scope_complicated(
+// CHECK: %[[ARG0:.*]]: i32, %[[ARG1:.*]]: i32, %[[ARG2:.*]]: i32
+// CHECK-SAME: %[[A:.*]]: memref<*xf16, #hivm.address_space<gm>>, %[[B:.*]]: memref<*xf16, #hivm.address_space<gm>>
+// CHECK-SAME: %[[C:.*]]: memref<*xf32, #hivm.address_space<gm>>
+// CHECK-SAME: %[[M:.*]]: index, %[[N:.*]]: index, %[[K:.*]]: index
+module {
+  func.func @test_infer_mem_scope_complicated(%arg0: i32, %arg1: i32, %arg2: i32, %arg3: memref<*xf16>, %arg4: memref<*xf16>, %arg5: memref<*xf32>, %arg6: index, %arg7: index, %arg8: index) attributes {hacc.function_kind = #hacc.function_kind<DEVICE>, hivm.func_core_type = #hivm.func_core_type<AIC>} {
+    %c0 = arith.constant 0 : index
+    // CHECK: #hivm.address_space<cc>
+    %alloc = memref.alloc() {alignment = 64 : i64} : memref<128x128xf32>
+    %reinterpret_cast = memref.reinterpret_cast %arg5 to offset: [%c0], sizes: [128, 128], strides: [1, 1] : memref<*xf32> to memref<128x128xf32, strided<[?, ?], offset: ?>>
+    %alloc_0 = memref.alloc() : memref<128x128xf16>
+    // CHECK: (memref<128x128xf16, #hivm.address_space<cbuf>>) -> ()
+    "some_op"(%alloc_0) : (memref<128x128xf16>) -> ()
+    // CHECK: scf.for
+    // CHECK-SAME: -> (memref<128x128xf32, #hivm.address_space<cc>>)
+    %0 = scf.for %arg9 = %arg0 to %arg1 step %arg2 iter_args(%arg10 = %alloc) -> (memref<128x128xf32>)  : i32 {
+      %reinterpret_cast_1 = memref.reinterpret_cast %arg3 to offset: [%c0], sizes: [128, 128], strides: [1, 1] : memref<*xf16> to memref<128x128xf16, strided<[?, ?], offset: ?>>
+      %reinterpret_cast_2 = memref.reinterpret_cast %arg4 to offset: [%c0], sizes: [128, 128], strides: [1, 1] : memref<*xf16> to memref<128x128xf16, strided<[?, ?], offset: ?>>
+      // CHECK: #hivm.address_space<cbuf>
+      %alloc_3 = memref.alloc() : memref<128x128xf16>
+      %subview = memref.subview %reinterpret_cast_1[0, 0] [%arg6, %arg7] [1, 1] : memref<128x128xf16, strided<[?, ?], offset: ?>> to memref<?x?xf16, strided<[?, ?], offset: ?>>
+      %subview_4 = memref.subview %alloc_3[0, 0] [%arg6, %arg7] [1, 1] : memref<128x128xf16> to memref<?x?xf16, strided<[128, 1]>>
+      memref.copy %subview, %subview_4 : memref<?x?xf16, strided<[?, ?], offset: ?>> to memref<?x?xf16, strided<[128, 1]>>
+      // CHECK: #hivm.address_space<cbuf>
+      %alloc_5 = memref.alloc() : memref<128x128xf16>
+      %subview_6 = memref.subview %reinterpret_cast_2[0, 0] [%arg7, %arg8] [1, 1] : memref<128x128xf16, strided<[?, ?], offset: ?>> to memref<?x?xf16, strided<[?, ?], offset: ?>>
+      %subview_7 = memref.subview %alloc_5[0, 0] [%arg7, %arg8] [1, 1] : memref<128x128xf16> to memref<?x?xf16, strided<[128, 1]>>
+      memref.copy %subview_6, %subview_7 : memref<?x?xf16, strided<[?, ?], offset: ?>> to memref<?x?xf16, strided<[128, 1]>>
+      %1 = arith.cmpi eq, %arg9, %arg1 : i32
+      hivm.hir.mmadL1 ins(%alloc_3, %alloc_5, %1, %arg6, %arg7, %arg8 : memref<128x128xf16>, memref<128x128xf16>, i1, index, index, index) outs(%arg10 : memref<128x128xf32>)
+      scf.yield %arg10 : memref<128x128xf32>
+    }
+    hivm.hir.fixpipe {enable_nz2nd} ins(%0 : memref<128x128xf32>) outs(%reinterpret_cast : memref<128x128xf32, strided<[?, ?], offset: ?>>)
+    return
+  }
+}
+
+// -----
+module {
+  // CHECK: #hivm.address_space<gm>
+  func.func @device_func_0(%arg0: memref<1048576xf32>, %arg1: memref<1048576xf32>, %arg2: memref<1048576xf32>) attributes {hacc.function_kind = #hacc.function_kind<DEVICE>} {
+    return
+  }
+  // CHECK: #hivm.address_space<gm>
+  func.func @device_func(%arg0: memref<1024x1024xf32>, %arg1: memref<1024x1024xf32>, %arg2: memref<1024x1024xf32>, %arg3: memref<1024x1024xf32>, %arg4: memref<1024x1024xf32>)
+  attributes {hacc.function_kind = #hacc.function_kind<DEVICE>} {
+    "some_operation"(%arg0, %arg1, %arg2) : (memref<1024x1024xf32>, memref<1024x1024xf32>, memref<1024x1024xf32>) -> ()
+    %collapse_shape_0 = memref.collapse_shape %arg2 [[0, 1]] : memref<1024x1024xf32> into memref<1048576xf32>
+    %collapse_shape_1 = memref.collapse_shape %arg3 [[0, 1]] : memref<1024x1024xf32> into memref<1048576xf32>
+    %collapse_shape_2 = memref.collapse_shape %arg4 [[0, 1]] : memref<1024x1024xf32> into memref<1048576xf32>
+    call @device_func_0(%collapse_shape_0, %collapse_shape_1, %collapse_shape_2) : (memref<1048576xf32>, memref<1048576xf32>, memref<1048576xf32>) -> ()
+    return
+  }
+}
+
+// -----
+
+// CHECK: func.func private @extern_device_func(
+// CHECK-SAME: #hivm.address_space<gm>
+// CHECK-SAME: #hivm.address_space<gm>
+// CHECK-SAME: #hivm.address_space<gm>
+// CHECK-SAME: ->  memref<?xf32, #hivm.address_space<gm>>
+func.func private @extern_device_func(memref<?xf32>, memref<?xf32>, memref<?xf32>) -> (memref<?xf32>) attributes {hacc.function_kind = #hacc.function_kind<DEVICE>}
+
+// -----
+
+module {
+  func.func private @fused_kernel_0(i64, memref<16xf32>, memref<16xf32>) -> memref<16xf32> attributes {hacc.function_kind = #hacc.function_kind<DEVICE>}
+  func.func @fused_kernel_1(%arg0: i64, %arg1: memref<16xf32>, %arg2: memref<16xf32>) attributes {hacc.function_kind = #hacc.function_kind<DEVICE>, hivm.func_core_type = #hivm.func_core_type<AIV>} {
+    // CHECK: #hivm.address_space<ub>
+    %alloc = memref.alloc() {alignment = 64 : i64} : memref<16xf32>
+    return
+  }
+  func.func @main(%arg0: i64) -> tensor<16xf32> attributes {hacc.function_kind = #hacc.function_kind<HOST>} {
+    // CHECK: #hivm.address_space<gm>
+    %alloc = memref.alloc() {alignment = 64 : i64} : memref<16xf32>
+    // CHECK: #hivm.address_space<gm>
+    %alloc_0 = memref.alloc() {alignment = 64 : i64} : memref<16xf32>
+    %0 = call @fused_kernel_0(%arg0, %alloc, %alloc_0) : (i64, memref<16xf32>, memref<16xf32>) -> memref<16xf32>
+    %1 = bufferization.to_tensor %0 : memref<16xf32>
+    call @fused_kernel_1(%arg0, %alloc, %alloc_0) : (i64, memref<16xf32>, memref<16xf32>) -> ()
+    return %1 : tensor<16xf32>
+  }
+}
+
+// -----
+
+// CHECK: func.func private @extern_host_func(
+// CHECK-NOT: #hivm.address_space<gm>
+func.func private @extern_host_func(memref<?xf32>, memref<?xf32>, memref<?xf32>) -> (memref<?xf32>) attributes {hacc.function_kind = #hacc.function_kind<HOST>}
+
+// -----
+
+module {
+  // CHECK-LABEL: func.func @simt_vf_caller(
+  // CHECK-SAME: %[[GM:.*]]: memref<16xf32, #hivm.address_space<gm>>
+  func.func @simt_vf_caller(%gm: memref<16xf32>) attributes {
+      hacc.function_kind = #hacc.function_kind<DEVICE>} {
+    // CHECK: %[[LOCAL:.*]] = memref.alloc() : memref<16xf32, #hivm.address_space<ub>>
+    %local = memref.alloc() : memref<16xf32>
+    // CHECK: call @simt_vf(%[[GM]], %[[LOCAL]])
+    // CHECK-SAME: (memref<16xf32, #hivm.address_space<gm>>,
+    // CHECK-SAME: memref<16xf32, #hivm.address_space<ub>>) -> ()
+    call @simt_vf(%gm, %local) {hivm.vector_function} :
+        (memref<16xf32>, memref<16xf32>) -> ()
+    return
+  }
+
+  // CHECK-LABEL: func.func @simt_vf(
+  // CHECK-SAME: %{{.*}}: memref<16xf32, #hivm.address_space<gm>>,
+  // CHECK-SAME: %{{.*}}: memref<16xf32, #hivm.address_space<ub>>)
+  func.func @simt_vf(%gm: memref<16xf32>, %local: memref<16xf32>)
+      attributes {hivm.vector_function,
+                  hivm.vf_mode = #hivm.vf_mode<SIMT>} {
+    return
+  }
+}
+
+// -----
+
+module {
+  // A tensor materialized directly as a memref is the nearest memref root.
+  // Traceback must stop at to_memref instead of returning the tensor value.
+  // CHECK-LABEL: func.func @simt_vf_to_memref_caller(
+  func.func @simt_vf_to_memref_caller() attributes {
+      hacc.function_kind = #hacc.function_kind<DEVICE>} {
+    %tensor = "test.tensor_source"() : () -> tensor<1xi32>
+    // CHECK: %[[BUFFER:.*]] = bufferization.to_memref %{{.*}} : memref<1xi32, strided<[?], offset: ?>, #hivm.address_space<ub>>
+    %buffer = bufferization.to_memref %tensor :
+        memref<1xi32, strided<[?], offset: ?>>
+    // CHECK: %[[CAST:.*]] = memref.cast %[[BUFFER]]
+    // CHECK-SAME: to memref<1xi32, #hivm.address_space<ub>>
+    %cast = memref.cast %buffer :
+        memref<1xi32, strided<[?], offset: ?>> to memref<1xi32>
+    // CHECK: call @simt_vf_from_tensor(%[[CAST]])
+    // CHECK-SAME: (memref<1xi32, #hivm.address_space<ub>>) -> ()
+    call @simt_vf_from_tensor(%cast) {hivm.vector_function} :
+        (memref<1xi32>) -> ()
+    return
+  }
+
+  // CHECK-LABEL: func.func @simt_vf_from_tensor(
+  // CHECK-SAME: %{{.*}}: memref<1xi32, #hivm.address_space<ub>>)
+  func.func @simt_vf_from_tensor(%local: memref<1xi32>)
+      attributes {hivm.vector_function,
+                  hivm.vf_mode = #hivm.vf_mode<SIMT>} {
+    return
+  }
+}
+
+// -----
+
+// CHECK: func.func @test_scf_if_0
+// CHECK: scf.if
+func.func @test_scf_if_0(%arg0: memref<19xf32>, %arg1: memref<17xf32>, %arg2: index, %arg3: index) {
+  %c0 = arith.constant 0 : index
+  %cst = arith.constant 5.000000e+00 : f32
+  %0 = arith.cmpi ne, %arg3, %c0 : index
+  %subview = memref.subview %arg0[%arg2] [%arg3] [1] : memref<19xf32> to memref<?xf32, strided<[1], offset: ?>>
+  %1 = scf.if %0 -> (memref<?xf32, strided<[?], offset: ?>>) {
+    %alloc = memref.alloc(%arg3) {alignment = 64 : i64} : memref<?xf32>
+    hivm.hir.vbrc ins(%cst : f32) outs(%alloc : memref<?xf32>)
+    %cast = memref.cast %alloc : memref<?xf32> to memref<?xf32, strided<[?], offset: ?>>
+    scf.yield %cast : memref<?xf32, strided<[?], offset: ?>>
+  } else {
+    %subview_0 = memref.subview %arg1[%arg2] [%arg3] [1] : memref<17xf32> to memref<?xf32, strided<[1], offset: ?>>
+    %alloc = memref.alloc(%arg3) {alignment = 64 : i64} : memref<?xf32>
+    hivm.hir.load ins(%subview_0 : memref<?xf32, strided<[1], offset: ?>>) outs(%alloc : memref<?xf32>) pad_mode = <PadValue> pad_value = %cst : f32
+    %cast = memref.cast %alloc : memref<?xf32> to memref<?xf32, strided<[?], offset: ?>>
+    scf.yield %cast : memref<?xf32, strided<[?], offset: ?>>
+  }
+  hivm.hir.store ins(%1 : memref<?xf32, strided<[?], offset: ?>>) outs(%subview : memref<?xf32, strided<[1], offset: ?>>) atomic = <none>
+  return
+}
+
+// -----
+
+#map = affine_map<()[s0] -> (s0 + 32)>
+module attributes {hivm.module_core_type = #hivm.module_core_type<AIV>} {
+  // CHECK-LABEL: test_scf_yield
+  func.func @test_scf_yield(%arg2: memref<?xf32>, %arg3: memref<?xf32>) attributes {hacc.entry, hacc.function_kind = #hacc.function_kind<DEVICE>, hivm.func_core_type = #hivm.func_core_type<AIV>} {
+    %cst = arith.constant 0.000000e+00 : f32
+    %c96_i32 = arith.constant 96 : i32
+    %c32_i32 = arith.constant 32 : i32
+    %c0_i32 = arith.constant 0 : i32
+    %c0 = arith.constant 0 : index
+    %alloc = memref.alloc() {alignment = 64 : i64} : memref<32xf32>
+    hivm.hir.vbrc ins(%cst : f32) outs(%alloc : memref<32xf32>)
+    %reinterpret_cast = memref.reinterpret_cast %arg2 to offset: [0], sizes: [32], strides: [1] : memref<?xf32> to memref<32xf32, strided<[1]>>
+    %cast = memref.cast %reinterpret_cast : memref<32xf32, strided<[1]>> to memref<32xf32, strided<[?], offset: ?>>
+    %0:3 = scf.for %arg7 = %c0_i32 to %c96_i32 step %c32_i32 iter_args(%arg8 = %alloc, %arg9 = %cast, %arg10 = %c0) -> (memref<32xf32>, memref<32xf32, strided<[?], offset: ?>>, index)  : i32 {
+      %alloc_1 = memref.alloc() : memref<32xf32>
+      hivm.hir.load ins(%arg9 : memref<32xf32, strided<[?], offset: ?>>) outs(%alloc_1 : memref<32xf32>)
+      %alloc_2 = memref.alloc() {alignment = 64 : i64} : memref<32xf32>
+      hivm.hir.vadd ins(%arg8, %alloc_1 : memref<32xf32>, memref<32xf32>) outs(%alloc_2 : memref<32xf32>)
+      %1 = affine.apply #map()[%arg10]
+      %reinterpret_cast_3 = memref.reinterpret_cast %arg2 to offset: [%1], sizes: [32], strides: [1] : memref<?xf32> to memref<32xf32, strided<[1], offset: ?>>
+      %cast_4 = memref.cast %reinterpret_cast_3 : memref<32xf32, strided<[1], offset: ?>> to memref<32xf32, strided<[?], offset: ?>>
+      // CHECK: scf.yield
+      // CHECK-SAME: memref<32xf32, #hivm.address_space<ub>>, memref<32xf32, strided<[?], offset: ?>, #hivm.address_space<gm>>, index
+      scf.yield %alloc_2, %cast_4, %1 : memref<32xf32>, memref<32xf32, strided<[?], offset: ?>>, index
+    }
+    %reinterpret_cast_0 = memref.reinterpret_cast %arg3 to offset: [0], sizes: [32], strides: [1] : memref<?xf32> to memref<32xf32, strided<[1]>>
+    hivm.hir.store ins(%0#0 : memref<32xf32>) outs(%reinterpret_cast_0 : memref<32xf32, strided<[1]>>)
+    return
+  }
+}
+
+// -----
+
+func.func @test_pointer_cast() attributes {hacc.entry, hacc.function_kind = #hacc.function_kind<DEVICE>} {
+  %c127_i64 = arith.constant 127 : i64
+  %c1 = arith.constant 1 : index
+  // CHECK: hivm.hir.pointer_cast(%{{.*}}) [%{{.*}}] : memref<?xi8, #hivm.address_space<gm>>
+  %0 = hivm.hir.pointer_cast(%c127_i64) [%c1] : memref<?xi8>
+  annotation.mark %0 {address_space = #hivm.address_space<gm>} : memref<?xi8>
+  %reinterpret_cast = memref.reinterpret_cast %0 to offset: [0], sizes: [1], strides: [1] : memref<?xi8> to memref<1xi8, strided<[1], offset: ?>>
+  return
+}
+
+// -----
+
+func.func @test_arith_select_cast(%arg0: memref<64x32xi1>, %arg1: i32, %arg2: memref<64x32xf16>, %arg3: memref<64x32xf16>) attributes {hacc.entry, hacc.function_kind = #hacc.function_kind<DEVICE>, hivm.func_core_type = #hivm.func_core_type<AIV>} {
+  %c0_i32 = arith.constant 0 : i32
+  %true = arith.constant true
+  %alloc = memref.alloc() {alignment = 64 : i64} : memref<64x32xi1>
+  hivm.hir.vbrc ins(%true : i1) outs(%alloc : memref<64x32xi1>)
+  %alloc_0 = memref.alloc() {alignment = 64 : i64} : memref<64x32xi1>
+  hivm.hir.vnot ins(%arg0 : memref<64x32xi1>) outs(%alloc_0 : memref<64x32xi1>)
+  %0 = arith.cmpi sgt, %arg1, %c0_i32 : i32
+  %1 = arith.select %0, %alloc_0, %alloc : memref<64x32xi1>
+  %alloc_1 = memref.alloc() : memref<64x32xf16>
+  hivm.hir.load ins(%arg2 : memref<64x32xf16>) outs(%alloc_1 : memref<64x32xf16>)
+  %alloc_2 = memref.alloc() : memref<64x32xf16>
+  hivm.hir.load ins(%arg3 : memref<64x32xf16>) outs(%alloc_2 : memref<64x32xf16>)
+  %alloc_3 = memref.alloc() {alignment = 64 : i64} : memref<64x32xf16>
+  // CHECK: hivm.hir.vsel ins(%{{.*}}, %{{.*}}, %{{.*}} : memref<64x32xi1, #hivm.address_space<ub>>, memref<64x32xf16, #hivm.address_space<ub>>, memref<64x32xf16, #hivm.address_space<ub>>) outs(%{{.*}} : memref<64x32xf16, #hivm.address_space<ub>>)
+  hivm.hir.vsel ins(%1, %alloc_1, %alloc_2 : memref<64x32xi1>, memref<64x32xf16>, memref<64x32xf16>) outs(%alloc_3 : memref<64x32xf16>)
+  return
+}
+
+// -----
+
+// CHECK-LABEL: test_infer_mem_scope_while
+module {
+  func.func @test_infer_mem_scope_while(%arg0 : memref<128xi32>) attributes {hacc.function_kind = #hacc.function_kind<DEVICE>, hivm.func_core_type = #hivm.func_core_type<AIV>} {
+    %true = arith.constant true
+    %false = arith.constant false
+    // CHECK:           %[[VAL_3:.*]] = memref.alloc() {alignment = 64 : i64} : memref<128xi32, #hivm.address_space<ub>>
+    %alloc_0 = memref.alloc() {alignment = 64 : i64} : memref<128xi32>
+    %1 = scf.while(%arg1 = %alloc_0, %arg2 = %false) : (memref<128xi32>, i1) -> memref<128xi32> {
+      %2 = arith.xori %arg2, %true : i1
+      // CHECK:             %[[VAL_8:.*]] = memref.alloc() : memref<128xi32, #hivm.address_space<ub>>
+      %alloc_1 = memref.alloc() : memref<128xi32>
+      memref.copy %arg1, %alloc_1 : memref<128xi32> to memref<128xi32>
+      scf.condition(%2) %alloc_1 : memref<128xi32>
+    } do {
+    // CHECK:           ^bb0(%[[VAL_9:.*]]: memref<128xi32, #hivm.address_space<ub>>):
+    ^bb0(%arg1: memref<128xi32>):
+      scf.yield %arg1, %true : memref<128xi32>, i1
+    }
+    return
+  }
+}
+
+// -----
+
+// Regression: scf.while whose condition is a before-arg (not a computed value).
+// Inits/before-args (4) exceed condition-forwarded/result count (3): the
+// condition slot has no matching after-arg or result. Previously this caused an
+// out-of-bounds index into after-args/results and a verifier type-mismatch.
+// CHECK-LABEL: test_infer_mem_scope_while_cond_is_before_arg
+module {
+  func.func @test_infer_mem_scope_while_cond_is_before_arg(%arg0 : memref<128xi32>) attributes {hacc.function_kind = #hacc.function_kind<DEVICE>, hivm.func_core_type = #hivm.func_core_type<AIV>} {
+    %true = arith.constant true
+    %false = arith.constant false
+    // CHECK: %[[INIT:.*]] = memref.alloc() {alignment = 64 : i64} : memref<128xi32, #hivm.address_space<ub>>
+    %alloc_0 = memref.alloc() {alignment = 64 : i64} : memref<128xi32>
+    // before-args: %arg1(memref), %arg2(i1 cond), %arg3(memref)  -> results: 2 memrefs
+    // CHECK: %[[RES:.*]]:2 = scf.while
+    // CHECK-SAME: -> (memref<128xi32, #hivm.address_space<ub>>, memref<128xi32, #hivm.address_space<ub>>)
+    %1:2 = scf.while(%arg1 = %alloc_0, %arg2 = %true, %arg3 = %alloc_0) : (memref<128xi32>, i1, memref<128xi32>) -> (memref<128xi32>, memref<128xi32>) {
+      // condition forwards the two memref before-args, skipping the i1 %arg2
+      scf.condition(%arg2) %arg1, %arg3 : memref<128xi32>, memref<128xi32>
+    } do {
+    // CHECK: ^bb0(%[[A1:.*]]: memref<128xi32, #hivm.address_space<ub>>, %[[A3:.*]]: memref<128xi32, #hivm.address_space<ub>>):
+    ^bb0(%arg1: memref<128xi32>, %arg3: memref<128xi32>):
+      // after-yield feeds all three before-args; the new alloc sets scope on
+      // its after-yield, which routes back to the before-arg and results.
+      // CHECK: %[[A4:.*]] = memref.alloc() : memref<128xi32, #hivm.address_space<ub>>
+      %alloc_1 = memref.alloc() : memref<128xi32>
+      scf.yield %alloc_1, %false, %alloc_1 : memref<128xi32>, i1, memref<128xi32>
+    }
+    // results carry the propagated scope
+    // CHECK: hivm.hir.copy ins(%[[RES]]#0 : memref<128xi32, #hivm.address_space<ub>>) outs(%[[RES]]#1 : memref<128xi32, #hivm.address_space<ub>>)
+    hivm.hir.copy ins(%1#0 : memref<128xi32>) outs(%1#1 : memref<128xi32>)
+    return
+  }
+}
+
+// -----
+
+// Regression: commiter scenario - the init/before chain and the
+// cond/after/results chain are independent; yield must not overwrite GM
+// scopes set by the cond chain.
+// CHECK-LABEL: test_infer_mem_scope_while_separate_chains
+module {
+  func.func @test_infer_mem_scope_while_separate_chains(%arg0 : memref<128xi32>) attributes {hacc.function_kind = #hacc.function_kind<DEVICE>, hivm.func_core_type = #hivm.func_core_type<AIV>} {
+    %true = arith.constant true
+    // CHECK: %[[INIT:.*]] = memref.alloc() {alignment = 64 : i64} : memref<128xi32, #hivm.address_space<ub>>
+    %alloc_0 = memref.alloc() {alignment = 64 : i64} : memref<128xi32>
+    // before chain: %alloc_0 -> %arg1 (UB); cond chain: %arg0(gm) -> results/after
+    // CHECK: %[[RES:.*]]:2 = scf.while
+    // CHECK-SAME: -> (memref<128xi32, #hivm.address_space<gm>>, i1)
+    %1:2 = scf.while(%arg1 = %alloc_0, %arg2 = %true) : (memref<128xi32>, i1) -> (memref<128xi32>, i1) {
+      scf.condition(%arg2) %arg0, %arg2 : memref<128xi32>, i1
+    } do {
+    // CHECK: ^bb0(%[[AFTER0:.*]]: memref<128xi32, #hivm.address_space<gm>>, %[[AFTER1:.*]]: i1):
+    ^bb0(%after0: memref<128xi32>, %after1: i1):
+      // after-arg keeps GM; yield a fresh UB alloc back to the before chain.
+      // CHECK: %[[YIELD_ALLOC:.*]] = memref.alloc() : memref<128xi32, #hivm.address_space<ub>>
+      %alloc_1 = memref.alloc() : memref<128xi32>
+      // CHECK: scf.yield %[[YIELD_ALLOC]], %[[AFTER1]] : memref<128xi32, #hivm.address_space<ub>>, i1
+      scf.yield %alloc_1, %after1 : memref<128xi32>, i1
+    }
+    return
+  }
+}
+
+// -----
+
+// CHECK-LABEL: test_infer_mem_scope_while
+module {
+  func.func @test_infer_mem_scope_while(%arg0 : memref<128xi32>) attributes {hacc.function_kind = #hacc.function_kind<DEVICE>, hivm.func_core_type = #hivm.func_core_type<AIV>} {
+    %true = arith.constant true
+    %false = arith.constant false
+    // CHECK:           %[[VAL_3:.*]] = memref.alloc() {alignment = 64 : i64} : memref<128xi32, #hivm.address_space<ub>>
+    %alloc_0 = memref.alloc() {alignment = 64 : i64} : memref<128xi32>
+    %1:2 = scf.while(%arg1 = %alloc_0, %arg2 = %false) : (memref<128xi32>, i1) -> (memref<128xi32>, i1) {
+      %2 = arith.xori %arg2, %true : i1
+      // CHECK:             %[[VAL_8:.*]] = memref.alloc() : memref<128xi32, #hivm.address_space<ub>>
+      %alloc_1 = memref.alloc() : memref<128xi32>
+      memref.copy %arg1, %alloc_1 : memref<128xi32> to memref<128xi32>
+      scf.condition(%2) %alloc_1, %arg2 : memref<128xi32>, i1
+    } do {
+    // CHECK:           ^bb0(%[[VAL_9:.*]]: memref<128xi32, #hivm.address_space<ub>>, %[[VAL_10:.*]]: i1):
+    ^bb0(%arg1: memref<128xi32>, %arg2: i1):
+      scf.yield %arg1, %arg2 : memref<128xi32>, i1
+    }
+    return
+  }
+}
+
+// -----
+
+// Regression: loop-invariant yield (after yields init) cycled through
+// init -> before-arg -> after-yield; guard stops the re-walk.
+// CHECK-LABEL: test_infer_mem_scope_while_yield_cycle
+module {
+  func.func @test_infer_mem_scope_while_yield_cycle() attributes {hacc.function_kind = #hacc.function_kind<DEVICE>, hivm.func_core_type = #hivm.func_core_type<AIV>} {
+    %true = arith.constant true
+    // CHECK: %[[INIT:.*]] = memref.alloc() {alignment = 64 : i64} : memref<128xi32, #hivm.address_space<ub>>
+    %alloc_0 = memref.alloc() {alignment = 64 : i64} : memref<128xi32>
+    // CHECK: %[[RES:.*]]:2 = scf.while
+    // CHECK-SAME: -> (memref<128xi32, #hivm.address_space<ub>>, i1)
+    %1:2 = scf.while(%arg1 = %alloc_0, %arg2 = %true) : (memref<128xi32>, i1) -> (memref<128xi32>, i1) {
+      scf.condition(%arg2) %arg1, %arg2 : memref<128xi32>, i1
+    } do {
+    // CHECK: ^bb0(%[[INV:.*]]: memref<128xi32, #hivm.address_space<ub>>, %[[INV1:.*]]: i1):
+    ^bb0(%after0: memref<128xi32>, %after1: i1):
+      // CHECK: scf.yield %[[INIT]], %[[INV1]] : memref<128xi32, #hivm.address_space<ub>>, i1
+      scf.yield %alloc_0, %after1 : memref<128xi32>, i1
+    }
+    return
+  }
+}
+
+// -----
+
+// CHECK-LABEL: test_infer_mem_scope_set_cbuf_for_aic_func_unused_alloc
+module {
+  func.func @test_infer_mem_scope_set_cbuf_for_aic_func_unused_alloc() attributes {hacc.entry, hacc.function_kind = #hacc.function_kind<DEVICE>, hivm.func_core_type = #hivm.func_core_type<AIC>} {
+    // CHECK: #hivm.address_space<cbuf>
+    %alloc = memref.alloc() : memref<8x16xf32>
+    // CHECK: #hivm.address_space<cbuf>
+    annotation.mark %alloc {MayImplicitTransposeWithLastAxis} : memref<8x16xf32>
+    return
+  }
+}
+
+// -----
+
+// Verify that an existing address space is propagated to users.
+// Before the regbase common fix, InferHIVMMemScope returned immediately for
+// the already-scoped function argument and left its cast result unscoped.
+
+// CHECK-LABEL: func.func @propagate_existing_scope(
+// CHECK-SAME: %[[ARG:.*]]: memref<?xf32, #hivm.address_space<gm>>
+func.func @propagate_existing_scope(
+    %arg0: memref<?xf32, #hivm.address_space<gm>>) attributes {
+      hacc.function_kind = #hacc.function_kind<DEVICE>} {
+  // CHECK: builtin.unrealized_conversion_cast %[[ARG]]
+  // CHECK-SAME: to memref<?xf32, #hivm.address_space<gm>>
+  %bridge = builtin.unrealized_conversion_cast %arg0 :
+      memref<?xf32, #hivm.address_space<gm>> to memref<?xf32>
+  return
+}
+
+// -----
+
+// Verify that an existing UB address space on an alloc is propagated to its
+// users rather than being treated as already complete.
+
+// CHECK-LABEL: func.func @propagate_existing_alloc_scope(
+func.func @propagate_existing_alloc_scope() attributes {
+      hacc.function_kind = #hacc.function_kind<DEVICE>,
+      hivm.func_core_type = #hivm.func_core_type<AIV>} {
+  // CHECK: %[[ALLOC:.*]] = memref.alloc() : memref<16xf32, #hivm.address_space<ub>>
+  %alloc = memref.alloc() : memref<16xf32, #hivm.address_space<ub>>
+  // CHECK: builtin.unrealized_conversion_cast %[[ALLOC]]
+  // CHECK-SAME: to memref<16xf32, #hivm.address_space<ub>>
+  %bridge = builtin.unrealized_conversion_cast %alloc :
+      memref<16xf32, #hivm.address_space<ub>> to memref<16xf32>
+  return
+}
+
+// -----
+
+// CHECK-LABEL: func.func @propagate_extract_strided_metadata(
+// CHECK-SAME: %[[ARG:.*]]: memref<16xf32, #hivm.address_space<gm>>
+func.func @propagate_extract_strided_metadata(%arg0: memref<16xf32>)
+    attributes {hacc.function_kind = #hacc.function_kind<DEVICE>} {
+  // CHECK: %[[BASE:.*]], %{{.*}}, %{{.*}}, %{{.*}} =
+  // CHECK-SAME: memref.extract_strided_metadata %[[ARG]]
+  // CHECK-SAME: -> memref<f32, #hivm.address_space<gm>>
+  %base, %offset, %size, %stride = memref.extract_strided_metadata %arg0 :
+      memref<16xf32> -> memref<f32>, index, index, index
+  return
+}
+
+// -----
+
+// CHECK-LABEL: func.func @test_mmadL1_tightly_coupled(
+func.func @test_mmadL1_tightly_coupled() {
+  // CHECK: #hivm.address_space<cbuf>
+  %rhs = memref.alloc() : memref<16x128xf16>
+  // CHECK: #hivm.address_space<cc>
+  %output = memref.alloc() : memref<16x128xf32>
+  %transpose = arith.constant true
+  %c16 = arith.constant 16 : index
+  %c128 = arith.constant 128 : index
+  %tightly_coupled = memref.alloc() :
+      memref<16x16xf16, #hivm.address_space<cbuf>>
+  annotation.mark %tightly_coupled {
+      hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<1>} :
+      memref<16x16xf16, #hivm.address_space<cbuf>>
+  // CHECK: to memref<16x16xf16, #hivm.address_space<cbuf>>
+  %cast = memref.memory_space_cast %tightly_coupled :
+      memref<16x16xf16, #hivm.address_space<cbuf>> to memref<16x16xf16>
+  hivm.hir.mmadL1 ins(%cast, %rhs, %transpose, %c16, %c16, %c128 :
+      memref<16x16xf16>, memref<16x128xf16>, i1, index, index, index)
+      outs(%output : memref<16x128xf32>)
+  return
+}
+
+// -----
+
+// CHECK-LABEL: func.func @test_mmadL1_multi_root(
+func.func @test_mmadL1_multi_root(%condition: i1) attributes {
+    hacc.function_kind = #hacc.function_kind<DEVICE>} {
+  %transpose = arith.constant true
+  %c16 = arith.constant 16 : index
+  // CHECK: %[[LHS0:.*]] = memref.alloc() : memref<16x16xf16, #hivm.address_space<cbuf>>
+  %lhs0 = memref.alloc() : memref<16x16xf16>
+  // CHECK: %[[LHS1:.*]] = memref.alloc() : memref<16x16xf16, #hivm.address_space<cbuf>>
+  %lhs1 = memref.alloc() : memref<16x16xf16>
+  // CHECK: %[[LHS:.*]] = scf.if %{{.*}} -> (memref<16x16xf16, #hivm.address_space<cbuf>>) {
+  %lhs = scf.if %condition -> (memref<16x16xf16>) {
+    scf.yield %lhs0 : memref<16x16xf16>
+  } else {
+    scf.yield %lhs1 : memref<16x16xf16>
+  }
+  // CHECK: %[[RHS:.*]] = memref.alloc() : memref<16x16xf16, #hivm.address_space<cbuf>>
+  %rhs = memref.alloc() : memref<16x16xf16>
+  // CHECK: %[[OUTPUT:.*]] = memref.alloc() : memref<16x16xf32, #hivm.address_space<cc>>
+  %output = memref.alloc() : memref<16x16xf32>
+  // CHECK: hivm.hir.mmadL1 ins(%[[LHS]], %[[RHS]],
+  // CHECK-SAME: memref<16x16xf16, #hivm.address_space<cbuf>>,
+  // CHECK-SAME: memref<16x16xf16, #hivm.address_space<cbuf>>,
+  // CHECK-SAME: outs(%[[OUTPUT]] : memref<16x16xf32, #hivm.address_space<cc>>)
+  hivm.hir.mmadL1 ins(%lhs, %rhs, %transpose, %c16, %c16, %c16 :
+      memref<16x16xf16>, memref<16x16xf16>, i1, index, index, index)
+      outs(%output : memref<16x16xf32>)
+  return
+}
+
+// -----
+
+// CHECK-LABEL: func.func @test_mmadmxL1(
+func.func @test_mmadmxL1() attributes {
+    hacc.function_kind = #hacc.function_kind<DEVICE>} {
+  // CHECK: %[[A:.*]] = memref.alloc() : memref<16x16xf8E4M3FN, #hivm.address_space<cbuf>>
+  %a = memref.alloc() : memref<16x16xf8E4M3FN>
+  // CHECK: %[[B:.*]] = memref.alloc() : memref<16x16xf8E4M3FN, #hivm.address_space<cbuf>>
+  %b = memref.alloc() : memref<16x16xf8E4M3FN>
+  // CHECK: %[[SCALE_A:.*]] = memref.alloc() : memref<1xui8, #hivm.address_space<cbuf>>
+  %scale_a = memref.alloc() : memref<1xui8>
+  // CHECK: %[[SCALE_B:.*]] = memref.alloc() : memref<1xui8, #hivm.address_space<cbuf>>
+  %scale_b = memref.alloc() : memref<1xui8>
+  // CHECK: %[[C:.*]] = memref.alloc() : memref<16x16xf32, #hivm.address_space<cc>>
+  %c = memref.alloc() : memref<16x16xf32>
+  %true = arith.constant true
+  %c16 = arith.constant 16 : index
+  // CHECK: hivm.hir.mmadmxL1 ins(%[[A]], %[[B]], %[[SCALE_A]], %[[SCALE_B]],
+  // CHECK-SAME: memref<16x16xf8E4M3FN, #hivm.address_space<cbuf>>,
+  // CHECK-SAME: memref<16x16xf8E4M3FN, #hivm.address_space<cbuf>>,
+  // CHECK-SAME: memref<1xui8, #hivm.address_space<cbuf>>,
+  // CHECK-SAME: memref<1xui8, #hivm.address_space<cbuf>>,
+  // CHECK-SAME: outs(%[[C]] : memref<16x16xf32, #hivm.address_space<cc>>)
+  hivm.hir.mmadmxL1 ins(%a, %b, %scale_a, %scale_b, %true,
+      %c16, %c16, %c16 : memref<16x16xf8E4M3FN>,
+      memref<16x16xf8E4M3FN>, memref<1xui8>, memref<1xui8>, i1,
+      index, index, index) outs(%c : memref<16x16xf32>)
+  return
+}
+
+// -----
+
+module attributes {hacc.target = #hacc.target<"Ascend910_9589">} {
+  // CHECK-LABEL: func.func @test_coupled_buffer_aic(
+  func.func @test_coupled_buffer_aic() attributes {
+      hacc.entry, hacc.function_kind = #hacc.function_kind<DEVICE>,
+      hivm.func_core_type = #hivm.func_core_type<AIC>} {
+    %transpose = arith.constant true
+    %c64 = arith.constant 64 : index
+    %c128 = arith.constant 128 : index
+    %lhs = memref.alloc() {alignment = 64 : i64} : memref<64x128xf16>
+    %rhs = memref.alloc() : memref<64x128xf16>
+    %output = memref.alloc() {alignment = 64 : i64} : memref<64x64xf32>
+    hivm.hir.mmadL1 {already_set_real_mkn, b_transpose,
+        fixpipe_already_inserted = true}
+        ins(%lhs, %rhs, %transpose, %c64, %c128, %c64 :
+            memref<64x128xf16>, memref<64x128xf16>, i1, index, index, index)
+        outs(%output : memref<64x64xf32>)
+    // CHECK: #hivm.address_space<ub>
+    %tightly_coupled = memref.alloc() :
+        memref<64x64xf32, #hivm.address_space<ub>>
+    annotation.mark %tightly_coupled {
+        effects = ["write", "read"],
+        hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<0>} :
+        memref<64x64xf32, #hivm.address_space<ub>>
+    hivm.hir.sync_block_wait[<CUBE>, <PIPE_V>, <PIPE_S>] flag = 0
+    // CHECK: ins({{.*}} : memref<64x64xf32, #hivm.address_space<cc>>)
+    // CHECK-SAME: outs({{.*}} : memref<64x64xf32, #hivm.address_space<ub>>)
+    hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>}
+        ins(%output : memref<64x64xf32>)
+        outs(%tightly_coupled : memref<64x64xf32,
+            #hivm.address_space<ub>>)
+    hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_S>] flag = 1
+    %unused = memref.alloc() : memref<64x128xf16>
+    return
+  }
+}
+
+// -----
+
+// CHECK-LABEL: test_infer_mem_scope_unrealized_conversion_cast
+module {
+  func.func @test_infer_mem_scope_unrealized_conversion_cast(%arg0 : memref<128xi32>) attributes {hacc.entry, hacc.function_kind = #hacc.function_kind<DEVICE>, hivm.func_core_type = #hivm.func_core_type<AIV>} {
+    // CHECK: #hivm.address_space<gm>
+    %1 = builtin.unrealized_conversion_cast %arg0 : memref<128xi32> to memref<256xi16>
+    return
+  }
+}
+
+// -----
+// CHECK: #[[$ATTR_0:.+]] = affine_map<()[s0] -> (s0 * 35584)>
+// CHECK: #[[$ATTR_1:.+]] = affine_map<()[s0] -> (s0 * 35584 + 16384)>
+// CHECK: #[[$ATTR_2:.+]] = affine_map<()[s0] -> (s0 * 35584 + 19456)>
+// CHECK-LABEL:   func.func @triton_conv1d_mix_aic
+// CHECK:           %{{.*}} = arith.constant true
+// CHECK:           hivm.hir.set_ffts_base_addr %{{.*}}
+// CHECK:           hivm.hir.set_mask_norm
+// CHECK:           %{{.*}} = arith.muli %{{.*}}, %{{.*}} : i32
+// CHECK:           %{{.*}} = arith.muli %{{.*}}, %{{.*}} : i32
+// CHECK:           annotation.mark %{{.*}} {logical_block_num} : i32
+// CHECK:           %{{.*}} = hivm.hir.get_block_idx -> i64
+// CHECK:           %{{.*}} = arith.index_cast %{{.*}} : i64 to index
+// CHECK:           %{{.*}} = affine.apply #[[$ATTR_0]](){{\[}}%{{.*}}]
+// CHECK:           %{{.*}} = memref.view %{{.*}}{{\[}}%{{.*}}][] : memref<?xi8, #hivm.address_space<gm>> to memref<2x2x1x128x16xf16, #hivm.address_space<gm>>
+// CHECK:           hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_S>] flag = 1
+// CHECK:           %{{.*}} = memref.alloc() {alignment = 64 : i64} : memref<2x2x1x128x16xf16, #hivm.address_space<cbuf>>
+// CHECK:           hivm.hir.load ins(%{{.*}} : memref<2x2x1x128x16xf16, #hivm.address_space<gm>>) outs(%{{.*}} : memref<2x2x1x128x16xf16, #hivm.address_space<cbuf>>)
+// CHECK:           %{{.*}} = affine.apply #[[$ATTR_1]](){{\[}}%{{.*}}]
+// CHECK:           %{{.*}} = memref.view %{{.*}}{{\[}}%{{.*}}][] : memref<?xi8, #hivm.address_space<gm>> to memref<1x1x3x32x16xf16, #hivm.address_space<gm>>
+// CHECK:           hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_S>] flag = 1
+// CHECK:           %{{.*}} = memref.alloc() {alignment = 64 : i64} : memref<1x1x3x32x16xf16, #hivm.address_space<cbuf>>
+// CHECK:           hivm.hir.load ins(%{{.*}} : memref<1x1x3x32x16xf16, #hivm.address_space<gm>>) outs(%{{.*}} : memref<1x1x3x32x16xf16, #hivm.address_space<cbuf>>)
+// CHECK:           %{{.*}} = memref.alloc() {alignment = 64 : i64} : memref<128x64xf32, #hivm.address_space<cc>>
+// CHECK:           hivm.hir.Conv1dL1 {dilation = 1 : i32, fixpipe_already_inserted = true, groups = 2 : i32, outputAlreadyNormalized, padding = 0 : i32, stride = 1 : i32} ins(%{{.*}}, %{{.*}}, %{{.*}} : memref<2x2x1x128x16xf16, #hivm.address_space<cbuf>>, memref<1x1x3x32x16xf16, #hivm.address_space<cbuf>>, i1) outs(%{{.*}} : memref<128x64xf32, #hivm.address_space<cc>>)
+// CHECK:           %{{.*}} = memref.subview %{{.*}}[0, 0] [126, 64] [1, 1] : memref<128x64xf32, #hivm.address_space<cc>> to memref<126x64xf32, strided<[64, 1]>, #hivm.address_space<cc>>
+// CHECK:           %{{.*}} = affine.apply #[[$ATTR_2]](){{\[}}%{{.*}}]
+// CHECK:           %{{.*}} = memref.view %{{.*}}{{\[}}%{{.*}}][] : memref<?xi8, #hivm.address_space<gm>> to memref<126x64xf16, #hivm.address_space<gm>>
+// CHECK:           hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>, pre_quant = #hivm.fixpipe_pre_quant_mode<F322F16>} ins(%{{.*}} : memref<126x64xf32, strided<[64, 1]>, #hivm.address_space<cc>>) outs(%{{.*}} : memref<126x64xf16, #hivm.address_space<gm>>)
+// CHECK:           annotation.mark %{{.*}} : memref<126x64xf16, #hivm.address_space<gm>>
+// CHECK:           hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_S>] flag = 0
+// CHECK:           return
+// CHECK:         }
+#map = affine_map<()[s0] -> (s0 * 35584)>
+#map1 = affine_map<()[s0] -> (s0 * 35584 + 16384)>
+#map2 = affine_map<()[s0] -> (s0 * 35584 + 19456)>
+func.func @triton_conv1d_mix_aic(%arg0: i64 {hacc.arg_type = #hacc.arg_type<ffts_base_address>}, %arg1: memref<?xi8> {hacc.arg_type = #hacc.arg_type<sync_block_lock>}, %arg2: memref<?xi8> {hacc.arg_type = #hacc.arg_type<workspace>}, %arg3: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg5: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg6: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg7: i32, %arg8: i32, %arg9: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, func_dyn_memref_args = dense<[false, true, true, true, true, true, true, false, false, false]> : vector<10xi1>, hacc.entry, hacc.function_kind = #hacc.function_kind<DEVICE>, hivm.func_core_type = #hivm.func_core_type<AIC>, hivm.part_of_mix, mix_mode = "aiv", parallel_mode = "simd"} {
+  %true = arith.constant true
+  hivm.hir.set_ffts_base_addr %arg0
+  hivm.hir.set_mask_norm
+  %0 = arith.muli %arg7, %arg8 : i32
+  %1 = arith.muli %0, %arg9 : i32
+  annotation.mark %1 {logical_block_num} : i32
+  %2 = hivm.hir.get_block_idx -> i64
+  %3 = arith.index_cast %2 : i64 to index
+  %4 = affine.apply #map()[%3]
+  %view = memref.view %arg2[%4][] : memref<?xi8> to memref<2x2x1x128x16xf16>
+  hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_S>] flag = 1
+  %alloc = memref.alloc() {alignment = 64 : i64} : memref<2x2x1x128x16xf16>
+  hivm.hir.load ins(%view : memref<2x2x1x128x16xf16>) outs(%alloc : memref<2x2x1x128x16xf16>) init_out_buffer = false may_implicit_transpose_with_last_axis = false
+  %5 = affine.apply #map1()[%3]
+  %view_0 = memref.view %arg2[%5][] : memref<?xi8> to memref<1x1x3x32x16xf16>
+  hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_S>] flag = 1
+  %alloc_1 = memref.alloc() {alignment = 64 : i64} : memref<1x1x3x32x16xf16>
+  hivm.hir.load ins(%view_0 : memref<1x1x3x32x16xf16>) outs(%alloc_1 : memref<1x1x3x32x16xf16>) init_out_buffer = false may_implicit_transpose_with_last_axis = false
+  %alloc_2 = memref.alloc() {alignment = 64 : i64} : memref<128x64xf32>
+  hivm.hir.Conv1dL1 {dilation = 1 : i32, fixpipe_already_inserted = true, groups = 2 : i32, outputAlreadyNormalized, padding = 0 : i32, stride = 1 : i32} ins(%alloc, %alloc_1, %true : memref<2x2x1x128x16xf16>, memref<1x1x3x32x16xf16>, i1) outs(%alloc_2 : memref<128x64xf32>)
+  %subview = memref.subview %alloc_2[0, 0] [126, 64] [1, 1] : memref<128x64xf32> to memref<126x64xf32, strided<[64, 1]>>
+  %6 = affine.apply #map2()[%3]
+  %view_3 = memref.view %arg2[%6][] : memref<?xi8> to memref<126x64xf16>
+  hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>, pre_quant = #hivm.fixpipe_pre_quant_mode<F322F16>} ins(%subview : memref<126x64xf32, strided<[64, 1]>>) outs(%view_3 : memref<126x64xf16>)
+  annotation.mark %view_3 : memref<126x64xf16>
+  hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_S>] flag = 0
+  return
+}
+
+// -----
+// CHECK-LABEL:   func.func @triton_conv2d_fp32_aligned_mix_aic
+// CHECK:           %{{.*}} = arith.constant true
+// CHECK:           hivm.hir.set_ffts_base_addr %{{.*}}
+// CHECK:           hivm.hir.set_mask_norm
+// CHECK:           %{{.*}} = arith.muli %{{.*}}, %{{.*}} : i32
+// CHECK:           %{{.*}} = arith.muli %{{.*}}, %{{.*}} : i32
+// CHECK:           annotation.mark %{{.*}} {logical_block_num} : i32
+// CHECK:           %{{.*}} = memref_ext.alloc_workspace() from %{{.*}} offset = [%{{.*}}] : from memref<?xi8, #hivm.address_space<gm>> to memref<1x2x32x32x8xf32, #hivm.address_space<gm>>
+// CHECK:           annotation.mark %{{.*}} {hivm_data_layout = #hivm.data_layout<NC1HWC0>} : memref<1x2x32x32x8xf32, #hivm.address_space<gm>>
+// CHECK:           hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_S>] flag = 1
+// CHECK:           %{{.*}} = memref.alloc() {alignment = 64 : i64} : memref<1x2x32x32x8xf32, #hivm.address_space<cbuf>>
+// CHECK:           hivm.hir.load ins(%{{.*}} : memref<1x2x32x32x8xf32, #hivm.address_space<gm>>) outs(%{{.*}} : memref<1x2x32x32x8xf32, #hivm.address_space<cbuf>>)
+// CHECK:           %{{.*}} = memref_ext.alloc_workspace() from %{{.*}} offset = [%{{.*}}] : from memref<?xi8, #hivm.address_space<gm>> to memref<2x3x3x16x8xf32, #hivm.address_space<gm>>
+// CHECK:           annotation.mark %{{.*}} {hivm_data_layout = #hivm.data_layout<C1HWNC0>} : memref<2x3x3x16x8xf32, #hivm.address_space<gm>>
+// CHECK:           hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_S>] flag = 1
+// CHECK:           %{{.*}} = memref.alloc() {alignment = 64 : i64} : memref<2x3x3x16x8xf32, #hivm.address_space<cbuf>>
+// CHECK:           hivm.hir.load ins(%{{.*}} : memref<2x3x3x16x8xf32, #hivm.address_space<gm>>) outs(%{{.*}} : memref<2x3x3x16x8xf32, #hivm.address_space<cbuf>>)
+// CHECK:           %{{.*}} = memref.alloc() {alignment = 64 : i64} : memref<912x16xf32, #hivm.address_space<cc>>
+// CHECK:           hivm.hir.Conv2dL1 {dilation = 1 : i32, fixpipe_already_inserted = true, groups = 1 : i32, outputAlreadyNormalized, padding = 0 : i32, stride = 1 : i32} ins(%{{.*}}, %{{.*}}, %{{.*}} : memref<1x2x32x32x8xf32, #hivm.address_space<cbuf>>, memref<2x3x3x16x8xf32, #hivm.address_space<cbuf>>, i1) outs(%{{.*}} : memref<912x16xf32, #hivm.address_space<cc>>)
+// CHECK:           %{{.*}} = memref.subview %{{.*}}[0, 0] [900, 16] [1, 1] : memref<912x16xf32, #hivm.address_space<cc>> to memref<900x16xf32, strided<[16, 1]>, #hivm.address_space<cc>>
+// CHECK:           %{{.*}} = memref_ext.alloc_workspace() from %{{.*}} offset = [%{{.*}}] : from memref<?xi8, #hivm.address_space<gm>> to memref<900x16xf32, #hivm.address_space<gm>>
+// CHECK:           hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>} ins(%{{.*}} : memref<900x16xf32, strided<[16, 1]>, #hivm.address_space<cc>>) outs(%{{.*}} : memref<900x16xf32, #hivm.address_space<gm>>)
+// CHECK:           annotation.mark %{{.*}} : memref<900x16xf32, #hivm.address_space<gm>>
+// CHECK:           hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_S>] flag = 0
+// CHECK:           return
+// CHECK:         }
+func.func @triton_conv2d_fp32_aligned_mix_aic(%arg0: i64 {hacc.arg_type = #hacc.arg_type<ffts_base_address>}, %arg1: memref<?xi8> {hacc.arg_type = #hacc.arg_type<sync_block_lock>}, %arg2: memref<?xi8> {hacc.arg_type = #hacc.arg_type<workspace>}, %arg3: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg5: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg6: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg7: i32, %arg8: i32, %arg9: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, func_dyn_memref_args = dense<[false, true, true, true, true, true, true, false, false, false]> : vector<10xi1>, hacc.entry, hacc.function_kind = #hacc.function_kind<DEVICE>, hivm.func_core_type = #hivm.func_core_type<AIC>, hivm.part_of_mix, mix_mode = "aiv", parallel_mode = "simd"} {
+  %true = arith.constant true
+  %c0 = arith.constant 0 : index
+  %c65536 = arith.constant 65536 : index
+  %c74752 = arith.constant 74752 : index
+  hivm.hir.set_ffts_base_addr %arg0
+  hivm.hir.set_mask_norm
+  %0 = arith.muli %arg7, %arg8 : i32
+  %1 = arith.muli %0, %arg9 : i32
+  annotation.mark %1 {logical_block_num} : i32
+  %2 = memref_ext.alloc_workspace() from %arg2 offset = [%c0] : from memref<?xi8> to memref<1x2x32x32x8xf32>
+  annotation.mark %2 {hivm_data_layout = #hivm.data_layout<NC1HWC0>} : memref<1x2x32x32x8xf32>
+  hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_S>] flag = 1
+  %alloc = memref.alloc() {alignment = 64 : i64} : memref<1x2x32x32x8xf32>
+  hivm.hir.load ins(%2 : memref<1x2x32x32x8xf32>) outs(%alloc : memref<1x2x32x32x8xf32>) init_out_buffer = false may_implicit_transpose_with_last_axis = false
+  %3 = memref_ext.alloc_workspace() from %arg2 offset = [%c65536] : from memref<?xi8> to memref<2x3x3x16x8xf32>
+  annotation.mark %3 {hivm_data_layout = #hivm.data_layout<C1HWNC0>} : memref<2x3x3x16x8xf32>
+  hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_S>] flag = 1
+  %alloc_0 = memref.alloc() {alignment = 64 : i64} : memref<2x3x3x16x8xf32>
+  hivm.hir.load ins(%3 : memref<2x3x3x16x8xf32>) outs(%alloc_0 : memref<2x3x3x16x8xf32>) init_out_buffer = false may_implicit_transpose_with_last_axis = false
+  %alloc_1 = memref.alloc() {alignment = 64 : i64} : memref<912x16xf32>
+  hivm.hir.Conv2dL1 {dilation = 1 : i32, fixpipe_already_inserted = true, groups = 1 : i32, outputAlreadyNormalized, padding = 0 : i32, stride = 1 : i32} ins(%alloc, %alloc_0, %true : memref<1x2x32x32x8xf32>, memref<2x3x3x16x8xf32>, i1) outs(%alloc_1 : memref<912x16xf32>)
+  %subview = memref.subview %alloc_1[0, 0] [900, 16] [1, 1] : memref<912x16xf32> to memref<900x16xf32, strided<[16, 1]>>
+  %4 = memref_ext.alloc_workspace() from %arg2 offset = [%c74752] : from memref<?xi8> to memref<900x16xf32>
+  hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>} ins(%subview : memref<900x16xf32, strided<[16, 1]>>) outs(%4 : memref<900x16xf32>)
+  annotation.mark %4 : memref<900x16xf32>
+  hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_S>] flag = 0
+  return
+}
+
+// -----
+
+// CHECK-LABEL: func.func @test_mmadL1_output_multi_root(
+func.func @test_mmadL1_output_multi_root(%condition: i1) attributes {
+    hacc.function_kind = #hacc.function_kind<DEVICE>} {
+  %transpose = arith.constant true
+  %c16 = arith.constant 16 : index
+  // CHECK: %[[LHS:.*]] = memref.alloc() : memref<16x16xf16, #hivm.address_space<cbuf>>
+  %lhs = memref.alloc() : memref<16x16xf16>
+  // CHECK: %[[RHS:.*]] = memref.alloc() : memref<16x16xf16, #hivm.address_space<cbuf>>
+  %rhs = memref.alloc() : memref<16x16xf16>
+  // CHECK: %[[RES:.*]] = scf.if %{{.*}} -> (memref<16x16xf32, #hivm.address_space<cc>>) {
+  %res = scf.if %condition -> (memref<16x16xf32>) {
+    // CHECK: %[[OUT0:.*]] = memref.alloc() : memref<16x16xf32, #hivm.address_space<cc>>
+    %out0 = memref.alloc() : memref<16x16xf32>
+    // CHECK: hivm.hir.mmadL1 ins(%[[LHS]], %[[RHS]],
+    // CHECK-SAME: outs(%[[OUT0]] : memref<16x16xf32, #hivm.address_space<cc>>)
+    hivm.hir.mmadL1 ins(%lhs, %rhs, %transpose, %c16, %c16, %c16 :
+        memref<16x16xf16>, memref<16x16xf16>, i1, index, index, index)
+        outs(%out0 : memref<16x16xf32>)
+    scf.yield %out0 : memref<16x16xf32>
+  } else {
+    // CHECK: %[[OUT1:.*]] = memref.alloc() : memref<16x16xf32, #hivm.address_space<cc>>
+    %out1 = memref.alloc() : memref<16x16xf32>
+    scf.yield %out1 : memref<16x16xf32>
+  }
+  return
+}
+
+// -----
+
+// Memory planning replaces the original allocs with pointer_cast ops. A later
+// InferHIVMMemScope invocation must accept these already-scoped roots.
+// CHECK-LABEL: func.func @test_conv1d_after_memory_planning
+func.func @test_conv1d_after_memory_planning() attributes {
+    hacc.function_kind = #hacc.function_kind<DEVICE>} {
+  %true = arith.constant true
+  %c0_i64 = arith.constant 0 : i64
+  // CHECK: %[[INPUT:.*]] = hivm.hir.pointer_cast(%{{.*}}) : memref<2x2x1x128x16xf16, #hivm.address_space<cbuf>>
+  %input = hivm.hir.pointer_cast(%c0_i64) : memref<2x2x1x128x16xf16, #hivm.address_space<cbuf>>
+  // CHECK: %[[WEIGHT:.*]] = hivm.hir.pointer_cast(%{{.*}}) : memref<1x1x3x32x16xf16, #hivm.address_space<cbuf>>
+  %weight = hivm.hir.pointer_cast(%c0_i64) : memref<1x1x3x32x16xf16, #hivm.address_space<cbuf>>
+  // CHECK: %[[OUTPUT:.*]] = hivm.hir.pointer_cast(%{{.*}}) : memref<128x64xf32, #hivm.address_space<cc>>
+  %output = hivm.hir.pointer_cast(%c0_i64) : memref<128x64xf32, #hivm.address_space<cc>>
+  // CHECK: hivm.hir.Conv1dL1
+  // CHECK-SAME: ins(%[[INPUT]], %[[WEIGHT]], %{{.*}} : memref<2x2x1x128x16xf16, #hivm.address_space<cbuf>>, memref<1x1x3x32x16xf16, #hivm.address_space<cbuf>>, i1)
+  // CHECK-SAME: outs(%[[OUTPUT]] : memref<128x64xf32, #hivm.address_space<cc>>)
+  hivm.hir.Conv1dL1 {dilation = 1 : i32, groups = 2 : i32, padding = 0 : i32, stride = 1 : i32}
+      ins(%input, %weight, %true : memref<2x2x1x128x16xf16, #hivm.address_space<cbuf>>, memref<1x1x3x32x16xf16, #hivm.address_space<cbuf>>, i1)
+      outs(%output : memref<128x64xf32, #hivm.address_space<cc>>)
+  return
+}

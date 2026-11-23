@@ -1,0 +1,588 @@
+diff --git a/bishengir/include/bishengir/Dialect/HIVMAVE/IR/HIVMAVEOps.td b/bishengir/include/bishengir/Dialect/HIVMAVE/IR/HIVMAVEOps.td
+index 9cc037327..1e2993070 100644
+--- a/bishengir/include/bishengir/Dialect/HIVMAVE/IR/HIVMAVEOps.td
++++ b/bishengir/include/bishengir/Dialect/HIVMAVE/IR/HIVMAVEOps.td
+@@ -218,7 +218,7 @@ def AVE_VFScatterOp : AVE_LibFnOp<"vscatter",[DeclareOpInterfaceMethods<AVELibra
+                        AveExtValidVector:$val);
+   let assemblyFormat = "$base `[` $indices `]` `[` $index_vec `]` `,` $mask `,` $val attr-dict `:`"
+                        "type($base) `,` type($index_vec) `,` type($mask) `,` type($val)";
+-  // let hasVerifier = 1;
++  let hasVerifier = 1;
+   let extraClassDeclaration = opNameDeclaration;
+ }
+ 
+diff --git a/bishengir/lib/Conversion/VectorToHIVMAVE/VectorToHIVMAVE.cpp b/bishengir/lib/Conversion/VectorToHIVMAVE/VectorToHIVMAVE.cpp
+index 20a00bc71..cabdb223e 100644
+--- a/bishengir/lib/Conversion/VectorToHIVMAVE/VectorToHIVMAVE.cpp
++++ b/bishengir/lib/Conversion/VectorToHIVMAVE/VectorToHIVMAVE.cpp
+@@ -32,6 +32,8 @@
+ #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+ #include <algorithm>
+ #include <cstddef>
++#include <cstdint>
++#include <limits>
+ #include <utility>
+ 
+ #define DEBUG_TYPE "convert-vector-to-hivmave"
+@@ -604,6 +606,139 @@ struct TransferReadOpPattern : public OpRewritePattern<vector::TransferReadOp> {
+   }
+ };
+ 
++// A contiguous store is valid for a strided view only when no lane beyond
++// lane zero can write. A one-element memref shape alone does not prove this.
++// LLVM v22 removed the free getStridesAndOffset(MemRefType, ...) overload in
++// favor of the member form. Keep a single compat shim so the rank-1 strided
++// store path builds under both configurations.
++static LogicalResult getStridesAndOffsetCompat(MemRefType memrefTy,
++                                               SmallVectorImpl<int64_t> &strides,
++                                               int64_t &offset) {
++#ifndef __LLVM_MAJOR_VERSION_22_COMPATIBLE__
++  return getStridesAndOffset(memrefTy, strides, offset);
++#else
++  auto [s, o] = memrefTy.getStridesAndOffset();
++  strides.assign(s.begin(), s.end());
++  offset = o;
++  return success();
++#endif
++}
++
++static bool writesOnlyFirstLane(vector::TransferWriteOp op) {
++  if (op.getVectorType().isScalable())
++    return false;
++  if (op.getVectorType().getNumElements() == 1)
++    return true;
++  Value mask = op.getMask();
++  while (mask) {
++    Operation *def = mask.getDefiningOp();
++    if (auto castOp = dyn_cast_or_null<vector::ShapeCastOp>(def)) {
++      mask = castOp.getSource();
++      continue;
++    }
++    // ShapeCastOpPattern replaces shape_cast with a UCC during conversion.
++    // Only look through shape-only predicate casts: arbitrary UCCs need not
++    // preserve either the number or the order of mask lanes.
++    if (auto castOp = dyn_cast_or_null<UnrealizedConversionCastOp>(def);
++        castOp && castOp->getNumOperands() == 1 &&
++        castOp->getNumResults() == 1) {
++      auto srcType = dyn_cast<VectorType>(castOp->getOperand(0).getType());
++      auto dstType = dyn_cast<VectorType>(mask.getType());
++      if (!srcType || !dstType || srcType.isScalable() ||
++          dstType.isScalable() || !srcType.getElementType().isInteger(1) ||
++          !dstType.getElementType().isInteger(1) ||
++          srcType.getNumElements() != dstType.getNumElements())
++        return false;
++      mask = castOp->getOperand(0);
++      continue;
++    }
++    if (def && def->getName().getStringRef() == "annotation.mark" &&
++        def->getNumOperands() == 1) {
++      mask = def->getOperand(0);
++      continue;
++    }
++    break;
++  }
++  if (!mask)
++    return false;
++  if (auto constantMask = mask.getDefiningOp<vector::ConstantMaskOp>()) {
++    auto bounds = constantMask.getMaskDimSizes();
++    return bounds.size() == 1 && cast<IntegerAttr>(bounds[0]).getInt() == 1;
++  }
++  if (auto createMask = mask.getDefiningOp<vector::CreateMaskOp>()) {
++    if (createMask.getOperands().size() != 1)
++      return false;
++    auto len = getConstantIntValue(createMask.getOperands()[0]);
++    return len && *len == 1;
++  }
++  if (auto pge = mask.getDefiningOp<hivmave::VFPgeOp>())
++    return pge.getPattern() == hivmave::PgePattern::VL1;
++  return false;
++}
++
++// True only for a rank-1 store whose element stride is a static constant
++// greater than one. A unit stride is contiguous, and a dynamic stride is left
++// to the existing unaligned/continuity lowering, which already handles the
++// small runtime-strided buffers produced by bufferization (e.g. the i64->i32
++// library-ABI cast). We intervene only for the statically non-contiguous case
++// the masked store provably flattens.
++static bool isRankOneStaticStridedStore(vector::TransferWriteOp op) {
++  auto type = dyn_cast<MemRefType>(op.getSource().getType());
++  if (!type || type.getRank() != 1)
++    return false;
++  SmallVector<int64_t> strides;
++  int64_t offset;
++  if (failed(getStridesAndOffsetCompat(type, strides, offset)))
++    return false;
++  if (ShapedType::isDynamic(strides[0]))
++    return false;
++  return strides[0] > 1 || strides[0] < 0;
++}
++
++// Run this before rewriting any mask producers or creating conversion ops.
++// Unsupported static-strided writes must never fall through to a NORM store.
++static StringRef getRankOneStridedStoreError(vector::TransferWriteOp op) {
++  if (!isRankOneStaticStridedStore(op))
++    return {};
++  if (op.getVectorType().getRank() != 1 ||
++      !op.getPermutationMap().isIdentity() || op.hasOutOfBoundsDim())
++    return "rank-1 strided transfer_write requires rank-1 identity in-bounds "
++           "access";
++  if (writesOnlyFirstLane(op))
++    return {};
++  {
++    auto srcTy = cast<MemRefType>(op.getSource().getType());
++    SmallVector<int64_t> strides;
++    int64_t offset;
++    if (failed(getStridesAndOffsetCompat(srcTy, strides, offset)))
++      llvm_unreachable("isRankOneStaticStridedStore guaranteed a static layout");
++    if (strides[0] < 0)
++      return "rank-1 strided transfer_write with negative stride is not "
++             "supported";
++  }
++  auto type = cast<MemRefType>(op.getSource().getType());
++  auto space = dyn_cast_or_null<hivm::AddressSpaceAttr>(type.getMemorySpace());
++  auto elemType = op.getVectorType().getElementType();
++  if (!space || space.getAddressSpace() != hivm::AddressSpace::UB ||
++      !(elemType.isF32() || elemType.isInteger(32)) ||
++      op.getVectorType().isScalable() ||
++      op.getVectorType().getNumElements() != 64)
++    return "rank-1 strided transfer_write requires UB vector<64x{f32,i32}> "
++           "scatter";
++  SmallVector<int64_t> strides;
++  int64_t offset;
++  if (failed(getStridesAndOffsetCompat(type, strides, offset)))
++    llvm_unreachable("isRankOneStaticStridedStore guaranteed a static layout");
++  // All 64 lane indices must fit, even if some lanes happen to be masked off.
++  if (strides[0] > std::numeric_limits<int32_t>::max() / 63)
++    return "rank-1 strided transfer_write scatter indices exceed signed i32 "
++           "range";
++  if (strides[0] < std::numeric_limits<int32_t>::min() / 63)
++    return "rank-1 strided transfer_write scatter indices exceed signed i32 "
++           "range";
++  return {};
++}
++
+ struct TransferWriteOpPattern
+     : public OpRewritePattern<vector::TransferWriteOp> {
+   using OpRewritePattern<vector::TransferWriteOp>::OpRewritePattern;
+@@ -634,6 +769,11 @@ struct TransferWriteOpPattern
+ 
+   LogicalResult matchAndRewrite(vector::TransferWriteOp writeOp,
+                                 PatternRewriter &rewriter) const override {
++    if (StringRef reason = getRankOneStridedStoreError(writeOp);
++        !reason.empty())
++      return rewriter.notifyMatchFailure(writeOp, reason);
++    bool needsScatter =
++        isRankOneStaticStridedStore(writeOp) && !writesOnlyFirstLane(writeOp);
+     auto loc = writeOp.getLoc();
+     VectorType vecType = writeOp.getVectorType();
+     Value source = writeOp.getSource();
+@@ -692,6 +832,24 @@ struct TransferWriteOpPattern
+                    ->getResult(0);
+       }
+     }
++    if (needsScatter) {
++      SmallVector<int64_t> strides;
++      int64_t offset;
++      if (failed(getStridesAndOffsetCompat(srcType, strides, offset)))
++        llvm_unreachable("needsScatter implies a static rank-1 layout");
++      SmallVector<int32_t> laneIndices;
++      for (int64_t lane = 0; lane < 64; ++lane)
++        laneIndices.push_back(static_cast<int32_t>(lane * strides[0]));
++      auto indexType = VectorType::get({64}, rewriter.getI32Type());
++      Value indices = rewriter.create<arith::ConstantOp>(
++          loc, indexType,
++          DenseIntElementsAttr::get(indexType, ArrayRef<int32_t>(laneIndices)));
++      // VFScatterOp indices are element offsets, not byte offsets. Its base
++      // indices retain the original memref offset and transfer start index.
++      rewriter.replaceOpWithNewOp<hivmave::VFScatterOp>(
++          writeOp, source, writeOp.getIndices(), indices, mask, vector);
++      return success();
++    }
+     hivmave::StoreDist storePattern = hivmave::StoreDist::NORM_B8;
+     if (isSingleElementMask) {
+       if (dataWidth == 8)
+@@ -1474,6 +1632,17 @@ struct VectorToHIVMAVEPass
+     if (moduleOp) {
+       tagConstantArguments(moduleOp);
+     }
++    WalkResult unloweredWrite = moduleOp->walk([](vector::TransferWriteOp op) {
++      StringRef reason = getRankOneStridedStoreError(op);
++      if (reason.empty())
++        return WalkResult::advance();
++      op.emitOpError(reason);
++      return WalkResult::interrupt();
++    });
++    if (unloweredWrite.wasInterrupted()) {
++      signalPassFailure();
++      return;
++    }
+     // Reject reads that TransferReadOpPattern cannot lower correctly up front,
+     // so the failure is reported with its actual reason instead of the
+     // generic "failed to legalize" from the conversion driver
+diff --git a/bishengir/lib/Dialect/HIVMAVE/Analyze/AnalyzeVectorLayout.cpp b/bishengir/lib/Dialect/HIVMAVE/Analyze/AnalyzeVectorLayout.cpp
+index 20aa84a6a..c26173b0e 100644
+--- a/bishengir/lib/Dialect/HIVMAVE/Analyze/AnalyzeVectorLayout.cpp
++++ b/bishengir/lib/Dialect/HIVMAVE/Analyze/AnalyzeVectorLayout.cpp
+@@ -417,6 +417,17 @@ struct TreeSolve : public std::enable_shared_from_this<TreeSolve> {
+             .Case<hivmave::VFLoadOp>([&](auto op) { return solveProblem(op); })
+             .Case<hivmave::VFMaskedStoreOp>(
+                 [&](auto op) { return solveProblem(op); })
++            .Case<hivmave::VFScatterOp>([&](auto op) {
++              // The scatter intrinsic consumes one B32 data/index register and
++              // the matching predicate. It has no result to seed the default
++              // layout solver, so constrain its operands explicitly.
++              if (elemBitwidthOf(op.getVal()) != 32)
++                return TreeSolves{};
++              return TreeSolves{
++                  wrapThis(FunctionType::NONE, {{op.getVal(), State::B32},
++                                                {op.getIndexVec(), State::B32},
++                                                {op.getMask(), State::B32}})};
++            })
+             .Case<UnrealizedConversionCastOp>(
+                 [&](auto op) { return solveProblem(op); })
+             .Case<hivmave::VectorLayoutCastOp>(
+diff --git a/bishengir/lib/Dialect/HIVMAVE/IR/HIVMAVEOps.cpp b/bishengir/lib/Dialect/HIVMAVE/IR/HIVMAVEOps.cpp
+index f3cc23acf..bedae2a8e 100644
+--- a/bishengir/lib/Dialect/HIVMAVE/IR/HIVMAVEOps.cpp
++++ b/bishengir/lib/Dialect/HIVMAVE/IR/HIVMAVEOps.cpp
+@@ -856,3 +856,31 @@ LogicalResult VFBlockGatherOp::verify() {
+     return emitOpError("requires one scalar index per buffer dimension");
+   return success();
+ }
++
++LogicalResult VFScatterOp::verify() {
++  // One scalar base index per buffer dimension, matching VFLoadOp /
++  // VFBlockGatherOp and the ToAVEIntrin lowering's own re-check. This is the
++  // real footgun for a future pattern that builds a scatter by hand.
++  auto baseType = cast<MemRefType>(getBase().getType());
++  if (getIndices().size() != static_cast<size_t>(baseType.getRank()))
++    return emitOpError("requires one scalar index per buffer dimension");
++
++  // index_vec is a rank-1 integer/index vector (ODS already enforces this; the
++  // cast is safe). We intentionally do NOT pin it to vector<64xi32> here: the
++  // op is deliberately generic (sibling vgather carries the same open shape),
++  // and the hardware-specific 64xi32 requirement stays in the ToAVEIntrin
++  // lowering, which rejects mismatches via notifyMatchFailure.
++  auto indexVecType = cast<VectorType>(getIndexVec().getType());
++
++  // When the value is a plain vector, its lane count must match the index
++  // vector: one scattered element per index lane. Skip the check for the
++  // padded-vector family (AveExtValidVector also admits AVE_PaddedVectorType),
++  // and never touch the mask, whose AveMaskType may be the custom !hivm.mask
++  // type rather than a VectorType.
++  if (auto valVecType = dyn_cast<VectorType>(getVal().getType())) {
++    if (valVecType.getNumElements() != indexVecType.getNumElements())
++      return emitOpError("requires index_vec and value to have the same "
++                         "number of lanes");
++  }
++  return success();
++}
+diff --git a/bishengir/test/Conversion/VectorToHIVMAVE/strided-transfer-write-invalid.mlir b/bishengir/test/Conversion/VectorToHIVMAVE/strided-transfer-write-invalid.mlir
+new file mode 100644
+index 000000000..4fcbede4e
+--- /dev/null
++++ b/bishengir/test/Conversion/VectorToHIVMAVE/strided-transfer-write-invalid.mlir
+@@ -0,0 +1,71 @@
++// RUN: bishengir-opt %s -split-input-file -convert-vector-to-hivmave -verify-diagnostics
++// Only a statically non-contiguous (stride > 1) UB store is intercepted. These
++// are the cases that provably cannot become a correct contiguous masked store
++// and for which scatter is not applicable; each must be diagnosed up front
++// rather than silently flattened. Dynamic strides are intentionally NOT here:
++// they fall through to the existing unaligned lowering (see the positive test).
++func.func @index_overflow(%dst: memref<64xf32, strided<[34087043], offset: ?>, #hivm.address_space<ub>>, %value: vector<64xf32>) {
++  %c0 = arith.constant 0 : index
++  // expected-error @+1 {{rank-1 strided transfer_write scatter indices exceed signed i32 range}}
++  vector.transfer_write %value, %dst[%c0] {in_bounds = [true]} : vector<64xf32>, memref<64xf32, strided<[34087043], offset: ?>, #hivm.address_space<ub>>
++  return
++}
++// -----
++func.func @out_of_bounds(%dst: memref<4xf32, strided<[8192], offset: ?>, #hivm.address_space<ub>>, %value: vector<64xf32>) {
++  %c0 = arith.constant 0 : index
++  // expected-error @+1 {{rank-1 strided transfer_write requires rank-1 identity in-bounds access}}
++  vector.transfer_write %value, %dst[%c0] : vector<64xf32>, memref<4xf32, strided<[8192], offset: ?>, #hivm.address_space<ub>>
++  return
++}
++// -----
++func.func @unsupported_type(%dst: memref<128xf16, strided<[2], offset: ?>, #hivm.address_space<ub>>, %value: vector<128xf16>) {
++  %c0 = arith.constant 0 : index
++  // expected-error @+1 {{rank-1 strided transfer_write requires UB vector<64x{f32,i32}> scatter}}
++  vector.transfer_write %value, %dst[%c0] {in_bounds = [true]} : vector<128xf16>, memref<128xf16, strided<[2], offset: ?>, #hivm.address_space<ub>>
++  return
++}
++// -----
++// A shape-one source alone does not imply that the compiler can prove VL1.
++// Callers supply a mask with no active lanes beyond lane zero.
++func.func @shape_one_not_single_lane(%dst: memref<1xf16, strided<[2], offset: ?>, #hivm.address_space<ub>>, %value: vector<128xf16>, %mask: vector<128xi1>) {
++  %c0 = arith.constant 0 : index
++  // expected-error @+1 {{rank-1 strided transfer_write requires UB vector<64x{f32,i32}> scatter}}
++  vector.transfer_write %value, %dst[%c0], %mask {in_bounds = [true]} : vector<128xf16>, memref<1xf16, strided<[2], offset: ?>, #hivm.address_space<ub>>
++  return
++}
++// -----
++func.func @wrong_space(%dst: memref<64xf32, strided<[2], offset: ?>, #hivm.address_space<gm>>, %value: vector<64xf32>) {
++  %c0 = arith.constant 0 : index
++  // expected-error @+1 {{rank-1 strided transfer_write requires UB vector<64x{f32,i32}> scatter}}
++  vector.transfer_write %value, %dst[%c0] {in_bounds = [true]} : vector<64xf32>, memref<64xf32, strided<[2], offset: ?>, #hivm.address_space<gm>>
++  return
++}
++// -----
++// Even a minimum scalable length of 64 is not the fixed hardware vector64.
++func.func @scalable_vector(%dst: memref<?xf32, strided<[2], offset: ?>, #hivm.address_space<ub>>, %value: vector<[64]xf32>) {
++  %c0 = arith.constant 0 : index
++  // expected-error @+1 {{rank-1 strided transfer_write requires UB vector<64x{f32,i32}> scatter}}
++  vector.transfer_write %value, %dst[%c0] {in_bounds = [true]} : vector<[64]xf32>, memref<?xf32, strided<[2], offset: ?>, #hivm.address_space<ub>>
++  return
++}
++// -----
++// A negative static stride is non-contiguous but cannot be expressed as an
++// in-range forward scatter, so it is rejected up front rather than silently
++// flattened into a contiguous store.
++func.func @negative_stride(%dst: memref<64xf32, strided<[-2], offset: ?>, #hivm.address_space<ub>>, %value: vector<64xf32>) {
++  %c0 = arith.constant 0 : index
++  // expected-error @+1 {{rank-1 strided transfer_write with negative stride is not supported}}
++  vector.transfer_write %value, %dst[%c0] {in_bounds = [true]} : vector<64xf32>, memref<64xf32, strided<[-2], offset: ?>, #hivm.address_space<ub>>
++  return
++}
++
++// -----
++// A single-input UCC that changes the lane count is not a shape-only cast.
++func.func @ucc_changes_lane_count(%dst: memref<128xf16, strided<[2]>, #hivm.address_space<ub>>, %value: vector<128xf16>) {
++  %c0 = arith.constant 0 : index
++  %m = vector.constant_mask [1] : vector<64xi1>
++  %u = builtin.unrealized_conversion_cast %m : vector<64xi1> to vector<128xi1>
++  // expected-error @+1 {{rank-1 strided transfer_write requires UB vector<64x{f32,i32}> scatter}}
++  vector.transfer_write %value, %dst[%c0], %u {in_bounds = [true]} : vector<128xf16>, memref<128xf16, strided<[2]>, #hivm.address_space<ub>>
++  return
++}
+diff --git a/bishengir/test/Conversion/VectorToHIVMAVE/strided-transfer-write.mlir b/bishengir/test/Conversion/VectorToHIVMAVE/strided-transfer-write.mlir
+new file mode 100644
+index 000000000..ef3e5a421
+--- /dev/null
++++ b/bishengir/test/Conversion/VectorToHIVMAVE/strided-transfer-write.mlir
+@@ -0,0 +1,154 @@
++// RUN: bishengir-opt %s -convert-vector-to-hivmave | FileCheck %s
++// RUN: bishengir-opt %s -hacc-append-device-spec=target=Ascend950PR_9579 -convert-vector-to-hivmave -convert-arith-to-hivmave -analyze-vector-layout -remove-vector-layout-attr -ave-normalize-ops -canonicalize -convert-hivmave-to-ave-intrin -canonicalize | FileCheck %s --check-prefix=INTRIN
++
++// The scatter indices are element offsets lane*stride for all 64 lanes; the
++// mask (VL4) still gates which lanes write, and the -inf data is preserved.
++// CHECK-LABEL: @column_mask4
++// CHECK-DAG: %[[DATA:.*]] = arith.constant dense<0xFF800000> : vector<64xf32>
++// CHECK-DAG: %[[MASK:.*]] = ave.hir.pge <VL4>
++// CHECK-DAG: %[[IDX:.*]] = arith.constant dense<[0, 8192, 16384, 24576,
++// CHECK-SAME: 507904, 516096]> : vector<64xi32>
++// CHECK: ave.hir.vscatter %arg0[%{{.*}}] [%[[IDX]]], %[[MASK]], %[[DATA]]
++// CHECK-NOT: ave.hir.masked_store
++// INTRIN-LABEL: @column_mask4
++// INTRIN: "hivm_regbaseintrins.intr.hivm.vscatter_v64s32_v300"
++func.func @column_mask4(%dst: memref<4xf32, strided<[8192], offset: ?>, #hivm.address_space<ub>>) {
++  %c0 = arith.constant 0 : index
++  %value = arith.constant dense<0xFF800000> : vector<64xf32>
++  %m = vector.constant_mask [4] : vector<64xi1>
++  vector.transfer_write %value, %dst[%c0], %m {in_bounds = [true]} : vector<64xf32>, memref<4xf32, strided<[8192], offset: ?>, #hivm.address_space<ub>>
++  return
++}
++
++// Dynamic/sparse/empty masks are not replaced with an unmasked write.
++// CHECK-LABEL: @arbitrary_mask
++// CHECK-SAME: %[[MASK:[a-zA-Z0-9_]+]]: vector<64xi1>
++// CHECK: ave.hir.vscatter {{.*}}, %[[MASK]],
++// CHECK-NOT: ave.hir.masked_store
++// INTRIN-LABEL: @arbitrary_mask
++// INTRIN: "hivm_regbaseintrins.intr.hivm.vscatter_v64s32_v300"
++func.func @arbitrary_mask(%dst: memref<?xf32, strided<[2], offset: 7>, #hivm.address_space<ub>>, %start: index, %value: vector<64xf32>, %mask: vector<64xi1>) {
++  vector.transfer_write %value, %dst[%start], %mask {in_bounds = [true]} : vector<64xf32>, memref<?xf32, strided<[2], offset: 7>, #hivm.address_space<ub>>
++  return
++}
++
++// A one-element shape is not a proof of a single active lane. The runtime
++// contract restricts %active to 0 or 1: inactive tail lanes are masked off, so
++// in_bounds is truthful. The compiler cannot establish VL1 from the argument.
++// CHECK-LABEL: @shape_one_runtime_mask
++// CHECK: ave.hir.vscatter
++// CHECK-NOT: ave.hir.masked_store
++// INTRIN-LABEL: @shape_one_runtime_mask
++// INTRIN: "hivm_regbaseintrins.intr.hivm.vscatter_v64s32_v300"
++func.func @shape_one_runtime_mask(%dst: memref<1xf32, strided<[2], offset: ?>, #hivm.address_space<ub>>, %value: vector<64xf32>, %active: index) {
++  %c0 = arith.constant 0 : index
++  %mask = vector.create_mask %active : vector<64xi1>
++  vector.transfer_write %value, %dst[%c0], %mask {in_bounds = [true]} : vector<64xf32>, memref<1xf32, strided<[2], offset: ?>, #hivm.address_space<ub>>
++  return
++}
++
++// A dynamic stride is left to the existing unaligned lowering: it must not be
++// intercepted as a scatter nor hard-failed. This is the shape bufferization
++// produces for small runtime-strided buffers (e.g. the i64->i32 library cast),
++// which the pipeline already lowers correctly.
++// CHECK-LABEL: @dynamic_stride
++// CHECK-NOT: ave.hir.vscatter
++// CHECK: ave.hir.masked_store
++func.func @dynamic_stride(%dst: memref<64xf32, strided<[?], offset: ?>, #hivm.address_space<ub>>, %value: vector<64xf32>) {
++  %c0 = arith.constant 0 : index
++  vector.transfer_write %value, %dst[%c0] {in_bounds = [true]} : vector<64xf32>, memref<64xf32, strided<[?], offset: ?>, #hivm.address_space<ub>>
++  return
++}
++
++// CHECK-LABEL: @unit_stride
++// CHECK: ave.hir.masked_store <NORM_B32>
++// CHECK-NOT: ave.hir.vscatter
++func.func @unit_stride(%dst: memref<64xf32, strided<[1], offset: ?>, #hivm.address_space<ub>>, %value: vector<64xf32>) {
++  %c0 = arith.constant 0 : index
++  vector.transfer_write %value, %dst[%c0] {in_bounds = [true]} : vector<64xf32>, memref<64xf32, strided<[1], offset: ?>, #hivm.address_space<ub>>
++  return
++}
++
++// A lane-zero-only write is independent of the spacing between other lanes.
++// CHECK-LABEL: @one_lane
++// CHECK: ave.hir.masked_store <ONEPT_B32>
++// CHECK-NOT: ave.hir.vscatter
++func.func @one_lane(%dst: memref<1xf32, strided<[?], offset: ?>, #hivm.address_space<ub>>, %value: vector<64xf32>) {
++  %c0 = arith.constant 0 : index
++  %m = vector.constant_mask [1] : vector<64xi1>
++  vector.transfer_write %value, %dst[%c0], %m {in_bounds = [true]} : vector<64xf32>, memref<1xf32, strided<[?], offset: ?>, #hivm.address_space<ub>>
++  return
++}
++
++// A static non-unit stride with a create_mask of constant length 1 writes only
++// lane zero, so it stays a masked contiguous store instead of being promoted
++// to a scatter (the create_mask length-1 is recognized by writesOnlyFirstLane).
++// CHECK-LABEL: @static_stride_one_lane_create_mask
++// CHECK: ave.hir.masked_store <NORM_B32>
++// CHECK-NOT: ave.hir.vscatter
++func.func @static_stride_one_lane_create_mask(%dst: memref<4xf32, strided<[8192], offset: ?>, #hivm.address_space<ub>>, %value: vector<64xf32>) {
++  %c0 = arith.constant 0 : index
++  %c1 = arith.constant 1 : index
++  %m = vector.create_mask %c1 : vector<64xi1>
++  vector.transfer_write %value, %dst[%c0], %m {in_bounds = [true]} : vector<64xf32>, memref<4xf32, strided<[8192], offset: ?>, #hivm.address_space<ub>>
++  return
++}
++
++// A static strided store with no mask lowers to a scatter across all 64 lanes,
++// with an all-ones predicate supplied for the absent mask.
++// CHECK-LABEL: @no_mask_scatter
++// CHECK: %[[MASK:.*]] = ave.hir.pge <ALL>
++// CHECK: %[[IDX:.*]] = arith.constant dense<[0, 8192, 16384, 24576,
++// CHECK-SAME: 507904, 516096]> : vector<64xi32>
++// CHECK: ave.hir.vscatter %arg0[%{{.*}}] [%[[IDX]]], %[[MASK]], %arg1
++// CHECK-NOT: ave.hir.masked_store
++func.func @no_mask_scatter(%dst: memref<4xf32, strided<[8192], offset: ?>, #hivm.address_space<ub>>, %value: vector<64xf32>) {
++  %c0 = arith.constant 0 : index
++  vector.transfer_write %value, %dst[%c0] {in_bounds = [true]} : vector<64xf32>, memref<4xf32, strided<[8192], offset: ?>, #hivm.address_space<ub>>
++  return
++}
++
++// An i32 column store (same shape as the f32 case) also lowers to a scatter:
++// the data register is already i32, so the intrinsic needs no bitcast on the
++// value operand. This exercises the i32 widening of the dtype gate.
++// CHECK-LABEL: @i32_column_scatter
++// CHECK: %[[MASK:.*]] = ave.hir.pge <VL4>
++// CHECK: %[[IDX:.*]] = arith.constant dense<[0, 8192, 16384, 24576,
++// CHECK-SAME: 507904, 516096]> : vector<64xi32>
++// CHECK: ave.hir.vscatter %arg0[%{{.*}}] [%[[IDX]]], %[[MASK]], %arg1
++// CHECK-NOT: ave.hir.masked_store
++// INTRIN-LABEL: @i32_column_scatter
++// INTRIN: "hivm_regbaseintrins.intr.hivm.vscatter_v64s32_v300"
++func.func @i32_column_scatter(%dst: memref<4xi32, strided<[8192], offset: ?>, #hivm.address_space<ub>>, %value: vector<64xi32>) {
++  %c0 = arith.constant 0 : index
++  %m = vector.constant_mask [4] : vector<64xi1>
++  vector.transfer_write %value, %dst[%c0], %m {in_bounds = [true]} : vector<64xi32>, memref<4xi32, strided<[8192], offset: ?>, #hivm.address_space<ub>>
++  return
++}
++
++// A shape-only UCC chain must preserve the lane-zero proof. In particular,
++// f16 cannot use the scatter fallback, so losing the proof rejects this store.
++// CHECK-LABEL: @ucc_lane_zero
++// CHECK: ave.hir.masked_store <ONEPT_B16>
++// CHECK-NOT: ave.hir.vscatter
++func.func @ucc_lane_zero(%dst: memref<128xf16, strided<[2]>, #hivm.address_space<ub>>, %value: vector<128xf16>) {
++  %c0 = arith.constant 0 : index
++  %m = vector.constant_mask [1] : vector<128xi1>
++  %u = builtin.unrealized_conversion_cast %m : vector<128xi1> to vector<1x128xi1>
++  %v = builtin.unrealized_conversion_cast %u : vector<1x128xi1> to vector<128xi1>
++  vector.transfer_write %value, %dst[%c0], %v {in_bounds = [true]} : vector<128xf16>, memref<128xf16, strided<[2]>, #hivm.address_space<ub>>
++  return
++}
++
++// Rank one is not a lane-zero proof: all four active lanes still scatter.
++// CHECK-LABEL: @ucc_multiple_lanes
++// CHECK: ave.hir.vscatter
++// CHECK-NOT: ave.hir.masked_store
++func.func @ucc_multiple_lanes(%dst: memref<64xf32, strided<[2]>, #hivm.address_space<ub>>, %value: vector<64xf32>) {
++  %c0 = arith.constant 0 : index
++  %m = vector.constant_mask [4] : vector<64xi1>
++  %u = builtin.unrealized_conversion_cast %m : vector<64xi1> to vector<1x64xi1>
++  %v = builtin.unrealized_conversion_cast %u : vector<1x64xi1> to vector<64xi1>
++  vector.transfer_write %value, %dst[%c0], %v {in_bounds = [true]} : vector<64xf32>, memref<64xf32, strided<[2]>, #hivm.address_space<ub>>
++  return
++}
+diff --git a/bishengir/test/Dialect/HIVMAVE/scatter-layout.mlir b/bishengir/test/Dialect/HIVMAVE/scatter-layout.mlir
+new file mode 100644
+index 000000000..c1ed723b4
+--- /dev/null
++++ b/bishengir/test/Dialect/HIVMAVE/scatter-layout.mlir
+@@ -0,0 +1,28 @@
++// RUN: bishengir-opt %s -hacc-append-device-spec=target=Ascend950PR_9579 -analyze-vector-layout -remove-vector-layout-attr -ave-normalize-ops -canonicalize -convert-hivmave-to-ave-intrin -canonicalize | FileCheck %s
++
++// A scatter is a result-less vector sink. It must constrain the data,
++// element-index vector and predicate to B32 instead of falling through the
++// generic result-based solver. Keep this test in the layout pipeline rather
++// than testing only the final scatter-to-intrinsic conversion.
++// CHECK-LABEL: func.func @scatter_layout_i32
++// CHECK: "hivm_regbaseintrins.intr.hivm.pge.b32"
++// CHECK: "hivm_regbaseintrins.intr.hivm.vscatter_v64s32_v300"
++// CHECK-NOT: ave.hir.vscatter
++func.func @scatter_layout_i32(%base: memref<128xi32, #hivm.address_space<ub>>, %index: vector<64xi32>, %val: vector<64xi32>) {
++  %c0 = arith.constant 0 : index
++  %mask = ave.hir.pge <ALL> : vector<64xi1>
++  ave.hir.vscatter %base[%c0][%index], %mask, %val : memref<128xi32, #hivm.address_space<ub>>, vector<64xi32>, vector<64xi1>, vector<64xi32>
++  return
++}
++
++// CHECK-LABEL: func.func @scatter_layout_f32
++// CHECK: "hivm_regbaseintrins.intr.hivm.pge.b32"
++// CHECK: llvm.bitcast
++// CHECK: "hivm_regbaseintrins.intr.hivm.vscatter_v64s32_v300"
++// CHECK-NOT: ave.hir.vscatter
++func.func @scatter_layout_f32(%base: memref<4xf32, strided<[8192], offset: ?>, #hivm.address_space<ub>>, %index: vector<64xi32>, %val: vector<64xf32>) {
++  %c0 = arith.constant 0 : index
++  %mask = ave.hir.pge <VL4> : vector<64xi1>
++  ave.hir.vscatter %base[%c0][%index], %mask, %val : memref<4xf32, strided<[8192], offset: ?>, #hivm.address_space<ub>>, vector<64xi32>, vector<64xi1>, vector<64xf32>
++  return
++}
+diff --git a/bishengir/test/Dialect/HIVMAVE/scatter-op-invalid.mlir b/bishengir/test/Dialect/HIVMAVE/scatter-op-invalid.mlir
+new file mode 100644
+index 000000000..2f7d5381f
+--- /dev/null
++++ b/bishengir/test/Dialect/HIVMAVE/scatter-op-invalid.mlir
+@@ -0,0 +1,32 @@
++// RUN: bishengir-opt %s -split-input-file -verify-diagnostics
++
++// A scatter must carry one scalar base index per buffer dimension. The
++// lowering re-checks this, but the verifier makes it an IR-level invariant so
++// a future pattern cannot build a malformed scatter and have it survive until
++// conversion.
++func.func @scatter_missing_base_index(%base: memref<128xi32, #hivm.address_space<ub>>, %index: vector<64xi32>, %mask: vector<64xi1>, %val: vector<64xi32>) {
++  // expected-error @+1 {{requires one scalar index per buffer dimension}}
++  ave.hir.vscatter %base[][%index], %mask, %val : memref<128xi32, #hivm.address_space<ub>>, vector<64xi32>, vector<64xi1>, vector<64xi32>
++  return
++}
++
++// -----
++
++// index_vec and the scattered value must agree in lane count: one element is
++// scattered per index lane. A 32-lane value against 64 index lanes is
++// malformed regardless of element width, and the verifier rejects it without
++// pinning the op to a hardware-specific 64xi32 shape.
++func.func @scatter_lane_count_mismatch(%base: memref<128xi32, #hivm.address_space<ub>>, %c0: index, %index: vector<64xi32>, %mask: vector<64xi1>, %val: vector<32xi32>) {
++  // expected-error @+1 {{requires index_vec and value to have the same number of lanes}}
++  ave.hir.vscatter %base[%c0][%index], %mask, %val : memref<128xi32, #hivm.address_space<ub>>, vector<64xi32>, vector<64xi1>, vector<32xi32>
++  return
++}
++
++// -----
++
++// A well-formed scatter parses and verifies: rank-1 base with one scalar
++// index, matching index_vec and value lane counts.
++func.func @scatter_valid(%base: memref<128xi32, #hivm.address_space<ub>>, %c0: index, %index: vector<64xi32>, %mask: vector<64xi1>, %val: vector<64xi32>) {
++  ave.hir.vscatter %base[%c0][%index], %mask, %val : memref<128xi32, #hivm.address_space<ub>>, vector<64xi32>, vector<64xi1>, vector<64xi32>
++  return
++}

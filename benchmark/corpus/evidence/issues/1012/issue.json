@@ -1,0 +1,10 @@
+{
+  "title": "[Bug] HIVM v2 pipeline ignores compiler auto-sync options",
+  "iid": 1012,
+  "updated_at": "2026-11-20T10:15:27.728+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1012",
+  "linked_mrs": [
+    "5074"
+  ]
+}

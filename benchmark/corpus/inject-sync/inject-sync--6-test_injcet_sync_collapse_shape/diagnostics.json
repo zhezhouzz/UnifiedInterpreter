@@ -1,0 +1,10 @@
+{
+  "whole": [
+    {
+      "op": "memref.collapse_shape",
+      "location": "loc(\"<stdin>\":14:23)",
+      "reason": "No core elaboration rule for this operation."
+    }
+  ],
+  "slice": []
+}

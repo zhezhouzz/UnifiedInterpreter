@@ -1,0 +1,117 @@
+{
+  "group": "regbase-memory",
+  "id": "plan-memory--0-mb_other_rollback_vf0",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "projection": [
+    {
+      "line": 40,
+      "operation": "hivm.hir.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]"
+    },
+    {
+      "line": 41,
+      "operation": "hivm.hir.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]"
+    },
+    {
+      "line": 42,
+      "operation": "hivm.hir.store ins(%subview_3 : memref<6500xi64, strided<[1]>, #hivm.address_space<ub>>) outs(%arg1 : memref<6500xi64, #hivm.address_space<gm>>)"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_MTE3",
+      "PIPE_V"
+    ],
+    "events": [
+      "EVENT_ID0"
+    ],
+    "units": [
+      "unit_store"
+    ]
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/RegBase/plan-memory.mlir",
+  "upstream_path": "bishengir/test/Dialect/HIVM/RegBase/plan-memory.mlir",
+  "split_index": 0,
+  "stage": "intra-core sync pass",
+  "function": "mb_other_rollback_vf0",
+  "translation": {
+    "status": "unsupported",
+    "function": "mb_other_rollback_level0_retry",
+    "diagnostics": [
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":26:14)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "annotation.mark",
+        "location": "loc(\"<stdin>\":27:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.subview",
+        "location": "loc(\"<stdin>\":28:16)",
+        "reason": "A subview needs alias and offset resolution."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":31:16)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "func.call",
+        "location": "loc(\"<stdin>\":33:5)",
+        "reason": "The call needs a callee effect summary or inlining."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":34:16)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "func.call",
+        "location": "loc(\"<stdin>\":35:5)",
+        "reason": "The call needs a callee effect summary or inlining."
+      },
+      {
+        "op": "memref.alloc",
+        "location": "loc(\"<stdin>\":36:16)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "annotation.mark",
+        "location": "loc(\"<stdin>\":37:5)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "memref.subview",
+        "location": "loc(\"<stdin>\":38:18)",
+        "reason": "A subview needs alias and offset resolution."
+      },
+      {
+        "op": "func.call",
+        "location": "loc(\"<stdin>\":39:5)",
+        "reason": "The call needs a callee effect summary or inlining."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      40,
+      42
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "mb_other_rollback_level0_retry"
+}

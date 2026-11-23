@@ -1,0 +1,92 @@
+{
+  "group": "issue-input",
+  "id": "1034",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "argv": [
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2"
+  ],
+  "projection": [
+    {
+      "line": 8,
+      "operation": "hivm.hir.set_flag[<PIPE_FIX>, <PIPE_MTE1>, <EVENT_ID0>]"
+    },
+    {
+      "line": 9,
+      "operation": "hivm.hir.wait_flag[<PIPE_FIX>, <PIPE_MTE1>, <EVENT_ID0>]"
+    },
+    {
+      "line": 10,
+      "operation": "hivm.hir.set_flag[<PIPE_M>, <PIPE_MTE1>, <EVENT_ID0>]"
+    },
+    {
+      "line": 11,
+      "operation": "hivm.hir.set_flag[<PIPE_M>, <PIPE_MTE1>, <EVENT_ID1>]"
+    }
+  ],
+  "profile": {
+    "pipes": [
+      "PIPE_FIX",
+      "PIPE_M",
+      "PIPE_MTE1"
+    ],
+    "events": [
+      "EVENT_ID0",
+      "EVENT_ID1"
+    ],
+    "units": []
+  },
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/blob/cc7eb3c361c739d8973fbc143f97cf153a7aac03/bishengir/test/Dialect/HIVM/propagate-convert-layout-shared-if-yield.mlir",
+  "issue": 1034,
+  "source_kind": "linked MR regression input",
+  "upstream_file": "evidence/repairs/issue-1034-mr-5289/tests/bishengir/test/Dialect/HIVM/propagate-convert-layout-shared-if-yield.mlir",
+  "split_index": 0,
+  "stage": "-hivm-graph-sync-solver=solver-version=v2",
+  "relation": "Supplemental local compile on pinned toolchain; original regression pass and target are recorded with upstream test.",
+  "translation": {
+    "status": "unsupported",
+    "function": "shared_accumulator",
+    "diagnostics": [
+      {
+        "op": "hivm.hir.convert_layout",
+        "location": "loc(\"<stdin>\":5:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "tensor.empty",
+        "location": "loc(\"<stdin>\":6:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "hivm.hir.fixpipe",
+        "location": "loc(\"<stdin>\":7:10)",
+        "reason": "No core elaboration rule for this operation."
+      },
+      {
+        "op": "scf.if",
+        "location": "loc(\"<stdin>\":12:10)",
+        "reason": "Branch guards, yields and SSA joins need a conditional translation."
+      },
+      {
+        "op": "hivm.hir.fixpipe",
+        "location": "loc(\"<stdin>\":21:5)",
+        "reason": "No core elaboration rule for this operation."
+      }
+    ]
+  },
+  "expectation": {
+    "scope": "one straight-line timing slice",
+    "method": "LLM-designed source-line projection, materialized by rule; conditional on reaching this slice",
+    "matches_full_output": false
+  },
+  "slice_translation": {
+    "lines": [
+      8,
+      11
+    ],
+    "status": "translated",
+    "diagnostics": [],
+    "matches_expected": true
+  },
+  "entry_for_projection": "shared_accumulator"
+}

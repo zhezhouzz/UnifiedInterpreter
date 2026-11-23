@@ -1,0 +1,12 @@
+{
+  "issue": null,
+  "mr": "3168",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/3168",
+  "commit": "77a30b899397ccd16feae730f7fc748f33fab4b8",
+  "parent": "ed6479aa2ddb9904274ae1368c175364883b1da6",
+  "title": "[HIVM] fix: guard fixpipe loop hoist on yield type",
+  "tests": [
+    "bishengir/test/Dialect/HIVM/Regbase/inline-fixpipe.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

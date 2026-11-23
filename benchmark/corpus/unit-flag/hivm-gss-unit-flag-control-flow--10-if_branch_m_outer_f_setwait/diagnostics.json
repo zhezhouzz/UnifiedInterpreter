@@ -1,0 +1,25 @@
+{
+  "whole": [
+    {
+      "op": "hivm.hir.nd2nz",
+      "location": "loc(\"<stdin>\":10:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "hivm.hir.nd2nz",
+      "location": "loc(\"<stdin>\":12:5)",
+      "reason": "No core elaboration rule for this operation."
+    },
+    {
+      "op": "scf.if",
+      "location": "loc(\"<stdin>\":18:5)",
+      "reason": "Branch guards, yields and SSA joins need a conditional translation."
+    },
+    {
+      "op": "hivm.hir.fixpipe",
+      "location": "loc(\"<stdin>\":25:5)",
+      "reason": "No core elaboration rule for this operation."
+    }
+  ],
+  "slice": []
+}
