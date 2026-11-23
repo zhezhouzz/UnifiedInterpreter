@@ -1,0 +1,6 @@
+bishengir-opt 1.2.0 (https://gitcode.com/Ascend/AscendNPU-IR.git fbdf863a8c8c 2026-11-12) 
+MIX: DCCGSS v1=v2; cross-core + local snapshot matched
+#920: pass exit 0; two expected negative checks failed on this build
+910B1-on driver exit 1 GSS True set/wait/barrier 4 4 1
+910B1-off driver exit 1 GSS False set/wait/barrier 0 0 0
+950-on driver exit 1 GSS True set/wait/barrier 4 4 1

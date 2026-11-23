@@ -1,0 +1,7 @@
+bishengir-opt 1.2.0 (https://gitcode.com/Ascend/AscendNPU-IR.git fbdf863a8c8c 2026-11-12) 
+llvm 19.1.7 85d266da62fa
+Release build
+
+61c68426da9e387ba037225c017ba4adf9acf853ead6fbd928ffbd781d7f25fe  bishengir-opt
+b18a60659176887d7bbd0346d337a014f209a1bf8d6424f087257f36d4845497  bishengir-compile
+18ab83ef5537b08a404989fd6297de7a2d63388651b742ca934c5c40fddbf264  FileCheck
