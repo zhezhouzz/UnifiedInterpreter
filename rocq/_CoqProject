@@ -52,4 +52,10 @@ CoreLanguage/Properties.v
 CoreLanguage/OrderedLocks.v
 CoreLanguage/Examples.v
 CoreLanguage/MemoryExamples.v
+CoreLanguage/Axiomatic/Syntax.v
+CoreLanguage/Axiomatic/Events.v
+CoreLanguage/Axiomatic/TraceSemantics.v
+CoreLanguage/Axiomatic/ResourceExamples.v
+CoreLanguage/Axiomatic/Issue316.v
+CoreLanguage/Axiomatic/Issue316Safety.v
 Extraction/Extract.v
