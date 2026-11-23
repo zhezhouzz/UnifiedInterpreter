@@ -1,0 +1,3 @@
+# Preserve the original bytes in the pinned upstream patches and regression tests.
+evidence/repairs/** -text
+evidence/issues/*/reported-fix/** -text
