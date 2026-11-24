@@ -1,198 +1,128 @@
-From Stdlib Require Import List ZArith Sorting.Permutation.
-From UnifiedInterpreter.CoreLanguage.Axiomatic Require Import TraceSemantics.
+From Stdlib Require Import List ZArith Bool Lia.
+From UnifiedInterpreter.CoreLanguage.Axiomatic Require Import SerializedTrace Issue316.
 Import ListNotations.
+Set Implicit Arguments.
 
-Module SharedResource.
-(* 两个分支只使用同一个资源。目标没有声明任何 pipeline。 *)
-Definition cfg : @configuration Empty_set unit :=
-  {| declared_pipeline := fun _ => False; declared_resource := fun _ => True;
-     can_read := fun _ _ => False;
-     can_write := fun _ _ => False |}.
-Local Notation Cmd := (@command unit nat Empty_set unit unit).
-Local Notation Model := (@computation_model unit nat Empty_set unit).
-Local Notation Event := (@event_record unit nat Empty_set unit).
-Definition branch : Cmd := CCompute tt 0 (Dispatch tt None) [] (Return tt []).
-Definition example := annotate_program [branch; branch].
-Definition start (j : positive) : Event :=
-  EventRecord (j, 1%positive) (LComputeStart (Dispatch tt None) []).
-Definition finish (j : positive) v : Event :=
-  EventRecord (j, 1%positive) (LComputeEnd v).
-Definition meaning (e : nat) := start (if Nat.eqb e 0 then 1%positive else 2%positive).
-
-Lemma both_prefixes (model : Model) (layout : allocation_layout) (t : list nat)
-    (order : t = [0;1] \/ t = [1;0]) :
-  program_semantics layout cfg model example t meaning.
+Module PipeExamples.
+Local Notation D := (kernel_domains unit).
+Definition hw := @kernel_hw unit (fun x => x) (fun x => x).
+Definition alloc := @kernel_alloc unit (fun x => x).
+Definition env : nat -> environment D := fun _ _ => None.
+Definition no_memory : memory D := fun _ => None.
+Definition signal_program k : program D :=
+  [(0, waitf MTE2 Vector (ev k) (setf MTE2 Vector (ev 0) (Return [])))].
+Definition wait k : item D := WaitItem false MTE2 k.
+Definition set0 : item D := SetItem false (Data Vector) 0.
+Definition sent k : list (event D) :=
+  [Issued 0 (Submit Vector (wait k)); Issued 0 (Submit MTE2 set0); Done 0 MTE2 0 set0 []].
+Definition run := sent 0 ++ [Done 0 Vector 0 (wait 0) []].
+Example wait_before_set :
+  trace_semantics hw alloc (signal_program 0) env no_memory run /\
+  terminated hw alloc (signal_program 0) env no_memory run.
 Proof.
   split.
-  - exists [branch; branch]. split; [ | reflexivity]. cbn. split; [discriminate |].
-    repeat apply Forall_cons; try apply Forall_nil.
-    all: split; [repeat constructor; simpl; tauto |].
-    all: split; [cbn; repeat constructor | split; [exact I | exists (fun _ => TFloat); cbn; auto]].
   - split.
-    + split.
-      * cbn. repeat constructor; cbn; intuition discriminate.
-      * intros [|[|j]] c eq; try (destruct j; discriminate);
-          inversion eq; subst; cbn; intros o [<-|[<-|[]]]; reflexivity.
-    + split.
-      * exists []. split.
-        -- destruct (comp_total model tt []) as [v computes].
-           exists [start 1; finish 1 v; start 2; finish 2 v].
-           exists (map meaning t ++ [finish 1 v; finish 2 v]).
-           split.
-           ++ apply ProgramCons with (events := [start 1; finish 1 v])
-                (remaining := [start 2; finish 2 v]) (uses := []) (rest := []).
-              2: apply ProgramCons with (events := [start 2; finish 2 v])
-                   (remaining := []) (uses := []) (rest := []); [ | apply ProgramNil].
-              all: apply EventsCompute with (uses := []) (rest := []);
-                [apply DirectValues, ValuesNil | exact computes | apply EventsStop; exact I].
-           ++ split; [repeat constructor; cbn; intuition discriminate |].
-              split; [ | eexists; reflexivity].
-              destruct order as [->| ->]; cbn.
-              ** apply perm_skip, perm_swap.
-              ** eapply Permutation_trans; [apply perm_skip, perm_swap | apply perm_swap].
-        -- split.
-           2: { split; [intros u e d v H; inversion H |].
-                destruct order as [->| ->]; repeat split. }
-           unfold A_sync. split.
-           ++ intros o h member phases e (_ & _ & h' & member' & k).
-              cbn in member'. destruct member' as [eq|[eq|[eq|[eq|[]]]]];
-                inversion eq; subst; destruct e; discriminate k.
-           ++ split.
-              ** intros o u edge. cbn in edge.
-                 destruct edge as [eq|[eq|[]]]; inversion eq; subst;
-                   split; intros e (_ & owner_eq & _); destruct e; discriminate.
-              ** split; [intros f o p; destruct p |].
-                 split; [intros p; destruct p |].
-                 intros w u p; destruct p.
-      * destruct order as [->| ->]; repeat constructor.
+    + split; repeat constructor; try (exists []; reflexivity); simpl; auto.
+    + apply checked_laws. vm_compute. repeat split; constructor; auto.
+  - split; [repeat constructor|]. intros [|s] [|[|p]]; reflexivity.
 Qed.
-End SharedResource.
 
-Module LocalAllocation.
-Local Notation Cmd := (@command unit nat bool unit unit).
-Local Notation Model := (@computation_model unit nat bool unit).
-
-(* 同一条申请命令在循环中执行两次。地址取自展开后的动态操作位置。 *)
-Example two_iterations (model : Model) :
-  let body : Cmd := For 0 0 2 (Alloc tt 1 LoopEnd) (Return tt []) in
-  let pos := pair 1%positive in
-  exists a b, a <> b /\
-    command_events odd_allocation_layout model empty_environment
-      (label_paths pos 1%positive (expand_loops body LoopEnd))
-      [EventRecord (pos 2%positive) (LAlloc a); EventRecord (pos 8%positive) (LAlloc b);
-       EventRecord (pos 16%positive) (LReturn [])] [].
+Lemma only_wait_left s p : pending (history hw [0] (initial no_memory) (sent 1)) s p =
+  if (s =? 0) && (p =? Vector) then [wait 1] else [].
+Proof. destruct s as [|s], p as [|[|p]]; reflexivity. Qed.
+Example wrong_event_stuck : deadlocked hw (signal_program 1) env no_memory (sent 1).
 Proof.
-  cbn. eexists (address_at odd_allocation_layout (InBranch (1,2)%positive)).
-  eexists (address_at odd_allocation_layout (InBranch (1,8)%positive)). split.
-  - apply distinct_allocations; discriminate.
-  - repeat first [eapply EventsAlias; [reflexivity |] | apply EventsAlloc
-                 | apply EventsReturn | apply ValuesNil].
+  assert (T : trace_semantics hw alloc (signal_program 1) env no_memory (sent 1)).
+  { split.
+    - split; repeat constructor; try (exists []; reflexivity); simpl; auto.
+    - apply checked_laws. vm_compute. repeat split; constructor; auto. }
+  split; [eauto|]. split.
+  - intros [a [_ [_ Q]]]. specialize (Q 0 Vector). discriminate.
+  - intros e a [[P Owners] [[Q F] M]].
+    apply Forall_app in Owners. destruct Owners as [_ O]. inversion O as [|? ? E]; subst.
+    change (In (owner e) [0]) in E. destruct E as [E|[]].
+    destruct e as [s act|s p j it delta]; cbn [owner] in E; subst s.
+    + inversion P as [|? ? K]; subst. destruct K as [rest B].
+      apply (f_equal (@length _)) in B. simpl in B. discriminate.
+    + specialize (Q (sent 1) (Done 0 p j it delta) [] eq_refl).
+      specialize (F (sent 1) (Done 0 p j it delta) [] eq_refl).
+      change (queue_law (history hw [0] (initial no_memory) (sent 1)) (Done 0 p j it delta)) in Q.
+      destruct Q as [L _]. rewrite only_wait_left in L.
+      destruct p as [|[|p]]; destruct j as [|j]; simpl in L; try discriminate;
+        try (destruct j; discriminate). inversion L; subst. discriminate.
 Qed.
 
-Example invalid_scalar_inputs :
-  @eval_atomic unit nat bool IntMod [VInt 3; VInt 0] = None /\
-  @eval_atomic unit nat bool BoolAnd [VBool true; VInt 0] = None /\
-  @eval_atomic unit nat bool (MemoryAt [0%nat]) [VInt (-1)] = None.
-Proof. repeat split. Qed.
-
-Example bool_compute (model : Model) (o doneId : op_id) :
-  command_events odd_allocation_layout model empty_environment
-    (LetAtomic o 0 BoolNot [Literal (VBool false)] (Return doneId [OVar 0]))
-    [EventRecord o (LAtomic BoolNot [VBool false] (VBool true));
-     EventRecord doneId (LReturn [VBool true])] [].
+Definition copy_item a b : item D := Operation load_op [@VView D a;@VView D b] [a] [b].
+Definition copy_command a b := @Issue D MTE2 load_op [Literal (@VView D a);Literal (@VView D b)].
+Definition copies : program D := [(0,copy_command 0 1 (copy_command 1 2 (Return [])))].
+Definition word n : cell D := Stored (VInt n).
+Definition mem : memory D := fun a => Some (word (Z.of_nat a)).
+Definition copies_issued := [Issued 0 (Submit MTE2 (copy_item 0 1));Issued 0 (Submit MTE2 (copy_item 1 2))].
+Definition first_then_second := copies_issued ++
+  [Done 0 MTE2 0 (copy_item 0 1) [(1,word 0)];Done 0 MTE2 0 (copy_item 1 2) [(2,word 0)]].
+Definition second_then_first := copies_issued ++
+  [Done 0 MTE2 1 (copy_item 1 2) [(2,word 1)];Done 0 MTE2 0 (copy_item 0 1) [(1,word 0)]].
+Example open_copies_race : race (history hw [0] (initial mem) copies_issued).
 Proof.
-  eapply EventsAtomic with (uses := []) (rest := []); [ | reflexivity | apply EventsReturn];
-    eapply ValuesCons with (uses := []) (rest := []); [apply UseKnown; reflexivity | apply ValuesNil |
-    apply UseKnown; reflexivity | apply ValuesNil].
+  exists 0,MTE2,0,0,MTE2,1,[0],[1],[1],[2],1.
+  split; [discriminate|]. split; [unfold opened_access; do 2 eexists; split; reflexivity|].
+  split; [unfold opened_access; do 2 eexists; split; reflexivity|]. simpl; tauto.
 Qed.
-End LocalAllocation.
-
-Module MemoryValues.
-Local Notation Event := (@event_record unit nat bool unit).
-Local Notation Value := (@value unit nat bool).
-
-Definition buffer := address_at odd_allocation_layout (BeforeRun 0).
-Definition other_buffer := address_at odd_allocation_layout (BeforeRun 1).
-Definition direct : execution unit bool := Dispatch tt None.
-Definition queued : execution unit bool := Dispatch tt (Some true).
-Definition observes (events : list Event) : Prop :=
-  memory_values (seq 0 (length events))
-    (fun e => nth e events (EventRecord (1, 1)%positive (LReturn []))).
-
-(* 读发起后、读完成前，向同一个地址完成的写入决定读取结果。 *)
-Definition reads_after_overwrite (result : Value) : list Event :=
-  [ EventRecord (1, 1)%positive (LWriteStart queued buffer (VInt 10));
-    EventRecord (1, 1)%positive LWriteEnd;
-    EventRecord (2, 1)%positive (LReadStart direct buffer);
-    EventRecord (1, 2)%positive (LWriteStart queued buffer (VInt 20));
-    EventRecord (1, 2)%positive LWriteEnd;
-    EventRecord (1, 3)%positive (LWriteStart queued other_buffer (VInt 30));
-    EventRecord (1, 3)%positive LWriteEnd;
-    EventRecord (1, 4)%positive (LWriteStart queued buffer (VInt 40));
-    EventRecord (2, 1)%positive (LReadEnd result) ].
-
-Example read_latest_completed_write : observes (reads_after_overwrite (VInt 20)).
-Proof. cbv; repeat split. Qed.
-
-Example reject_stale_or_pending_write :
-  ~ observes (reads_after_overwrite (VInt 10)) /\
-  ~ observes (reads_after_overwrite (VInt 40)).
-Proof. cbv; intuition discriminate. Qed.
-
-Example allocation_cannot_overwrite_existing_contents :
-  ~ observes [EventRecord (1, 1)%positive (LWriteStart queued buffer (VInt 10));
-              EventRecord (1, 1)%positive LWriteEnd;
-              EventRecord (2, 1)%positive (LAlloc buffer)].
-Proof. cbv; intuition discriminate. Qed.
-End MemoryValues.
-
-Module ReadWithoutPriorWrite.
-Local Notation Model := (@computation_model unit nat Empty_set unit).
-Local Notation Event := (@event_record unit nat Empty_set unit).
-Local Notation Cmd := (@command unit nat Empty_set unit op_id).
-
-Definition read_op : op_id := (1, 1)%positive.
-Definition return_op : op_id := (1, 2)%positive.
-Definition read_program address : list Cmd :=
-  [Read read_op 0 (Dispatch tt None) (Literal (VMemory address)) (Return return_op [])].
-
-Definition read_events address result (e : nat) : Event :=
-  match e with
-  | 0%nat => EventRecord read_op (LReadStart (Dispatch tt None) address)
-  | _ => EventRecord read_op (LReadEnd result)
-  end.
-
-Example read_can_complete_with_any_value (model : Model) address result :
-  trace_semantics odd_allocation_layout model (read_program address)
-    [0; 1] (read_events address result).
+Example copy_completion_order :
+  trace_semantics hw alloc copies env mem first_then_second /\
+  trace_semantics hw alloc copies env mem second_then_first /\
+  contents (history hw [0] (initial mem) first_then_second) 2 = Some (word 0) /\
+  contents (history hw [0] (initial mem) second_then_first) 2 = Some (word 1).
 Proof.
-  exists []. refine (conj _ (conj _ (conj _ _))).
-  - exists [read_events address result 0; read_events address result 1],
-      [read_events address result 0; read_events address result 1].
-    split.
-    + apply ProgramCons with (events := [read_events address result 0; read_events address result 1])
-        (remaining := []) (uses := []) (rest := []); [ | apply ProgramNil].
-      apply EventsRead with (uses := []) (rest := []).
-      * apply DirectValues. eapply ValuesCons with (uses := []) (rest := []);
-          [apply UseKnown; reflexivity | apply ValuesNil].
-      * apply EventsStop. exact I.
-    + split; [repeat constructor; simpl; intuition discriminate |].
-      split; [reflexivity | exists []; reflexivity].
-  - refine (conj _ (conj _ (conj _ (conj _ _)))).
-    + intros o h member different e (in_trace & _ & head & head_member & phase).
-      cbn in member, head_member. destruct member as [member|[member|[]]];
-        destruct head_member as [head_member|[head_member|[]]];
-        inversion member; inversion head_member; subst; try contradiction; try discriminate.
-      destruct e as [|e]; [discriminate phase |].
-      exists 0%nat. split.
-      * repeat split; try (cbn; auto). exists HRead. cbn; auto.
-      * exists 0%nat, 1%nat. destruct e; [repeat split; constructor | cbn in in_trace; intuition discriminate].
-    + intros o u edge. cbn in edge. destruct edge as [edge|[]]; inversion edge; subst.
-      split; intros e (_ & owner_eq & _); destruct e; discriminate owner_eq.
-    + intros f o p; destruct p.
-    + intros p; destruct p.
-    + intros w u p; destruct p.
-  - intros use e d value member; inversion member.
-  - repeat split.
+  split; [|split; [|split; reflexivity]]; split.
+  1,3: split; repeat constructor; try (exists []; reflexivity); simpl; auto.
+  all: apply checked_laws; vm_compute; repeat first [split | constructor | solve [intuition congruence] | eexists | reflexivity].
 Qed.
-End ReadWithoutPriorWrite.
+Example barrier_blocks_later_copy :
+  let prefix := [Issued 0 (Submit MTE2 (copy_item 0 1));Issued 0 (Fence (Pipe MTE2));
+    Issued 0 (Submit MTE2 (copy_item 1 2))] in
+  ~ queue_law (history hw [0] (initial mem) prefix)
+      (Done 0 MTE2 2 (copy_item 1 2) [(2,word 1)]).
+Proof. intros prefix [_ H]. discriminate. Qed.
+Example descending_loop : iterations 5 (-2) (-2) = [5;3;1;-1]%Z.
+Proof. reflexivity. Qed.
+Example return_from_loop : control_plan hw alloc 0
+  (For 0 (lit 5) (lit (-2)) (lit (-2)) (Return [Var 0]) (Barrier All End)) (env 0) =
+  ([Control],true).
+Proof. reflexivity. Qed.
+Example zero_stride : control_plan hw alloc 0
+  (For 0 (lit 0) (lit 2) (lit 0) End (Return [])) (env 0) = ([],false).
+Proof. reflexivity. Qed.
+End PipeExamples.
+
+Section Broadcast.
+Context {D : domains} (h : hardware D) (m : memory D) (p f : nat).
+Hypothesis targets : forall t, block_edge h 0 p t ScalarEnd = ((t =? 1) || (t =? 2)).
+Local Notation active := [0;1;2].
+Definition broadcast : item D := SetItem true ScalarEnd f.
+Definition send := [Issued 0 (Submit p broadcast);Done 0 p 0 broadcast []].
+Definition consume s : event D := Issued s (ScalarWait p f).
+Lemma broadcast_round :
+  checked h active (initial m) (send ++ [consume 1;consume 2]) /\
+  ~ flag_law h active (history h active (initial m) (send ++ [consume 1])) (Done 0 p 0 broadcast []).
+Proof.
+  assert (A : addressed h active 0 true p ScalarEnd f =
+      [Key true 1 p ScalarEnd f;Key true 2 p ScalarEnd f]).
+  { unfold addressed. cbn [filter]. rewrite !targets. reflexivity. }
+  assert (Bits : forall t, t=1 \/ t=2 ->
+      token (history h active (initial m) send) (Key true t p ScalarEnd f) = true).
+  { intros t E. cbn [history send broadcast fold_left after token]. rewrite A.
+    destruct (in_dec key_eq _ _); [reflexivity|]. exfalso; apply n. destruct E; subst; simpl; auto. }
+  assert (Second : token (history h active (initial m) (send ++ [consume 1]))
+      (Key true 2 p ScalarEnd f) = true).
+  { unfold history. rewrite fold_left_app. cbn [fold_left consume after token].
+    destruct (key_eq _ _); [discriminate|apply Bits; auto]. }
+  split.
+  - cbn [checked send app]. split; [repeat split|]. split.
+    + unfold allowed, broadcast, queue_law,flag_law,memory_law.
+      cbn [after pending token initial]. rewrite A, !Nat.eqb_refl. repeat split; repeat constructor.
+    + split; [repeat split; apply Bits; auto|]. split; [repeat split; exact Second|exact I].
+  - unfold flag_law,broadcast. rewrite A. intro K.
+    apply Forall_inv_tail, Forall_inv in K. congruence.
+Qed.
+End Broadcast.

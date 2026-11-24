@@ -1,286 +1,153 @@
-From Stdlib Require Import List ZArith Sorting.Permutation.
+From Stdlib Require Import List ZArith Bool.
 From UnifiedInterpreter.CoreLanguage.Axiomatic Require Export Events.
 Import ListNotations.
 Set Implicit Arguments.
 
-Definition prefix {A : Type} (u v : list A) : Prop :=
-  exists suffix, v = u ++ suffix.
+Record key := Key { is_block : bool; receiver : nat; source : nat; target : endpoint; flag : nat }.
+Definition key_eq (a b : key) : {a=b}+{a<>b}.
+Proof. decide equality; try apply Nat.eq_dec; try apply Bool.bool_dec. decide equality; apply Nat.eq_dec. Defined.
+Definition addressed {D} (h : hardware D) active s cross p q e :=
+  map (fun t => Key cross t p q e)
+    (if cross then filter (fun t => block_edge h s p t q) active else [s]).
+Definition barriers {D} (h : hardware D) s b :=
+  match b with Pipe p => [p] | All => data_pipes h s end.
+Definition open_item {D} (i : item D) :=
+  match i with WaitItem _ _ _ | BarItem => false | _ => true end.
+Definition remove_at {A} (j : nat) (xs : list A) := firstn j xs ++ skipn (S j) xs.
+Definition commit {D} (m : memory D) (writes : patch D) :=
+  fold_left (fun mem av => update mem (fst av) (Some (snd av))) writes m.
+Definition sample {D} (m : memory D) loc :=
+  match m loc with Some v => Some (loc,v) | None => None end.
 
-Inductive star {A : Type} (language : list A -> Prop) : list A -> Prop :=
-| StarEmpty : star language []
-| StarCons : forall word rest, language word -> star language rest ->
-    star language (word ++ rest).
+(* 这三个投影只依赖轨迹前缀。position 是完成时在所属队列中的位置。 *)
+Record observations D := Observed {
+  pending : nat -> nat -> list (item D);
+  token : key -> bool;
+  contents : memory D
+}.
+Definition initial {D} (m : memory D) := Observed (fun _ _ => []) (fun _ => false) m.
+Definition after {D} (h : hardware D) active (o : observations D) (e : event D) : observations D :=
+  let queues s p :=
+    match e with
+    | Issued u (Submit r i) => if Nat.eqb s u && Nat.eqb p r then pending o s p ++ [i] else pending o s p
+    | Issued u (Fence b) => if Nat.eqb s u && existsb (Nat.eqb p) (barriers h u b)
+          then pending o s p ++ [BarItem] else pending o s p
+    | Done u r j _ _ => if Nat.eqb s u && Nat.eqb p r then remove_at j (pending o s p) else pending o s p
+    | _ => pending o s p end in
+  let bits k :=
+    match e with
+    | Issued s (ScalarWait p f) => if key_eq k (Key true s p ScalarEnd f) then false else token o k
+    | Done s p _ (SetItem cross q f) _ =>
+        if in_dec key_eq k (addressed h active s cross p q f) then true else token o k
+    | Done s q _ (WaitItem cross p f) _ => if key_eq k (Key cross s p (Data q) f) then false else token o k
+    | _ => token o k end in
+  let mem := match e with
+    | Issued _ (Reserve _ _ ls _) => commit (contents o) (map (fun a => (a,Uninit)) ls)
+    | Done _ _ _ _ writes => commit (contents o) writes
+    | _ => contents o end in
+  Observed queues bits mem.
+Definition history {D} h active (o : observations D) t := fold_left (after h active) t o.
 
-Definition prefix_language {A : Type} (language : list A -> Prop) (u : list A) :=
-  exists word, language word /\ prefix u word.
+Definition queue_law {D} (o : observations D) (e : event D) : Prop :=
+  match e with
+  | Done s p j i _ => let q := pending o s p in nth_error q j = Some i /\
+      match i with SetItem _ _ _ | BarItem => j=0
+      | _ => forallb open_item (firstn j q) = true end
+  | _ => True end.
+Definition flag_law {D} (h : hardware D) active (o : observations D) (e : event D) : Prop :=
+  match e with
+  | Issued s (ScalarWait p f) => token o (Key true s p ScalarEnd f) = true
+  | Done s p _ (SetItem cross q f) _ => Forall (fun k => token o k = false) (addressed h active s cross p q f)
+  | Done s q _ (WaitItem cross p f) _ => token o (Key cross s p (Data q) f) = true
+  | _ => True end.
+Definition memory_law {D} (h : hardware D) (o : observations D) (e : event D) : Prop :=
+  match e with
+  | Issued s (Reserve space dims ls v) => allocation h s space dims ls v /\
+      Forall (fun a => contents o a = None) ls
+  | Done s p _ (Operation f args r w) delta =>
+      Forall (fun a => accessible h s a /\ exists v, contents o a = Some v) (r ++ w) /\
+      NoDup (map fst delta) /\ incl (map fst delta) w /\
+      exists inputs, traverse (sample (contents o)) r = Some inputs /\ evaluate h s p f args inputs delta
+  | Done _ _ _ _ delta => delta = []
+  | _ => True end.
+Definition at_prefixes {D} (h : hardware D) active (o : observations D)
+    (test : observations D -> event D -> Prop) (t : list (event D)) :=
+  forall pre e post, t = pre ++ e :: post -> test (history h active o pre) e.
+Definition A_sync {D} (h : hardware D) active o t :=
+  at_prefixes h active o queue_law t /\ at_prefixes h active o (flag_law h active) t.
+Definition trace_semantics {D} (h : hardware D) alloc (P : program D) env m t :=
+  let streams := map fst P in let o := initial m in
+  candidate h alloc P env t /\ A_sync h streams o t /\ at_prefixes h streams o (memory_law h) t.
+Definition program_semantics {D} (h : hardware D) params (P : program D) env m t :=
+  well_formed h params P /\
+  (forall s x, In s (map fst P) -> option_map category_of (env s x) = params s x) /\
+  exists alloc, trace_semantics h alloc P env m t.
+Definition controls_finished {D} (h : hardware D) alloc (P : program D) env t :=
+  Forall (fun sc => control_plan h alloc (fst sc) (snd sc) (env (fst sc)) =
+                    (issued_by (fst sc) t,true)) P.
+Definition terminated {D} (h : hardware D) alloc P env m t :=
+  controls_finished h alloc P env t /\
+  forall s p, pending (history h (map fst P) (initial m) t) s p = [].
+Definition deadlocked {D} (h : hardware D) P env m t :=
+  (exists alloc, trace_semantics h alloc P env m t) /\
+  ~ (exists alloc, trace_semantics h alloc P env m t /\ terminated h alloc P env m t) /\
+  forall e alloc, ~ trace_semantics h alloc P env m (t ++ [e]).
+Definition opened_access {D} (o : observations D) s p j r w :=
+  exists f args, nth_error (pending o s p) j = Some (Operation f args r w) /\
+                 forallb open_item (firstn j (pending o s p)) = true.
+Definition race {D} (o : observations D) :=
+  exists s p j u q k r w r' w' a,
+    (s,p,j) <> (u,q,k) /\ opened_access o s p j r w /\ opened_access o u q k r' w' /\
+    ((In a w /\ In a (r' ++ w')) \/ (In a r /\ In a w')).
 
-(* 完整的有序投影：跳过事件仅限于该事件没有任何投影字母的情形。 *)
-Inductive projection {A B : Type} (select : A -> B -> Prop) : list A -> list B -> Prop :=
-| ProjectNil : projection select [] []
-| ProjectKeep : forall e t letter word,
-    select e letter -> projection select t word ->
-    projection select (e :: t) (letter :: word)
-| ProjectSkip : forall e t word,
-    (~ exists letter, select e letter) -> projection select t word ->
-    projection select (e :: t) word.
-
-Lemma projection_unique {A B} (select : A -> B -> Prop)
-    (functional : forall e a b, select e a -> select e b -> a = b) t u v :
-  projection select t u -> projection select t v -> u = v.
+Lemma prefixes_append {D} (h : hardware D) streams o test t u :
+  at_prefixes h streams o test (t++u) -> at_prefixes h streams o test t.
 Proof.
-  intros left. revert v. induction left; intros v right; inversion right; subst;
-    try reflexivity; try solve [exfalso; eauto].
-  - f_equal; eauto.
-  - eauto.
+  intros H pre e post ->. apply H with (post:=post++u).
+  rewrite <- app_assoc. reflexivity.
+Qed.
+Theorem trace_prefix_closed {D} (h : hardware D) a P env m t u :
+  trace_semantics h a P env m (t++u) -> trace_semantics h a P env m t.
+Proof.
+  intros [[C Owners] [[Q F] M]]. split; [split|].
+  - apply Forall_forall. intros sc I. rewrite Forall_forall in C.
+    destruct (C sc I) as [rest E]. exists (issued_by (fst sc) u ++ rest).
+    unfold issued_by in *. now rewrite E, flat_map_app, app_assoc.
+  - apply Forall_app in Owners. tauto.
+  - repeat split; eapply prefixes_append; eassumption.
 Qed.
 
-Inductive flag_letter := FlagSet | FlagWait.
-
-Local Definition operation_eq_dec (x y : op_id) : {x = y} + {x <> y}.
-Proof. decide equality; apply Pos.eq_dec. Defined.
-
-Section Semantics.
-Context {Float EventId Pipe Unit : Type}.
-Context (layout : allocation_layout).
-Local Notation Val := (@value Float EventId Pipe).
-Local Notation Program := (@program Float EventId Pipe Unit op_id).
-Local Notation EventRecordType := (@event_record Float EventId Pipe Unit).
-Local Notation Use := (@use_record Float EventId Pipe).
-Local Notation Model := (@computation_model Float EventId Pipe Unit).
-Local Notation Kappa := (@interpretation Float EventId Pipe Unit).
-
-(* 候选见证同时记录有限事件集合和各操作数实际取得的值。 *)
-Definition candidate_witness (model : Model) (p : Program)
-    (t : list EventId) (kappa : Kappa) (uses : list Use) : Prop :=
-  exists events ordered,
-    program_events layout model p events uses /\ NoDup events /\
-    Permutation events ordered /\ prefix (map kappa t) ordered.
-
-Definition Cand (model : Model) (p : Program) (t : list EventId) (kappa : Kappa) : Prop :=
-  exists uses, candidate_witness model p t kappa uses.
-
-Lemma allocated_address_in_trace model p t kappa e address :
-  Cand model p t kappa -> In e t -> payload (kappa e) = LAlloc address ->
-  address = address_at layout (InBranch (owner (kappa e))).
+Section LocalNotifications.
+Context {D : domains} (h : hardware D) (streams : list nat) (s p q f : nat).
+Local Notation bit := (Key false s p (Data q) f).
+Lemma local_notification_origin o t :
+  token o bit = false -> token (history h streams o t) bit = true ->
+  exists j delta, In (Done s p j (SetItem false (Data q) f) delta) t.
 Proof.
-  intros (uses & events & ordered & generated & _ & perm & suffix & eq) member allocated.
-  assert (present : In (kappa e) events).
-  { apply (Permutation_in _ (Permutation_sym perm)). rewrite eq.
-    apply in_or_app; left; apply in_map; assumption. }
-  apply program_allocation_origins in generated.
-  apply (proj1 (Forall_forall _ _) generated) in present.
-  unfold allocation_origin in present; rewrite allocated in present; exact present.
+  revert o. induction t as [|e rest IH]; intros o B T; [cbn [history fold_left] in T; congruence|].
+  cbn [history fold_left] in T.
+  destruct (token (after h streams o e) bit) eqn:E.
+  - destruct e as [u act|u r j it delta].
+    + destruct act; cbn [after token] in E; try congruence.
+      destruct (key_eq _ _) in E; congruence.
+    + destruct it; cbn [after token] in E; try congruence.
+      * destruct (in_dec key_eq bit (addressed h streams u cross r q0 event)) as [M|N] in E; [|congruence].
+        apply in_map_iff in M. destruct M as [v [K V]]. inversion K; subst.
+        simpl in V. destruct V as [->|[]]. exists j,delta. now left.
+      * destruct (key_eq _ _) in E; congruence.
+  - destruct (IH _ E T) as [j [delta M]]. exists j,delta. now right.
 Qed.
+End LocalNotifications.
 
-Lemma candidate_record_injective model p t kappa :
-  Cand model p t kappa -> forall e d, In e t -> In d t -> kappa e = kappa d -> e = d.
+Theorem local_wait_requires_new_set {D} (h : hardware D) active o s p q f j k dw dw' pre middle post :
+  let wait := fun n delta => @Done D s q n (WaitItem false p f) delta in
+  at_prefixes h active o (flag_law h active) (pre ++ wait j dw :: middle ++ wait k dw' :: post) ->
+  exists n delta, In (Done s p n (SetItem false (Data q) f) delta) middle.
 Proof.
-  intros (uses & events & ordered & generated & unique & perm & suffix & eq).
-  apply (Permutation_NoDup perm) in unique. rewrite eq in unique.
-  clear generated perm eq. induction t as [|head tail IH]; cbn; [tauto |].
-  inversion unique as [|? ? absent tail_unique]; subst.
-  intros e d [<-|he] [<-|hd] same; auto.
-  - exfalso. apply absent, in_or_app. left. rewrite same. apply in_map; exact hd.
-  - exfalso. apply absent, in_or_app. left. rewrite <- same. apply in_map; exact he.
+  cbn zeta. intro F. set (w := @Done D s q j (WaitItem false p f) dw).
+  specialize (F (pre++w::middle) (Done s q k (WaitItem false p f) dw') post).
+  rewrite <- app_assoc in F. specialize (F eq_refl).
+  cbn [flag_law] in F. unfold history in F. rewrite fold_left_app in F. cbn [fold_left] in F.
+  eapply local_notification_origin; [|exact F]. unfold w. cbn [after token].
+  destruct (key_eq _ _); congruence.
 Qed.
-
-Corollary distinct_allocation_events model p t kappa e d a b :
-  Cand model p t kappa -> In e t -> In d t ->
-  payload (kappa e) = LAlloc a -> payload (kappa d) = LAlloc b ->
-  e <> d -> a <> b.
-Proof.
-  intros candidate emitted_e emitted_d label_e label_d different.
-  intros equal. apply different. eapply candidate_record_injective; eauto.
-  pose proof (allocated_address_in_trace e candidate emitted_e label_e) as ae.
-  pose proof (allocated_address_in_trace d candidate emitted_d label_d) as ad.
-  assert (sites : InBranch (owner (kappa e)) = InBranch (owner (kappa d))).
-  { apply (addresses_injective layout). congruence. }
-  destruct (kappa e), (kappa d); cbn in *; congruence.
-Qed.
-
-Definition earlier (t : list EventId) (a b : EventId) : Prop :=
-  exists i j, nth_error t i = Some a /\ nth_error t j = Some b /\ (i < j)%nat.
-
-Definition before (t : list EventId) (a b : EventId -> Prop) : Prop :=
-  forall eb, b eb -> exists ea, a ea /\ earlier t ea eb.
-
-Definition event_at (p : Program) (t : list EventId) (kappa : Kappa)
-    (phase : head -> event_kind) (o : op_id) (e : EventId) : Prop :=
-  In e t /\ owner (kappa e) = o /\
-  exists h, In (o, h) (program_operations p) /\ kind (payload (kappa e)) = phase h.
-
-Definition starts p t kappa := event_at p t kappa start_kind.
-Definition finishes p t kappa := event_at p t kappa end_kind.
-Definition gate_kind (h : head) :=
-  if nonblocking h then start_kind h else end_kind h.
-Definition gates p t kappa := event_at p t kappa gate_kind.
-
-Definition pipeline_before (p : Program) (t : list EventId) (kappa : Kappa)
-    (pipe : Pipe) (o u : op_id) : Prop :=
-  exists a b, starts p t kappa o a /\ starts p t kappa u b /\
-    pipeline (payload (kappa a)) = Some pipe /\
-    pipeline (payload (kappa b)) = Some pipe /\ earlier t a b.
-
-Lemma no_pipeline_order_for_direct p t kappa o
-    (direct : forall e, starts p t kappa o e -> pipeline (payload (kappa e)) = None) :
-  forall q u, ~ pipeline_before p t kappa q o u /\ ~ pipeline_before p t kappa q u o.
-Proof.
-  intros q u; split; intros (a & b & sa & sb & qa & qb & _).
-  - rewrite (direct a sa) in qa. discriminate.
-  - rewrite (direct b sb) in qb. discriminate.
-Qed.
-
-Definition A1 (p : Program) (t : list EventId) (kappa : Kappa) : Prop :=
-  forall o h, In (o, h) (program_operations p) -> start_kind h <> end_kind h ->
-    before t (starts p t kappa o) (finishes p t kappa o).
-
-Definition A2 (p : Program) (t : list EventId) (kappa : Kappa) : Prop :=
-  forall o u, In (o, u) (po p) ->
-    before t (starts p t kappa o) (starts p t kappa u) /\
-    before t (gates p t kappa o) (starts p t kappa u).
-
-Definition A3 (p : Program) (t : list EventId) (kappa : Kappa) : Prop :=
-  forall f o source,
-    In (f, HSetFlag) (program_operations p) ->
-    pipeline_before p t kappa source o f ->
-    before t (finishes p t kappa o) (finishes p t kappa f).
-
-Definition flag_projection (p : Program) (t : list EventId) (kappa : Kappa)
-    (source target : Pipe) (flag : EventId) (e : EventId) (letter : flag_letter) : Prop :=
-  exists o s, starts p t kappa o s /\ finishes p t kappa o e /\
-    match letter with
-    | FlagSet => payload (kappa s) = LSetFlagStart source target flag /\
-                 kind (payload (kappa e)) = SetFlagEnd
-    | FlagWait => payload (kappa s) = LWaitFlagStart source target flag /\
-                  kind (payload (kappa e)) = WaitFlagEnd
-    end.
-
-Definition A4 (p : Program) (t : list EventId) (kappa : Kappa) : Prop :=
-  forall source target flag, exists word,
-    projection (flag_projection p t kappa source target flag) t word /\
-    prefix_language (star (fun block => block = [FlagSet; FlagWait])) word.
-
-Lemma A4_projected_word p t kappa source target flag word :
-  A4 p t kappa ->
-  projection (flag_projection p t kappa source target flag) t word ->
-  prefix_language (star (fun block => block = [FlagSet; FlagWait])) word.
-Proof.
-  intros axiom4 observed. destruct (axiom4 source target flag) as (w & projected & alternating).
-  assert (word = w) as ->; [ | exact alternating].
-  eapply projection_unique; [ | exact observed | exact projected].
-  intros e a b (o & s & _ & _ & ha) (u & v & _ & _ & hb).
-  destruct a,b; cbn in *; intuition congruence.
-Qed.
-
-Definition A5 (p : Program) (t : list EventId) (kappa : Kappa) : Prop :=
-  forall w u target,
-    In (w, HWaitFlag) (program_operations p) ->
-    pipeline_before p t kappa target w u ->
-    before t (finishes p t kappa w) (starts p t kappa u).
-
-Definition A_sync (p : Program) (t : list EventId) (kappa : Kappa) : Prop :=
-  A1 p t kappa /\ A2 p t kappa /\ A3 p t kappa /\
-  A4 p t kappa /\ A5 p t kappa.
-
-Definition result_event (kappa : Kappa) (o : op_id) (d : EventId)
-    (result : Val) : Prop :=
-  kappa d = EventRecord o (LReadEnd result) \/
-  kappa d = EventRecord o (LComputeEnd result).
-
-(* 操作数在发起事件处取值；if 和 return 的单个事件也是其发起事件。 *)
-Definition completed_result_values (p : Program) (t : list EventId)
-    (kappa : Kappa) (uses : list Use) : Prop :=
-  forall use e d result, In use uses ->
-    starts p t kappa (consumer use) e -> In d t ->
-    result_event kappa (producer use) d result ->
-    earlier t d e -> used_value use = result.
-
-Local Definition prior_start (phase : event_kind) (o : op_id) (past : list EventRecordType) :=
-  option_map payload (find (fun e => if operation_eq_dec (owner e) o then
-    match phase, kind (payload e) with
-    | ReadStart, ReadStart | WriteStart, WriteStart => true
-    | _, _ => false
-    end else false) past).
-
-(* 前缀按最近事件在前的顺序排列。写入地址与值取自该写入的发起事件。 *)
-Local Fixpoint latest_write (address : memory_resource)
-    (past : list EventRecordType) : option Val :=
-  match past with
-  | [] => None
-  | e :: earlier_events =>
-      match payload e with
-      | LWriteEnd =>
-          match prior_start WriteStart (owner e) earlier_events with
-          | Some (LWriteStart _ written data) =>
-              if Nat.eqb written address then Some data else latest_write address earlier_events
-          | _ => latest_write address earlier_events
-          end
-      | _ => latest_write address earlier_events
-      end
-  end.
-
-Local Fixpoint memory_history (past events : list EventRecordType) : Prop :=
-  match events with
-  | [] => True
-  | e :: rest =>
-    (match payload e with
-    | LReadEnd result =>
-        match prior_start ReadStart (owner e) past with
-        | Some (LReadStart _ address) =>
-            match latest_write address past with
-            | Some data => data = result
-            | None => True
-            end
-        | _ => False
-        end
-    | LWriteEnd =>
-        match prior_start WriteStart (owner e) past with
-        | Some (LWriteStart _ _ _) => True
-        | _ => False
-        end
-    | LAlloc address => latest_write address past = None
-    | _ => True
-    end) /\ memory_history (e :: past) rest
-  end.
-
-Definition memory_values (t : list EventId) (kappa : Kappa) : Prop :=
-  memory_history [] (map kappa t).
-
-Definition trace_semantics (model : Model) (p : Program)
-    (t : list EventId) (kappa : Kappa) : Prop :=
-  exists uses, candidate_witness model p t kappa uses /\
-    A_sync p t kappa /\ completed_result_values p t kappa uses /\
-    memory_values t kappa.
-
-Definition target_allows (cfg : @configuration Pipe Unit)
-    (l : @label Float EventId Pipe Unit) : Prop :=
-  let allowed d := declared_resource cfg (resource d) /\
-    match queue d with Some p => declared_pipeline cfg p | None => True end in
-  match l with
-  | LReadStart d a => allowed d /\ can_read cfg (resource d) a
-  | LWriteStart d a _ => allowed d /\ can_write cfg (resource d) a
-  | LSetFlagStart p q _ | LWaitFlagStart p q _ =>
-      declared_pipeline cfg p /\ declared_pipeline cfg q
-  | LComputeStart d _ => allowed d
-  | LPipeAssignment _ p => declared_pipeline cfg p
-  | _ => True
-  end.
-
-Definition program_semantics
-    (cfg : @configuration Pipe Unit) (model : Model) (p : Program)
-    (t : list EventId) (kappa : Kappa) : Prop :=
-  (exists raw, well_formed cfg raw /\ map erase_annotations p = expand_program raw) /\
-  annotations_valid p /\ trace_semantics model p t kappa /\
-  Forall (fun e => target_allows cfg (payload (kappa e))) t.
-
-Definition raw_program_semantics
-    (cfg : @configuration Pipe Unit) (model : Model)
-    (raw : @program Float EventId Pipe Unit unit)
-    (t : list EventId) (kappa : Kappa) : Prop :=
-  well_formed cfg raw /\ exists annotated, annotates raw annotated /\
-    program_semantics cfg model annotated t kappa.
-
-Definition shared_program_semantics cfg model (p : @shared_program Float EventId Pipe Unit) :=
-  raw_program_semantics cfg model (instantiate_shared layout 0 p).
-
-End Semantics.

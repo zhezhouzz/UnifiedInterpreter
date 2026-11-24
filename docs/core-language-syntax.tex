@@ -1,234 +1,106 @@
 \documentclass[UTF8,a4paper,11pt,fontset=fandol]{ctexart}
 \usepackage[margin=24mm]{geometry}
-\usepackage{amsmath,amssymb,booktabs,tabularx,array}
+\usepackage{amsmath,amssymb}
 \usepackage[unicode,hidelinks]{hyperref}
-\pagestyle{plain}
-\linespread{1.10}
-\setlength{\parskip}{0.2em}
-\setlength{\emergencystretch}{2em}
-\renewcommand{\arraystretch}{1.12}
-\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\hypersetup{pdftitle={Core Language Syntax}}
 \newcommand{\kw}[1]{\mathsf{#1}}
-\hypersetup{pdftitle={Core Language Syntax},pdfauthor={}}
 \begin{document}
-\begin{center}
-\Large\bfseries Core Language Syntax
-\end{center}
+\begin{center}\Large\bfseries Core Language 的语法与 \#316 程序\end{center}
 
-\section{原子类别与记号}
-
-常量具有 \texttt{int}、\texttt{float}、\texttt{bool}、
-\texttt{event\_id}、\texttt{pipeline\_id} 和 \texttt{memory} 六种类别，
-变量通过绑定指代相应的值。
-
-\begin{center}
-\begin{tabularx}{\linewidth}{@{}llY@{}}
-\toprule
-元变量 & 所属集合 & 含义 \\
-\midrule
-$x$ & $\mathsf{Var}$ & 可数无限的局部变量名称集合 \\
-$k$ & $\mathsf{Int}=\mathbb Z$ & \texttt{int}：整数常量 \\
-$r$ & $\mathsf{Float}$ & \texttt{float}：选定浮点格式的值集合 \\
-$b$ & $\mathsf{Bool}$ & \texttt{bool}：$\{\kw{true},\kw{false}\}$ \\
-$\varepsilon$ & $\mathsf{EventId}$ & \texttt{event\_id}：未解释的事件标识集合 \\
-$p,q$ & $\mathsf{Pipe}$ & \texttt{pipeline\_id}：pipeline 实例标识集合 \\
-$a$ & $\mathsf{Memory}$ & 内存资源的地址，比较地址即可判断是否访问同一资源 \\
-\bottomrule
-\end{tabularx}
-\end{center}
-
-常量保留其类别标记，变量名称与常量相互区分。
-$c$ 表示常量，$v$ 表示操作数，$C$ 表示命令，$P$ 表示整个程序。
-下标用于区分同一类别的不同实例，例如 $v_1,v_2$ 和 $C_1,C_2$。
-横线记号 $\bar v$ 是有限操作数序列 $v_1,\ldots,v_m$ 的缩写，
-其中 $m$ 为非负整数；$m=0$ 时，括号内为空，例如
-$\kw{return}()$。
-
-操作数在具体命令中可以指代数据、地址、事件标识或 pipeline 标识。
-内存以整个资源为访问单位，目标配置按执行资源和内存地址给出读写权限。
-每个地址都是一个自然数。每次执行 $\kw{alloc}()$ 从执行配置取得一个具体地址，
-同一次执行中的不同申请返回不同地址。外部输入和输出也可以由地址常量指定。
-
-符号 $::=$ 表示语法定义，$\mid$ 分隔备选构造。
-语法产生式中以直立字体排印的命令名称为固定关键字。
-构造中的圆括号、方括号、花括号、逗号、分号、等号、$\mathrel{:=}$ 和
-$\parallel$ 均为语法符号；$\parallel$ 表示并发分支的分隔。
-
-\section{抽象语法}
-
+\section{程序与操作数}
+一个程序在一个 AI Core 上运行。硬件配置 \(H\) 指定可用指令流和每条流的数据管道。
+程序选择有限的活动流集合 \(\kappa\)，每条流 \(s\) 具有独立的标量环境。
 \[
 \begin{aligned}
-c &::= k \mid r \mid b \mid \varepsilon \mid p \mid a, \\
-v &::= c \mid x, \\[0.4em]
-d &::= h \mid h@u,\qquad h\in\mathsf{Unit},\\
-C &::= \kw{return}(\bar v) \\
-  &\quad\mid \kw{let}\ x=v\ \kw{in}\ C \\
-  &\quad\mid \kw{let}\ x=\kw{select}(v_b,v_1,v_2)\ \kw{in}\ C \\
-  &\quad\mid \kw{let}\ x=\kw{compute}_{\rm atomic}[f](\bar v)\ \kw{in}\ C \\
-  &\quad\mid x:=\kw{alloc}();\ C \\
-  &\quad\mid \kw{assignpipe}\ x:=v;\ C \\
-  &\quad\mid x:=\kw{compute}[d](\bar v);\ C \\
-  &\quad\mid x:=\kw{read}[d](v);\ C \\
-  &\quad\mid \kw{write}[d](v_1,v_2);\ C \\
-  &\quad\mid \kw{setflag}[u,w](v);\ C \\
-  &\quad\mid \kw{waitflag}[u,w](v);\ C \\
-  &\quad\mid \kw{for}\ i\ \kw{in}\ [l,h)\ \{D\};\ C \\
-  &\quad\mid \kw{if}\ v\ \kw{then}\ \{C_1\}
-       \ \kw{else}\ \{C_2\}, \\[0.4em]
-P &::= \kw{run}\ \{C_1\parallel\cdots\parallel C_n\}\mid x:=\kw{alloc}();\ P.
+ P &::= \mathop{\|}_{s\in\kappa}s\{C_s\},\\
+ \tau &::= \kw{int}\mid\kw{float}\mid\kw{bool}\mid\kw{event}\mid\kw{view},
+ &v &::= c\mid x .
 \end{aligned}
 \]
+整数属于 \(\mathbb Z\)。硬件解释指定浮点值、视图、标量算子 \(g\) 和管道算子 \(f\)。
+视图可以描述一整段存储，地址重叠的两个视图可以引用相同单元。
+Rocq 使用自然数编码变量、指令流、数据管道、事件编号和具体单元地址。
+实例可以给共享 GM 单元分配相同编码，并给不同流的私有 UB 单元分配互异编码。
 
-$n$ 为正整数；程序包含有限且非空的并发分支序列。
-省略号仅表示按所给下标展开的有限序列。
-每条命令中的后续程序 $C$ 本身也是完整命令。
-循环上下界 $l,h$ 为自然数。循环变量从 $l$ 开始，每轮增加 $1$，达到 $h$ 时结束；
-$h\le l$ 时直接执行 $C$。循环体的正常结尾在 Rocq 中表示为 \texttt{LoopEnd}。
-循环体中的 $i$ 是只读整数参数，每轮进入时取得本轮的值。
-普通局部名称在源分支中满足 SSA，每轮执行同一静态定义时产生独立绑定；
-循环体内定义的名称只在该循环体中可见。展开后的事件命令取得互异操作标识。
-循环边界允许异步操作继续执行。
+\section{命令与作用域}
+\[
+\begin{aligned}
+ C ::= {}&\kw{return}(\bar v)\mid\kw{end}\\
+  \mid{}&\kw{let}\ x=\kw{scalar}[g](\bar v)\ \kw{in}\ C\\
+  \mid{}&\kw{let}\ x=\kw{alloc}[m](\bar v)\ \kw{in}\ C\\
+  \mid{}&\kw{issue}[p](f,\bar v);C\\
+  \mid{}&\kw{setflag}[p,q](v);C\mid\kw{waitflag}[p,q](v);C\\
+  \mid{}&\kw{syncblockset}[p,q](v);C\mid\kw{syncblockwait}[p,q](v);C\\
+  \mid{}&\kw{pipebarrier}[b];C\\
+  \mid{}&\kw{if}\ v\ \kw{then}\ \{C_1\}\ \kw{else}\ \{C_2\};C_3\\
+  \mid{}&\kw{for}\ x=v_1\ \kw{to}\ v_2\ \kw{step}\ v_3\ \kw{do}\ \{C_1\};C_2 .
+\end{aligned}
+\]
+\(\kw{scalar}\) 立即绑定求值结果。\(\kw{alloc}\) 根据整数维度在指定空间申请新鲜地址，
+将各单元初始化为 \(\kw{Uninit}\)，并绑定视图。\(\kw{issue}\) 将算子、当前实参和读写足迹
+提交给管道 \(p\)。装载、计算和写回都可以采用这条命令，目标视图是显式实参。
+例如 \(\kw{issue}[\mathrm V](\kw{VExp},u,r)\) 从 \(u\) 读取 tile 并将结果写入 \(r\)。
+管道完成该操作时执行内存读取和写入。
 
-\clearpage
-\section{标注、绑定与良构条件}
+两个流内同步命令使用数据管道作为源端和目标端，事件操作数必须具有
+\(\kw{event}\) 类别。块同步命令还允许标量目标端 \(\mathrm S\)。
+屏障目标 \(b\) 是一条数据管道或 \(\mathrm{ALL}\)。
+\(\kw{end}\) 交回当前命令块的续延，\(\kw{return}\) 结束整条流的控制执行。
 
-方括号中的 $u,w$ 是 \texttt{pipeline\_id} 类型的操作数。
-每条命令发起时读取它们的值。同步的第一个操作数指定源 pipeline，
-第二个指定目标 pipeline。发起事件保存当时的 pipeline 实例。
+每个 \(\kw{let}\) 绑定当前环境中的新变量。分支和循环体内的局部变量只在当前块内可见。
+循环读取整数下界 \(l\)、上界 \(u\) 和步长 \(h\)，按 \(l+ih\) 绑定循环变量。
+正步长在 \(l+ih<u\) 时进入循环体，负步长在 \(l+ih>u\) 时进入循环体。
+零步长使控制执行停在循环入口。已发射的操作仍可完成。
 
-静态配置分别声明可用的 pipeline 和执行资源。$d=h$ 表示直接使用资源 $h$，
-$d=h@u$ 表示使用 $h$ 并将操作提交到 $u$ 指定的 pipeline。
-两个并发分支使用同一个 $h$ 时，资源标识本身不规定发起或完成的顺序。
-在多核心配置中，pipeline 标识同时区分所属核心。
+\section{硬件与良构判断}
+\(\Delta(g)=(\bar\tau,\tau)\) 指定标量算子的输入和结果类别，
+\(\Sigma(s,p,f)=\bar\tau\) 指定流 \(s\) 在管道 \(p\) 上可发射的算子和输入类别。例如
+\[
+ \frac{p\in\mathsf{Pipes}(s)\quad\Gamma\vdash\bar v:\bar\tau\quad
+       \Sigma(s,p,f)=\bar\tau\quad H;\Gamma\vdash_s C}
+      {H;\Gamma\vdash_s\kw{issue}[p](f,\bar v);C}.
+\]
+良构程序具有互异且可用的活动流，每条流从声明的参数环境开始检查。
+判断还检查分配空间、屏障目标和同步边。块通知须有活动接收流，
+块等待须有活动发送流。硬件解释保证标量结果符合签名，分配可访问地址，
+每个读取或写入足迹中的地址互异。
+相应定义是 \texttt{Syntax.v} 的 \texttt{command}、\texttt{valid\_hardware}、
+\texttt{typed} 和 \texttt{well\_formed}。
 
-\begin{enumerate}
-\item 程序中使用的执行资源和 pipeline 实例均已在静态配置中声明。
-\item 在 $\kw{let}\ x=v\ \kw{in}\ C$、
-  $x:=\kw{compute}[d](\bar v);C$ 和
-  $x\mathrel{:=}\kw{read}[d](v);C$ 中，$x$ 绑定后续程序 $C$ 中对应的变量使用。
-  该绑定的作用域从 $C$ 开始。
-\item 别名、计算及读取结果满足 SSA 约定。可变 pipeline 变量由
-  $\kw{assignpipe}$ 首次赋值后可用，同一分支可以再次赋值。
-  其名称与该分支全部 SSA 名称互异。所有变量使用均位于对应绑定的作用域内。
-  不同并发分支分别具有自己的局部变量作用域。
-\item $\kw{if}$ 的条件具有 \texttt{bool} 类别；
-  $\kw{setflag}$ 和 $\kw{waitflag}$ 的操作数具有
-  \texttt{event\_id} 类别。
-\end{enumerate}
-
-绑定的作用域规定变量名称的可见性；异步结果是否已经可用由执行状态决定。
-良构条件允许表达缺失同步的程序，数据竞争、提前使用异步结果和死锁
-属于执行行为分析的对象。
-
-\section{命令含义}
-
-\begin{description}
-\item[$\kw{return}(\bar v)$]
-  结束当前并发分支的命令执行，并给出输出值序列。
-  $\kw{return}()$ 给出空序列。该命令不增加隐式等待。
-\item[$\kw{let}\ x=v\ \kw{in}\ C$]
-  将操作数绑定到局部变量 $x$，随后执行 $C$。
-\item[$\kw{let}\ x=\kw{select}(v_b,v_1,v_2)\ \kw{in}\ C$]
-  $v_b$ 为局部已知的布尔值，两个候选操作数类型相同。条件为真时传递
-  $v_1$ 的绑定，为假时传递 $v_2$ 的绑定。选择保留异步生产者引用，不产生事件。
-\item[{$\kw{let}\ x=\kw{compute}_{\rm atomic}[f](\bar v)\ \kw{in}\ C$}]
-  在同一个事件中取得实参、计算并绑定结果。整数运算有
-  \texttt{add, sub, mul, mod, eq, lt}，布尔运算有 \texttt{not, and, or}。
-  \texttt{eq, lt} 比较整数并返回布尔值。取余要求除数非零，采用整数的模运算。
-  对给定的外部内存地址序列 $A$，$\kw{at}(A)$ 取一个从零开始的整数索引并返回对应的地址，
-  要求索引在序列范围内。原子计算没有 pipeline 归属。
-\item[{$x:=\kw{alloc}()$}]
-  为整个缓冲区返回一个新地址。并发前申请的地址绑定在所有分支中可见；
-  分支中的申请在一个事件处绑定地址。同一循环中不同轮次的申请也产生不同地址。
-\item[{$\kw{assignpipe}\ x:=v;C$}]
-  在该命令的单个事件处读取 $v$，将实际取得的 pipeline 标识保存到 $x$，再执行 $C$。
-\item[{$x:=\kw{compute}[d](\bar v);C$}]
-  在 $d$ 指定的执行资源上发起一次异步的
-  抽象纯计算，并将 $x$ 作为结果的绑定名称，随后继续执行 $C$。
-  提前使用 $x$ 时取值不保证等于计算完成的结果；使用 $x$ 不触发自动等待。
-  $\kw{compute}$ 是固定关键字，输入序列记录计算的数据依赖；
-  计算关系由采用的抽象语义给出。
-\item[{$x\mathrel{:=}\kw{read}[d](v);C$}]
-  使用 $d$ 指定的执行资源发起对 $v$ 所指代内存资源的异步读取，
-  并将 $x$ 作为结果的绑定名称。
-  读取完成时取得该地址最近一次完成的写入值。此前没有同地址的写入完成事件时，
-  读取可以返回任意值。
-  发起读取后可以继续执行 $C$。使用 $x$ 不触发自动等待。
-\item[{$\kw{write}[d](v_1,v_2);C$}]
-  使用 $d$ 指定的执行资源发起向 $v_1$ 所指代内存资源写入 $v_2$ 所指代值的
-  异步操作，随后继续执行 $C$。该写入完成后，其值可被后续完成的读取取得。
-\item[{$\kw{setflag}[p,q](v);C$}]
-  在源 pipeline $p$ 上发起面向目标 pipeline $q$、以 $v$ 所指代事件标识
-  标记的非阻塞设置请求，随后继续执行 $C$。
-  设置请求的完成条件由同步语义规定。
-\item[{$\kw{waitflag}[p,q](v);C$}]
-  在目标 pipeline $q$ 上等待来自源 pipeline $p$、以 $v$ 所指代事件标识
-  标记的同步条件满足，随后执行 $C$。
-\item[$\kw{if}\ v\ \kw{then}\ \{C_1\}\ \kw{else}\ \{C_2\}$]
-  当 $v$ 的值为 $\kw{true}$ 时执行 $C_1$，为 $\kw{false}$ 时执行 $C_2$。
-\item[$\kw{run}\ \{C_1\parallel\cdots\parallel C_n\}$]
-  各个并发分支访问共享内存，执行步骤可以交错。
-  异步读写和计算的发起与完成分别由执行语义描述；程序顺序本身不增加隐式等待。
-\end{description}
-
-\section{GitCode Issue \#316：Vector 侧的 UB 双缓冲}
-
-取 $M=\mathrm{MTE2}$、$V=\mathrm{Vector}$。参数 input 给出 $N$ 个 GM 输入块的地址，
-out 是 UB 输出地址。各输入块含 $1024$ 个 f16 元素。bufA、bufB 由两次申请取得。
-Rocq 示例中，输入地址为 $2,4,\ldots,2N$，out 为 $0$。两次申请的返回地址由本次执行的分配布局给出，
-彼此不同，并且与输入和输出地址互异。
-搬运分支从 GM 读取输入 tile。
-readyA、readyB、freeA、freeB、$e$ 是编号依次为 $0$ 至 $4$ 的事件标识。
-初始化上界 $K=\min(2,N)$ 是程序参数 $N$ 确定的自然数。
-
-\begin{verbatim}
-bufA := alloc();
-bufB := alloc();
-run {
-  let p = M in
-    for i in [0, N) {
-      let slot = compute_atomic[mod](i, 2) in
-      let first = compute_atomic[eq](slot, 0) in
-      let buf = select(first, bufA, bufB) in
-      let ready = select(first, readyA, readyB) in
-      let free = select(first, freeA, freeB) in
-      let src = compute_atomic[at(input)](i) in
-      waitflag[V,p](free);
-      x := read[TransferEngine@p](src);
-      setflag[p,p](e); waitflag[p,p](e);
-      write[TransferEngine@p](buf, x);
-      setflag[p,V](ready);
-    }; return()
-  ||
-  let p = V in
-    for s in [0, K) {
-      let initialFirst = compute_atomic[eq](s, 0) in
-      let initial = select(initialFirst, freeA, freeB) in
-      setflag[p,M](initial);
-    };
-    for i in [0, N) {
-      let slot = compute_atomic[mod](i, 2) in
-      let first = compute_atomic[eq](slot, 0) in
-      let buf = select(first, bufA, bufB) in
-      let ready = select(first, readyA, readyB) in
-      let free = select(first, freeA, freeB) in
-      waitflag[M,p](ready);
-      x := read[VectorUnit@p](buf);
-      setflag[p,p](e); waitflag[p,p](e);
-      y := compute[VectorUnit@p](x);
-      setflag[p,p](e); waitflag[p,p](e);
-      write[VectorUnit@p](out, y);
-      setflag[p,p](e); waitflag[p,p](e);
-      setflag[p,M](free);
-    }; return()
-}
-\end{verbatim}
-
-第二个分支在进入计算循环前，为本次执行用到的每个 slot 发出一次初始可用通知。
-同一 pipeline 上成对的 $\kw{setflag}[p,p](e)$ 和 $\kw{waitflag}[p,p](e)$ 表达读取和计算结果的就绪，
-以及写回 out 的完成。这些 flag 指令是 Core Language 对原提案等待条件的编码。
-第 $0$、$1$ 次搬运分别消耗 bufA、bufB 的初始可用通知。
-第 $2$ 次搬运复用 bufA 前，须等第 $0$ 次计算释放 bufA。
-原提案见 \href{https://gitcode.com/Ascend/AscendNPU-IR/issues/316}{GitCode \#316}。
-
+\section{单条 AIV 指令流中的双缓冲}
+Issue \#316 第 2.2 节的 \texttt{vexp} 从 UB 读取数据，把结果直接写入传入的
+\texttt{output} 视图。第 2.3 节按迭代编号轮换两个输入缓冲区。对应的 HIVM 示例见
+\path{examples/kernels/issue316_vexp_hivm.mlir}。\(A,B\) 是程序分配的两个 UB tile，
+\(\mathrm{output}\) 是调用方提供的一个 UB tile，每个 tile 含 1024 个 f16 元素。
+下列程序用 \(\mathrm{set}_{p,q}(e)\)、\(\mathrm{wait}_{p,q}(e)\) 表示流内同步，
+用 \(e_0,e_1\) 表示两个事件编号。\(N\) 为程序参数。
+\[
+\begin{aligned}
+ &\kw{let}\ A=\kw{alloc}[\mathrm{UB}](1024)\ \kw{in}\\
+ &\kw{let}\ B=\kw{alloc}[\mathrm{UB}](1024)\ \kw{in}\\
+ &\mathrm{set}_{\mathrm V,\mathrm{MTE2}}(e_0);
+   \ \mathrm{set}_{\mathrm V,\mathrm{MTE2}}(e_1);\\
+ &\kw{for}\ i=0\ \kw{to}\ N\ \kw{step}\ 1\ \kw{do}\ \{\\
+ &\quad k=i\bmod 2,\quad e=e_k,\quad u=[A,B]_k,\quad
+      a=\mathrm{input}[i];\\
+ &\quad \mathrm{wait}_{\mathrm V,\mathrm{MTE2}}(e);
+       \quad\kw{issue}[\mathrm{MTE2}](\kw{Load},a,u);
+       \quad\mathrm{set}_{\mathrm{MTE2},\mathrm V}(e);\\
+ &\quad \mathrm{wait}_{\mathrm{MTE2},\mathrm V}(e);
+       \quad\kw{issue}[\mathrm V](\kw{VExp},u,\mathrm{output});\\
+ &\quad \mathrm{set}_{\mathrm V,\mathrm{MTE2}}(e);
+       \quad\kw{pipebarrier}[\mathrm V];\quad\kw{end}\};\\
+ &\mathrm{wait}_{\mathrm V,\mathrm{MTE2}}(e_0);
+   \quad\mathrm{wait}_{\mathrm V,\mathrm{MTE2}}(e_1);
+   \quad\kw{pipebarrier}[\mathrm{ALL}];\quad\kw{return}().
+\end{aligned}
+\]
+循环体首行的四个赋值各表示一次同步 \(\kw{scalar}\) 绑定。\(\mathrm{input}[i]\)
+表示源文件中从元素偏移 \(1024i\) 开始的 GM tile。MTE2 完成装载后通知 V。
+V 在异步计算完成时更新 \(\mathrm{output}\)，随后以通知令牌释放所选缓冲区。
+示例中的 V 管道屏障使各轮对 \(\mathrm{output}\) 的更新保持顺序，同时允许 MTE2
+向另一块 UB 缓冲区装载下一轮输入。Rocq 实例用一个单元表示一个 tile，令
+\(\mathrm{VExp}(t)[j]=\mathrm{exp}_{f16}(t[j])\)，其中 \(0\le j<1024\)。
+单元素指数由实例参数给出。源程序、良构证明和逐轮发射序列见
+\texttt{Issue316.v} 的 \texttt{kernel}、\texttt{issue316\_well\_formed} 和 \texttt{issue316\_plan}。
 \end{document}
