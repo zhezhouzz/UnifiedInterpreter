@@ -1,0 +1,152 @@
+[
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":3:15)",
+    "op": "memref.alloca",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":6:5)",
+    "op": "memref.store",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":12:5)",
+    "op": "hivm.hir.set_ffts_base_addr",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":45:11)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":50:13)",
+    "op": "scf.for",
+    "reason": "general loop carries require a Core state representation"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":111:11)",
+    "op": "memref_ext.alloc_workspace",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":112:11)",
+    "op": "bufferization.to_tensor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":114:11)",
+    "op": "hivm.hir.fixpipe",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":116:11)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":118:11)",
+    "op": "hivm.hir.load",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":119:11)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":120:11)",
+    "op": "hivm.hir.load",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":123:5)",
+    "op": "hivm.hir.store",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":126:14)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":129:11)",
+    "op": "arith.maxsi",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":130:11)",
+    "op": "arith.minsi",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":136:11)",
+    "op": "bufferization.to_tensor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":137:11)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":141:11)",
+    "op": "hivm.hir.mmadL1",
+    "reason": "mmadL1 sync_related_args require internal MTE1/M protocol"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":150:11)",
+    "op": "arith.maxsi",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":151:11)",
+    "op": "arith.minsi",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":153:11)",
+    "op": "arith.minsi",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":154:11)",
+    "op": "arith.minsi",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":155:24)",
+    "op": "tensor.extract_slice",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "matmul_x_w_bias_down_up_fused_layer_1_kernel",
+    "location": "loc(\"<stdin>\":157:5)",
+    "op": "hivm.hir.fixpipe",
+    "reason": "requires bufferization"
+  }
+]

@@ -1,0 +1,33 @@
+{
+  "id": "zero-trip-alias",
+  "tier": "L2",
+  "category": "protocol-model",
+  "source_ref": "!3472 zero-trip alias minimal model",
+  "chip_profile": "Ascend910B1",
+  "core_ratio": "0:1",
+  "compile_argv": [
+    "bishengir-opt"
+  ],
+  "entry_functions": [
+    "kernel"
+  ],
+  "expected_verdict": {
+    "buggy": "wrong_value",
+    "fixed": "safe"
+  },
+  "oracle_note": "n=0 returns the initial UB view. Observe its vabs result after store.",
+  "execution": {
+    "streams": [
+      "kernel"
+    ],
+    "initial": {
+      "gm:1": 7
+    },
+    "arguments": {
+      "0": 0
+    },
+    "outputs": {
+      "gm:2": 7
+    }
+  }
+}

@@ -1,6 +1,0 @@
-run {
-  write[fill@PIPE_V](UB_BYTE_0, 5);
-  write[fill@PIPE_V](UB_BYTE_0, 2);
-  old := read[add@PIPE_V](UB_BYTE_0);
-  return()
-}

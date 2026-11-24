@@ -1,0 +1,36 @@
+{
+  "verdict": "wrong_value",
+  "states_discovered": 229,
+  "witness": [
+    "0:0 arith.constant",
+    "0:1 hivm.hir.pointer_cast",
+    "0:2 hivm.hir.pointer_cast",
+    "0:3 hivm.hir.pointer_cast",
+    "0:4 issue",
+    "0:5 setflag",
+    "0:6 waitflag",
+    "0:7 issue",
+    "0:8 issue",
+    "0:9 setflag",
+    "0:10 waitflag",
+    "0:11 issue",
+    "0:12 pipebarrier",
+    "0:4 issue.done[MTE2] ub:0:0=3",
+    "0:5 setflag.done[MTE2]",
+    "0:6 waitflag.done[V]",
+    "0:8 issue.done[MTE2] ub:0:0=2",
+    "0:7 issue.done[V]",
+    "0:9 setflag.done[MTE2]",
+    "0:10 waitflag.done[MTE3]",
+    "0:11 issue.done[MTE3] gm:4=2",
+    "0:12 pipebarrier.done[MTE2]",
+    "0:12 pipebarrier.done[V]",
+    "0:12 pipebarrier.done[MTE3]"
+  ],
+  "observation": {
+    "gm:4": {
+      "expected": 5,
+      "actual": 2
+    }
+  }
+}

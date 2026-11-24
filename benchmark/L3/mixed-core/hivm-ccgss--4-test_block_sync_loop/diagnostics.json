@@ -1,0 +1,38 @@
+[
+  {
+    "function": "test_block_sync_loop",
+    "location": "loc(\"<stdin>\":3:15)",
+    "op": "memref.alloca",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "test_block_sync_loop",
+    "location": "loc(\"<stdin>\":6:5)",
+    "op": "memref.store",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_block_sync_loop",
+    "location": "loc(\"<stdin>\":11:5)",
+    "op": "hivm.hir.set_ffts_base_addr",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_block_sync_loop",
+    "location": "loc(\"<stdin>\":28:12)",
+    "op": "memref.load",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_block_sync_loop",
+    "location": "loc(\"<stdin>\":44:7)",
+    "op": "hivm.hir.mmadL1",
+    "reason": "mmadL1 sync_related_args require internal MTE1/M protocol"
+  },
+  {
+    "function": "test_block_sync_loop",
+    "location": "loc(\"<stdin>\":67:7)",
+    "op": "memref.store",
+    "reason": "missing Core interpretation"
+  }
+]

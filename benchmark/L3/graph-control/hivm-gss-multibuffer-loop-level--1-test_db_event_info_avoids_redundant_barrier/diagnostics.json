@@ -1,0 +1,32 @@
+[
+  {
+    "function": "test_db_event_info_avoids_redundant_barrier",
+    "location": "loc(\"<stdin>\":3:15)",
+    "op": "memref.alloca",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "test_db_event_info_avoids_redundant_barrier",
+    "location": "loc(\"<stdin>\":6:5)",
+    "op": "memref.store",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_db_event_info_avoids_redundant_barrier",
+    "location": "loc(\"<stdin>\":16:12)",
+    "op": "memref.load",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_db_event_info_avoids_redundant_barrier",
+    "location": "loc(\"<stdin>\":25:7)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_db_event_info_avoids_redundant_barrier",
+    "location": "loc(\"<stdin>\":35:7)",
+    "op": "memref.store",
+    "reason": "missing Core interpretation"
+  }
+]

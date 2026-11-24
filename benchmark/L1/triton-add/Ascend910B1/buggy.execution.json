@@ -1,0 +1,53 @@
+{
+  "verdict": "wrong_value",
+  "states_discovered": 112,
+  "witness": [
+    "0:0 arith.constant",
+    "0:1 arith.constant",
+    "0:2 arith.constant",
+    "0:3 arith.constant",
+    "0:4 arith.constant",
+    "0:5 hivm.hir.set_mask_norm",
+    "0:6 arith.muli",
+    "0:7 arith.muli",
+    "0:8 annotation.mark",
+    "0:9 hivm.hir.get_block_idx",
+    "0:10 arith.trunci",
+    "0:11 arith.remsi",
+    "0:12 arith.muli",
+    "0:13 arith.index_cast",
+    "0:14 memref.reinterpret_cast",
+    "0:15 hivm.hir.pointer_cast",
+    "0:16 arith.index_cast",
+    "0:17 affine.max",
+    "0:18 affine.min",
+    "0:19 affine.apply",
+    "0:20 arith.cmpi",
+    "0:21 memref.subview",
+    "0:22 memref.subview",
+    "0:23 branch False",
+    "0:24 issue",
+    "0:25 memref.reinterpret_cast",
+    "0:26 hivm.hir.pointer_cast",
+    "0:27 memref.subview",
+    "0:28 memref.subview",
+    "0:29 branch False",
+    "0:30 issue",
+    "0:31 memref.reinterpret_cast",
+    "0:32 hivm.hir.pointer_cast",
+    "0:33 issue",
+    "0:34 memref.subview",
+    "0:35 memref.subview",
+    "0:36 issue",
+    "0:24 issue.done[MTE2] ub:0:0=2",
+    "0:30 issue.done[MTE2] ub:0:1024=3",
+    "0:36 issue.done[MTE3] gm:5=2",
+    "0:33 issue.done[V] ub:0:0=5"
+  ],
+  "observation": {
+    "gm:5": {
+      "expected": 5,
+      "actual": 2
+    }
+  }
+}

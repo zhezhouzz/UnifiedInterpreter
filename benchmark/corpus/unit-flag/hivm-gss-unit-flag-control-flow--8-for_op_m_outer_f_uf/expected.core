@@ -1,9 +1,0 @@
-run {
-  waitflag[PIPE_M, PIPE_MTE1](EVENT_ID0);
-  waitflag[PIPE_M, PIPE_MTE1](EVENT_ID1);
-  waitflag[PIPE_MTE1, PIPE_MTE2](EVENT_ID0);
-  waitflag[PIPE_MTE1, PIPE_MTE2](EVENT_ID1);
-  setflag[PIPE_M, PIPE_FIX](EVENT_ID0);
-  waitflag[PIPE_M, PIPE_FIX](EVENT_ID0);
-  return()
-}

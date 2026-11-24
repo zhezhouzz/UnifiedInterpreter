@@ -1,0 +1,24 @@
+{
+  "id": "issue-input/1027",
+  "tier": "L3",
+  "category": "issue-input",
+  "source_ref": "https://gitcode.com/Ascend/AscendNPU-IR/blob/d88edb84635bf47f0eeed6fc9d571e89e17357d3/bishengir/test/Dialect/HIVM/insert-fixpipe-for-scf-if-mmad.mlir",
+  "chip_profile": "Ascend950PR_9579",
+  "core_ratio": null,
+  "compile_argv": [
+    "bishengir-opt",
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2"
+  ],
+  "entry_functions": [
+    "single_fixpipe_after_scf_if",
+    "bound_accumulator_with_branch_users",
+    "bound_if_initializes_loop",
+    "resident_if_with_branch_stores",
+    "bound_if_with_c_only_users"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "split_index": 0
+}

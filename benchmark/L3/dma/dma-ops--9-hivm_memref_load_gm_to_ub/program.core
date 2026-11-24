@@ -1,0 +1,61 @@
+{
+  "hivm_memref_load_gm_to_ub": {
+    "params": [],
+    "body": [
+      {
+        "cmd": "alloc",
+        "space": "gm",
+        "args": [],
+        "results": [
+          0
+        ],
+        "types": [
+          "memref<16x16xf16, #hivm.address_space<gm>>"
+        ],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>"
+        }
+      },
+      {
+        "cmd": "alloc",
+        "space": "ub",
+        "args": [],
+        "results": [
+          1
+        ],
+        "types": [
+          "memref<16x16xf16, #hivm.address_space<ub>>"
+        ],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>"
+        }
+      },
+      {
+        "cmd": "issue",
+        "p": "MTE2",
+        "fn": "load",
+        "write_operand": 1,
+        "read_operands": [
+          0
+        ],
+        "args": [
+          0,
+          1
+        ],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 1, 1, 0, 0, 0, 0>"
+        }
+      },
+      {
+        "cmd": "return",
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {}
+      }
+    ],
+    "core_kind": null
+  }
+}

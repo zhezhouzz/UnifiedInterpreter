@@ -1,0 +1,98 @@
+[
+  {
+    "function": "packed_column_and_row",
+    "location": "loc(\"<stdin>\":6:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "packed_column_and_row",
+    "location": "loc(\"<stdin>\":7:10)",
+    "op": "hivm.hir.vbrc",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "packed_column_and_row",
+    "location": "loc(\"<stdin>\":8:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "packed_column_and_row",
+    "location": "loc(\"<stdin>\":9:10)",
+    "op": "hivm.hir.vbrc",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "packed_column_and_row",
+    "location": "loc(\"<stdin>\":11:10)",
+    "op": "bufferization.to_tensor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "packed_column_and_row",
+    "location": "loc(\"<stdin>\":12:5)",
+    "op": "hivm.hir.copy",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "packed_column_and_row",
+    "location": "loc(\"<stdin>\":13:24)",
+    "op": "tensor.extract_slice",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "packed_column_and_row",
+    "location": "loc(\"<stdin>\":14:10)",
+    "op": "hivm.hir.convert_layout",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "packed_column_and_row",
+    "location": "loc(\"<stdin>\":15:23)",
+    "op": "tensor.insert_slice",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "packed_column_and_row",
+    "location": "loc(\"<stdin>\":17:10)",
+    "op": "bufferization.to_tensor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "packed_column_and_row",
+    "location": "loc(\"<stdin>\":18:5)",
+    "op": "hivm.hir.copy",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "packed_column_and_row",
+    "location": "loc(\"<stdin>\":19:26)",
+    "op": "tensor.extract_slice",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "packed_column_and_row",
+    "location": "loc(\"<stdin>\":20:25)",
+    "op": "tensor.insert_slice",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "packed_column_and_row",
+    "location": "loc(\"<stdin>\":21:10)",
+    "op": "hivm.hir.convert_layout",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "packed_column_and_row",
+    "location": "loc(\"<stdin>\":22:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "packed_column_and_row",
+    "location": "loc(\"<stdin>\":23:10)",
+    "op": "hivm.hir.mmadL1",
+    "reason": "requires bufferization"
+  }
+]

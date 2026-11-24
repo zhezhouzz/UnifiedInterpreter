@@ -1,0 +1,14 @@
+[
+  {
+    "function": "test_custom_macro_internal_slot",
+    "location": "loc(\"<stdin>\":11:5)",
+    "op": "hivm.hir.custom_macro",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_custom_macro_internal_slot_with_pipes",
+    "location": "loc(\"<stdin>\":25:5)",
+    "op": "hivm.hir.custom_macro",
+    "reason": "missing Core interpretation"
+  }
+]

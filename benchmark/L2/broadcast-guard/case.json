@@ -1,0 +1,34 @@
+{
+  "id": "broadcast-guard",
+  "tier": "L2",
+  "category": "protocol-model",
+  "source_ref": "kern3 / MIX forward single-round model",
+  "chip_profile": "Ascend910B1",
+  "core_ratio": "1:2",
+  "compile_argv": [
+    "bishengir-opt",
+    "-canonicalize"
+  ],
+  "entry_functions": [
+    "producer",
+    "consumer"
+  ],
+  "expected_verdict": {
+    "buggy": "protocol_violation",
+    "fixed": "safe"
+  },
+  "oracle_note": "One AIC broadcasts to two AIVs. Bug excludes sub-block 1, leaving its own token live.",
+  "execution": {
+    "streams": [
+      "producer",
+      "consumer",
+      "consumer"
+    ],
+    "initial": {},
+    "kinds": [
+      "AIC",
+      "AIV",
+      "AIV"
+    ]
+  }
+}

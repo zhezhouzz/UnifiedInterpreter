@@ -1,0 +1,32 @@
+[
+  {
+    "function": "for_op_m_outer_f_uf",
+    "location": "loc(\"<stdin>\":3:15)",
+    "op": "memref.alloca",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "for_op_m_outer_f_uf",
+    "location": "loc(\"<stdin>\":6:5)",
+    "op": "memref.store",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "for_op_m_outer_f_uf",
+    "location": "loc(\"<stdin>\":26:12)",
+    "op": "memref.load",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "for_op_m_outer_f_uf",
+    "location": "loc(\"<stdin>\":40:7)",
+    "op": "hivm.hir.mmadL1",
+    "reason": "mmadL1 sync_related_args require internal MTE1/M protocol"
+  },
+  {
+    "function": "for_op_m_outer_f_uf",
+    "location": "loc(\"<stdin>\":44:7)",
+    "op": "memref.store",
+    "reason": "missing Core interpretation"
+  }
+]

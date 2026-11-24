@@ -1,0 +1,41 @@
+{
+  "id": "add-Ascend950PR_9579",
+  "tier": "L1",
+  "category": "auto-sync differential",
+  "source_ref": "Triton masked add, kernels.py",
+  "chip_profile": "Ascend950PR_9579",
+  "core_ratio": "0:1",
+  "compile_argv": [
+    "bishengir-compile",
+    "--target=Ascend950PR_9579",
+    "--enable-hfusion-compile",
+    "--enable-triton-kernel-compile",
+    "--enable-lir-compile=false",
+    "--disable-hivm-auto-inject-sync=false",
+    "--mlir-disable-threading",
+    "--mlir-print-ir-module-scope",
+    "--mlir-print-ir-after-all",
+    "-o",
+    "kernel.ll"
+  ],
+  "entry_functions": [
+    "add_kernel"
+  ],
+  "pass_boundary": "hivm-enable-multi-buffer",
+  "expected_verdict": null,
+  "oracle_note": "buggy/fixed filenames denote requested off/on settings. At the common pass boundary both contain identical synchronization on this driver.",
+  "variants": true,
+  "buggy_compile_argv": [
+    "bishengir-compile",
+    "--target=Ascend950PR_9579",
+    "--enable-hfusion-compile",
+    "--enable-triton-kernel-compile",
+    "--enable-lir-compile=false",
+    "--disable-hivm-auto-inject-sync=true",
+    "--mlir-disable-threading",
+    "--mlir-print-ir-module-scope",
+    "--mlir-print-ir-after-all",
+    "-o",
+    "kernel.ll"
+  ]
+}

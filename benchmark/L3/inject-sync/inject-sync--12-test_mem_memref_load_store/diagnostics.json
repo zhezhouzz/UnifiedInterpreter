@@ -1,0 +1,50 @@
+[
+  {
+    "function": "test_mem_memref_load_store",
+    "location": "loc(\"<stdin>\":11:5)",
+    "op": "hivm.hir.set_flag",
+    "reason": "intra-stream scalar endpoint requires local-scalar-memory profile"
+  },
+  {
+    "function": "test_mem_memref_load_store",
+    "location": "loc(\"<stdin>\":12:5)",
+    "op": "hivm.hir.wait_flag",
+    "reason": "intra-stream scalar endpoint requires local-scalar-memory profile"
+  },
+  {
+    "function": "test_mem_memref_load_store",
+    "location": "loc(\"<stdin>\":14:12)",
+    "op": "memref.load",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_mem_memref_load_store",
+    "location": "loc(\"<stdin>\":15:12)",
+    "op": "memref.load",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_mem_memref_load_store",
+    "location": "loc(\"<stdin>\":16:12)",
+    "op": "arith.addf",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_mem_memref_load_store",
+    "location": "loc(\"<stdin>\":17:7)",
+    "op": "memref.store",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_mem_memref_load_store",
+    "location": "loc(\"<stdin>\":19:5)",
+    "op": "hivm.hir.set_flag",
+    "reason": "intra-stream scalar endpoint requires local-scalar-memory profile"
+  },
+  {
+    "function": "test_mem_memref_load_store",
+    "location": "loc(\"<stdin>\":20:5)",
+    "op": "hivm.hir.wait_flag",
+    "reason": "intra-stream scalar endpoint requires local-scalar-memory profile"
+  }
+]

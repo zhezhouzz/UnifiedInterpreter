@@ -1,0 +1,20 @@
+{
+  "id": "repair-regression/mr-3684",
+  "tier": "L3",
+  "category": "repair-regression",
+  "source_ref": "https://gitcode.com/Ascend/AscendNPU-IR/blob/711e1724f19832ed8a4a90a30251803d490c90f7/bishengir/test/Dialect/HIVM/hivm-create-preload-local-buffer-after-loop.mlir",
+  "chip_profile": null,
+  "core_ratio": null,
+  "compile_argv": [
+    "bishengir-opt",
+    "-create-preload"
+  ],
+  "entry_functions": [
+    "yield_preload_local_used_after"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "split_index": 0,
+  "upstream_path": "bishengir/test/Dialect/HIVM/hivm-create-preload-local-buffer-after-loop.mlir"
+}

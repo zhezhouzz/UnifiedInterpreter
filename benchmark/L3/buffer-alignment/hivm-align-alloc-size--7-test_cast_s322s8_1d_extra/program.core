@@ -1,0 +1,65 @@
+{
+  "test_cast_s322s8_1d_extra": {
+    "params": [],
+    "body": [
+      {
+        "cmd": "alloc",
+        "space": "ub",
+        "args": [],
+        "results": [
+          0
+        ],
+        "types": [
+          "memref<2xi32, #hivm.address_space<ub>>"
+        ],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>"
+        }
+      },
+      {
+        "cmd": "alloc",
+        "space": "ub",
+        "args": [],
+        "results": [
+          1
+        ],
+        "types": [
+          "memref<2xi8, #hivm.address_space<ub>>"
+        ],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>"
+        }
+      },
+      {
+        "cmd": "issue",
+        "p": "V",
+        "fn": "vcast",
+        "write_operand": 1,
+        "read_operands": [
+          0
+        ],
+        "args": [
+          0,
+          1
+        ],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "broadcast": "array<i64>",
+          "cast": "#hivm.cast<cast_signed>",
+          "operandSegmentSizes": "array<i32: 1, 1, 0>",
+          "round_mode": "#hivm.round_mode<truncwithoverflow>",
+          "transpose": "array<i64>"
+        }
+      },
+      {
+        "cmd": "return",
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {}
+      }
+    ],
+    "core_kind": null
+  }
+}

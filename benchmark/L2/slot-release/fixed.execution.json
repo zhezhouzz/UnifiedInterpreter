@@ -1,0 +1,6 @@
+{
+  "verdict": "safe",
+  "states_discovered": 19,
+  "witness": [],
+  "observation": "reachable state space exhausted"
+}

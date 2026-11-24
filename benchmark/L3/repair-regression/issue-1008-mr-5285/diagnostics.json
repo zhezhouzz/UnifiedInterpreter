@@ -1,0 +1,38 @@
+[
+  {
+    "function": "matmul_mix_aiv_with_bind_sub_block_tag",
+    "location": "loc(\"<stdin>\":8:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "matmul_mix_aiv_with_bind_sub_block_tag",
+    "location": "loc(\"<stdin>\":13:26)",
+    "op": "tensor.extract_slice",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "matmul_mix_aiv_with_bind_sub_block_tag",
+    "location": "loc(\"<stdin>\":14:12)",
+    "op": "hivm.hir.vadd",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "matmul_mix_aiv_with_bind_sub_block_tag",
+    "location": "loc(\"<stdin>\":15:12)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "matmul_mix_aiv_with_bind_sub_block_tag",
+    "location": "loc(\"<stdin>\":16:12)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "matmul_mix_aiv_with_bind_sub_block_tag",
+    "location": "loc(\"<stdin>\":17:7)",
+    "op": "bufferization.materialize_in_destination",
+    "reason": "missing Core interpretation"
+  }
+]

@@ -1,0 +1,8 @@
+[
+  {
+    "function": "test_custom_macro_wait_inject_set",
+    "location": "loc(\"<stdin>\":8:5)",
+    "op": "hivm.hir.custom_macro",
+    "reason": "missing Core interpretation"
+  }
+]

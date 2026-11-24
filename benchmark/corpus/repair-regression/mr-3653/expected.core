@@ -1,4 +1,0 @@
-run {
-  work_6 := compute[unit_vexp@PIPE_V]();
-  return()
-}

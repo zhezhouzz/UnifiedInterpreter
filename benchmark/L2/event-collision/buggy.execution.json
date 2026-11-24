@@ -1,0 +1,10 @@
+{
+  "verdict": "protocol_violation",
+  "states_discovered": 8,
+  "witness": [
+    "0:0 setflag",
+    "0:1 setflag",
+    "0:0 setflag.done[MTE2]"
+  ],
+  "observation": "0:1 setflag at queue head, next slot [(False, 0, 'MTE2', 'V', 0, 2)]"
+}

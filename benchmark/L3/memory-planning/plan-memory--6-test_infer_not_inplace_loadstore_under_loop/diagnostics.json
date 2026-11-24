@@ -1,0 +1,20 @@
+[
+  {
+    "function": "test_infer_not_inplace_loadstore_under_loop",
+    "location": "loc(\"<stdin>\":11:7)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_infer_not_inplace_loadstore_under_loop",
+    "location": "loc(\"<stdin>\":14:7)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_infer_not_inplace_loadstore_under_loop",
+    "location": "loc(\"<stdin>\":16:7)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  }
+]

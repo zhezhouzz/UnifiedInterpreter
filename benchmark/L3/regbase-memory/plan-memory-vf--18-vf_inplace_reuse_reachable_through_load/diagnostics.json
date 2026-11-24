@@ -1,0 +1,26 @@
+[
+  {
+    "function": "vf_inplace_reuse_reachable_through_load",
+    "location": "loc(\"<stdin>\":5:10)",
+    "op": "vector.transfer_read",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "vf_inplace_reuse_reachable_through_load",
+    "location": "loc(\"<stdin>\":6:5)",
+    "op": "vector.transfer_write",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "plan_memory_vf_no_inplace_reuse_with_reshape_user",
+    "location": "loc(\"<stdin>\":21:25)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "plan_memory_vf_no_inplace_reuse_with_reshape_user",
+    "location": "loc(\"<stdin>\":25:7)",
+    "op": "func.call",
+    "reason": "missing Core interpretation"
+  }
+]

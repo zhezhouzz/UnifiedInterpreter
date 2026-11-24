@@ -1,4 +1,0 @@
-run {
-  work_24 := compute[unit_load@PIPE_MTE2]();
-  return()
-}

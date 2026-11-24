@@ -1,0 +1,92 @@
+[
+  {
+    "function": "vfreuse_store_subview_collapseshape_outlined_vf_2",
+    "location": "loc(\"<stdin>\":16:14)",
+    "op": "vector.transfer_read",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "vfreuse_store_subview_collapseshape_outlined_vf_2",
+    "location": "loc(\"<stdin>\":17:14)",
+    "op": "vector.transfer_read",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "vfreuse_store_subview_collapseshape_outlined_vf_2",
+    "location": "loc(\"<stdin>\":18:14)",
+    "op": "arith.extf",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "vfreuse_store_subview_collapseshape_outlined_vf_2",
+    "location": "loc(\"<stdin>\":19:14)",
+    "op": "arith.mulf",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "vfreuse_store_subview_collapseshape_outlined_vf_2",
+    "location": "loc(\"<stdin>\":20:14)",
+    "op": "math.exp",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "vfreuse_store_subview_collapseshape_outlined_vf_2",
+    "location": "loc(\"<stdin>\":21:14)",
+    "op": "arith.addf",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "vfreuse_store_subview_collapseshape_outlined_vf_2",
+    "location": "loc(\"<stdin>\":22:14)",
+    "op": "arith.divf",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "vfreuse_store_subview_collapseshape_outlined_vf_2",
+    "location": "loc(\"<stdin>\":23:14)",
+    "op": "arith.extf",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "vfreuse_store_subview_collapseshape_outlined_vf_2",
+    "location": "loc(\"<stdin>\":24:14)",
+    "op": "arith.mulf",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "vfreuse_store_subview_collapseshape_outlined_vf_2",
+    "location": "loc(\"<stdin>\":25:14)",
+    "op": "arith.truncf",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "vfreuse_store_subview_collapseshape_outlined_vf_2",
+    "location": "loc(\"<stdin>\":26:9)",
+    "op": "vector.transfer_write",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "vfreuse_store_subview_collapseshape",
+    "location": "loc(\"<stdin>\":44:25)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "vfreuse_store_subview_collapseshape",
+    "location": "loc(\"<stdin>\":47:27)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "vfreuse_store_subview_collapseshape",
+    "location": "loc(\"<stdin>\":52:7)",
+    "op": "func.call",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "vfreuse_store_subview_collapseshape",
+    "location": "loc(\"<stdin>\":55:27)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  }
+]

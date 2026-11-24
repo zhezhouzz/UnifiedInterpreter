@@ -1,8 +1,0 @@
-run {
-  a := read[mem](CELL_0);
-  write[mem](CELL_2, a);
-  write[mem](CELL_2, 0);
-  b := read[mem](CELL_2);
-  write[mem](CELL_1, b);
-  return()
-}

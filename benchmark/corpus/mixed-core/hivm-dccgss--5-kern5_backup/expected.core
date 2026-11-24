@@ -1,4 +1,0 @@
-run {
-  work_21 := compute[unit_vadd@PIPE_V]();
-  return()
-}

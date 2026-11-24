@@ -1,0 +1,14 @@
+[
+  {
+    "function": "propagate_up_from_for_result",
+    "location": "loc(\"<stdin>\":3:10)",
+    "op": "hivm.hir.convert_layout",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "propagate_up_from_for_result",
+    "location": "loc(\"<stdin>\":4:10)",
+    "op": "scf.for",
+    "reason": "expected one invariant yielded view"
+  }
+]

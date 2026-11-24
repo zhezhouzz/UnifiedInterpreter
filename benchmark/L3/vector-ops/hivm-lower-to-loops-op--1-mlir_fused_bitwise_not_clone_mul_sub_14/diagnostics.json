@@ -1,0 +1,86 @@
+[
+  {
+    "function": "mlir_fused_bitwise_not_clone_mul_sub_14",
+    "location": "loc(\"<stdin>\":15:23)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "mlir_fused_bitwise_not_clone_mul_sub_14",
+    "location": "loc(\"<stdin>\":16:25)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "mlir_fused_bitwise_not_clone_mul_sub_14",
+    "location": "loc(\"<stdin>\":17:25)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "mlir_fused_bitwise_not_clone_mul_sub_14",
+    "location": "loc(\"<stdin>\":25:15)",
+    "op": "memref.view",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "mlir_fused_bitwise_not_clone_mul_sub_14",
+    "location": "loc(\"<stdin>\":30:17)",
+    "op": "memref.view",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "mlir_fused_bitwise_not_clone_mul_sub_14",
+    "location": "loc(\"<stdin>\":36:17)",
+    "op": "memref.view",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "mlir_fused_bitwise_not_clone_mul_sub_14",
+    "location": "loc(\"<stdin>\":40:17)",
+    "op": "memref.view",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "mlir_fused_bitwise_not_clone_mul_sub_14",
+    "location": "loc(\"<stdin>\":42:7)",
+    "op": "hivm.hir.vcmp",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "mlir_fused_bitwise_not_clone_mul_sub_14",
+    "location": "loc(\"<stdin>\":44:17)",
+    "op": "memref.view",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "mlir_fused_bitwise_not_clone_mul_sub_14",
+    "location": "loc(\"<stdin>\":46:7)",
+    "op": "hivm.hir.vnot",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "mlir_fused_bitwise_not_clone_mul_sub_14",
+    "location": "loc(\"<stdin>\":48:17)",
+    "op": "memref.view",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "mlir_fused_bitwise_not_clone_mul_sub_14",
+    "location": "loc(\"<stdin>\":53:17)",
+    "op": "memref.view",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "mlir_fused_bitwise_not_clone_mul_sub_14",
+    "location": "loc(\"<stdin>\":57:18)",
+    "op": "memref.view",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "mlir_fused_bitwise_not_clone_mul_sub_14",
+    "location": "loc(\"<stdin>\":61:18)",
+    "op": "memref.view",
+    "reason": "missing Core interpretation"
+  }
+]

@@ -1,0 +1,26 @@
+[
+  {
+    "function": "yield_preload_local_used_after",
+    "location": "loc(\"<stdin>\":17:10)",
+    "op": "scf.for",
+    "reason": "iteration-dependent carried view"
+  },
+  {
+    "function": "yield_preload_local_used_after",
+    "location": "loc(\"<stdin>\":48:23)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "yield_preload_local_used_after",
+    "location": "loc(\"<stdin>\":49:25)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "yield_preload_local_used_after",
+    "location": "loc(\"<stdin>\":51:25)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  }
+]

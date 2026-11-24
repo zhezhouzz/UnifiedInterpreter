@@ -1,0 +1,21 @@
+{
+  "id": "repair-regression/mr-3520",
+  "tier": "L3",
+  "category": "repair-regression",
+  "source_ref": "https://gitcode.com/Ascend/AscendNPU-IR/blob/95ec65165da1e9cb1c7db9ea782f88f019eb9f65/bishengir/test/Dialect/HIVM/infer-hivm-mem-scope.mlir",
+  "chip_profile": null,
+  "core_ratio": null,
+  "compile_argv": [
+    "bishengir-opt",
+    "-allow-unregistered-dialect",
+    "-hivm-infer-mem-scope"
+  ],
+  "entry_functions": [
+    "test_scf_if_0"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "split_index": 8,
+  "upstream_path": "bishengir/test/Dialect/HIVM/infer-hivm-mem-scope.mlir"
+}

@@ -1,0 +1,20 @@
+{
+  "id": "repair-regression/issue-1026-mr-5303",
+  "tier": "L3",
+  "category": "repair-regression",
+  "source_ref": "https://gitcode.com/Ascend/AscendNPU-IR/blob/3b682d4956d76ec6115fa01dc8540d48960950f1/bishengir/test/Dialect/HIVM/convert-layout-to-transpose.mlir",
+  "chip_profile": null,
+  "core_ratio": null,
+  "compile_argv": [
+    "bishengir-opt",
+    "--hivm-convert-layout-to-transpose=use-3d-transpose=true"
+  ],
+  "entry_functions": [
+    "nd_to_fractal_aligned_f16"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "split_index": 0,
+  "upstream_path": "bishengir/test/Dialect/HIVM/convert-layout-to-transpose.mlir"
+}

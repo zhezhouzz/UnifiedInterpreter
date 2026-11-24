@@ -1,0 +1,219 @@
+{
+  "kernel": {
+    "params": [
+      {
+        "id": 0,
+        "type": "memref<1xf32, #hivm.address_space<gm>>"
+      },
+      {
+        "id": 1,
+        "type": "memref<1xf32, #hivm.address_space<gm>>"
+      }
+    ],
+    "body": [
+      {
+        "cmd": "scalar",
+        "fn": "arith.constant",
+        "args": [],
+        "results": [
+          2
+        ],
+        "types": [
+          "f32"
+        ],
+        "attrs": {
+          "value": "7.000000e+00 : f32"
+        }
+      },
+      {
+        "cmd": "scalar",
+        "fn": "arith.constant",
+        "args": [],
+        "results": [
+          3
+        ],
+        "types": [
+          "index"
+        ],
+        "attrs": {
+          "value": "0 : index"
+        }
+      },
+      {
+        "cmd": "scalar",
+        "fn": "arith.constant",
+        "args": [],
+        "results": [
+          4
+        ],
+        "types": [
+          "i64"
+        ],
+        "attrs": {
+          "value": "256 : i64"
+        }
+      },
+      {
+        "cmd": "scalar",
+        "fn": "arith.constant",
+        "args": [],
+        "results": [
+          5
+        ],
+        "types": [
+          "i64"
+        ],
+        "attrs": {
+          "value": "0 : i64"
+        }
+      },
+      {
+        "cmd": "scalar",
+        "fn": "hivm.hir.pointer_cast",
+        "args": [
+          5
+        ],
+        "results": [
+          6
+        ],
+        "types": [
+          "memref<1xf32, #hivm.address_space<ub>>"
+        ],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 1, 0>"
+        }
+      },
+      {
+        "cmd": "scalar",
+        "fn": "hivm.hir.pointer_cast",
+        "args": [
+          4
+        ],
+        "results": [
+          7
+        ],
+        "types": [
+          "memref<1xf32, #hivm.address_space<ub>>"
+        ],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 1, 0>"
+        }
+      },
+      {
+        "cmd": "issue",
+        "p": "V",
+        "fn": "vabs",
+        "write_operand": 1,
+        "read_operands": [
+          0
+        ],
+        "args": [
+          6,
+          7
+        ],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "broadcast": "array<i64>",
+          "operandSegmentSizes": "array<i32: 1, 1, 0>",
+          "transpose": "array<i64>"
+        }
+      },
+      {
+        "cmd": "setflag",
+        "p": "V",
+        "q": "S",
+        "event": 0,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "set_pipe": "#hivm.pipe<PIPE_V>",
+          "static_event_id": "#hivm.event<EVENT_ID0>",
+          "wait_pipe": "#hivm.pipe<PIPE_S>"
+        }
+      },
+      {
+        "cmd": "waitflag",
+        "p": "V",
+        "q": "S",
+        "event": 0,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "set_pipe": "#hivm.pipe<PIPE_V>",
+          "static_event_id": "#hivm.event<EVENT_ID0>",
+          "wait_pipe": "#hivm.pipe<PIPE_S>"
+        }
+      },
+      {
+        "cmd": "scalarstore",
+        "args": [
+          2,
+          6,
+          3
+        ],
+        "results": [],
+        "types": [],
+        "attrs": {}
+      },
+      {
+        "cmd": "setflag",
+        "p": "S",
+        "q": "V",
+        "event": 0,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "set_pipe": "#hivm.pipe<PIPE_S>",
+          "static_event_id": "#hivm.event<EVENT_ID0>",
+          "wait_pipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "waitflag",
+        "p": "S",
+        "q": "V",
+        "event": 0,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "set_pipe": "#hivm.pipe<PIPE_S>",
+          "static_event_id": "#hivm.event<EVENT_ID0>",
+          "wait_pipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "issue",
+        "p": "V",
+        "fn": "vabs",
+        "write_operand": 1,
+        "read_operands": [
+          0
+        ],
+        "args": [
+          6,
+          7
+        ],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "broadcast": "array<i64>",
+          "operandSegmentSizes": "array<i32: 1, 1, 0>",
+          "transpose": "array<i64>"
+        }
+      },
+      {
+        "cmd": "return",
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {}
+      }
+    ],
+    "core_kind": null
+  }
+}

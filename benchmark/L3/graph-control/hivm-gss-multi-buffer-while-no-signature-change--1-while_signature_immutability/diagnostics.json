@@ -1,0 +1,8 @@
+[
+  {
+    "function": "while_signature_immutability",
+    "location": "loc(\"<stdin>\":5:12)",
+    "op": "scf.while",
+    "reason": "missing Core interpretation"
+  }
+]

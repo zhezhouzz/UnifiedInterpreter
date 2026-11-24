@@ -1,0 +1,8 @@
+[
+  {
+    "function": "test_sync_solver_expand_shape",
+    "location": "loc(\"<stdin>\":14:21)",
+    "op": "memref.expand_shape",
+    "reason": "missing Core interpretation"
+  }
+]

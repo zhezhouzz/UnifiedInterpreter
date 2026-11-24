@@ -1,0 +1,38 @@
+[
+  {
+    "function": "dot_abs",
+    "location": "loc(\"<stdin>\":5:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "dot_abs",
+    "location": "loc(\"<stdin>\":6:10)",
+    "op": "hivm.hir.mmadL1",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "dot_abs",
+    "location": "loc(\"<stdin>\":7:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "dot_abs",
+    "location": "loc(\"<stdin>\":8:10)",
+    "op": "hivm.hir.fixpipe",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "dot_abs",
+    "location": "loc(\"<stdin>\":9:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "dot_abs",
+    "location": "loc(\"<stdin>\":10:10)",
+    "op": "hivm.hir.vabs",
+    "reason": "requires bufferization"
+  }
+]

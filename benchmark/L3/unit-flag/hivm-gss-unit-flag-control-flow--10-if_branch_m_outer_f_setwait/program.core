@@ -1,0 +1,394 @@
+{
+  "if_branch_m_outer_f_setwait": {
+    "params": [
+      {
+        "id": 0,
+        "type": "memref<16xf32, #hivm.address_space<gm>>"
+      },
+      {
+        "id": 1,
+        "type": "memref<16xf32, #hivm.address_space<gm>>"
+      },
+      {
+        "id": 2,
+        "type": "memref<256xf32, #hivm.address_space<gm>>"
+      },
+      {
+        "id": 3,
+        "type": "i1"
+      }
+    ],
+    "body": [
+      {
+        "cmd": "scalar",
+        "fn": "arith.constant",
+        "args": [],
+        "results": [
+          4
+        ],
+        "types": [
+          "i64"
+        ],
+        "attrs": {
+          "value": "0 : i64"
+        }
+      },
+      {
+        "cmd": "scalar",
+        "fn": "arith.constant",
+        "args": [],
+        "results": [
+          5
+        ],
+        "types": [
+          "i64"
+        ],
+        "attrs": {
+          "value": "64 : i64"
+        }
+      },
+      {
+        "cmd": "scalar",
+        "fn": "arith.constant",
+        "args": [],
+        "results": [
+          6
+        ],
+        "types": [
+          "i1"
+        ],
+        "attrs": {
+          "value": "true"
+        }
+      },
+      {
+        "cmd": "scalar",
+        "fn": "arith.constant",
+        "args": [],
+        "results": [
+          7
+        ],
+        "types": [
+          "index"
+        ],
+        "attrs": {
+          "value": "16 : index"
+        }
+      },
+      {
+        "cmd": "scalar",
+        "fn": "arith.constant",
+        "args": [],
+        "results": [
+          8
+        ],
+        "types": [
+          "index"
+        ],
+        "attrs": {
+          "value": "256 : index"
+        }
+      },
+      {
+        "cmd": "scalar",
+        "fn": "arith.constant",
+        "args": [],
+        "results": [
+          9
+        ],
+        "types": [
+          "i64"
+        ],
+        "attrs": {
+          "value": "-1 : i64"
+        }
+      },
+      {
+        "cmd": "scalar",
+        "fn": "hivm.hir.pointer_cast",
+        "args": [
+          4
+        ],
+        "results": [
+          10
+        ],
+        "types": [
+          "memref<16xf32, #hivm.address_space<cbuf>>"
+        ],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 1, 0>"
+        }
+      },
+      {
+        "cmd": "issue",
+        "p": "MTE2",
+        "fn": "nd2nz",
+        "write_operand": 1,
+        "read_operands": [
+          0
+        ],
+        "args": [
+          0,
+          10
+        ],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "dst_continuous": "unit",
+          "operandSegmentSizes": "array<i32: 1, 1, 0, 0>"
+        }
+      },
+      {
+        "cmd": "scalar",
+        "fn": "hivm.hir.pointer_cast",
+        "args": [
+          5
+        ],
+        "results": [
+          11
+        ],
+        "types": [
+          "memref<16xf32, #hivm.address_space<cbuf>>"
+        ],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 1, 0>"
+        }
+      },
+      {
+        "cmd": "issue",
+        "p": "MTE2",
+        "fn": "nd2nz",
+        "write_operand": 1,
+        "read_operands": [
+          0
+        ],
+        "args": [
+          1,
+          11
+        ],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "dst_continuous": "unit",
+          "operandSegmentSizes": "array<i32: 1, 1, 0, 0>"
+        }
+      },
+      {
+        "cmd": "setflag",
+        "p": "MTE2",
+        "q": "MTE1",
+        "event": 0,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "set_pipe": "#hivm.pipe<PIPE_MTE2>",
+          "static_event_id": "#hivm.event<EVENT_ID0>",
+          "wait_pipe": "#hivm.pipe<PIPE_MTE1>"
+        }
+      },
+      {
+        "cmd": "scalar",
+        "fn": "hivm.hir.pointer_cast",
+        "args": [
+          4
+        ],
+        "results": [
+          12
+        ],
+        "types": [
+          "memref<256xf32, #hivm.address_space<cc>>"
+        ],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 1, 0>"
+        }
+      },
+      {
+        "cmd": "waitflag",
+        "p": "MTE2",
+        "q": "MTE1",
+        "event": 0,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "set_pipe": "#hivm.pipe<PIPE_MTE2>",
+          "static_event_id": "#hivm.event<EVENT_ID0>",
+          "wait_pipe": "#hivm.pipe<PIPE_MTE1>"
+        }
+      },
+      {
+        "cmd": "setflag",
+        "p": "M",
+        "q": "MTE1",
+        "event": 0,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "set_pipe": "#hivm.pipe<PIPE_M>",
+          "static_event_id": "#hivm.event<EVENT_ID0>",
+          "wait_pipe": "#hivm.pipe<PIPE_MTE1>"
+        }
+      },
+      {
+        "cmd": "setflag",
+        "p": "M",
+        "q": "MTE1",
+        "event": 1,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "set_pipe": "#hivm.pipe<PIPE_M>",
+          "static_event_id": "#hivm.event<EVENT_ID1>",
+          "wait_pipe": "#hivm.pipe<PIPE_MTE1>"
+        }
+      },
+      {
+        "cmd": "if",
+        "args": [
+          3
+        ],
+        "results": [],
+        "types": [],
+        "attrs": {},
+        "bodies": [
+          [
+            {
+              "cmd": "issue",
+              "p": "M",
+              "fn": "mmadL1",
+              "write_operand": 6,
+              "read_operands": [
+                0,
+                1,
+                6
+              ],
+              "args": [
+                10,
+                11,
+                6,
+                7,
+                8,
+                7,
+                12
+              ],
+              "results": [],
+              "types": [],
+              "attrs": {
+                "operandSegmentSizes": "array<i32: 1, 1, 1, 1, 1, 1, 1, 0, 0, 0>"
+              }
+            },
+            {
+              "cmd": "end",
+              "args": [],
+              "results": [],
+              "types": [],
+              "attrs": {}
+            }
+          ],
+          [
+            {
+              "cmd": "end",
+              "args": [],
+              "results": [],
+              "types": []
+            }
+          ]
+        ],
+        "bindings": [
+          [
+            []
+          ],
+          [
+            []
+          ]
+        ]
+      },
+      {
+        "cmd": "waitflag",
+        "p": "M",
+        "q": "MTE1",
+        "event": 0,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "set_pipe": "#hivm.pipe<PIPE_M>",
+          "static_event_id": "#hivm.event<EVENT_ID0>",
+          "wait_pipe": "#hivm.pipe<PIPE_MTE1>"
+        }
+      },
+      {
+        "cmd": "waitflag",
+        "p": "M",
+        "q": "MTE1",
+        "event": 1,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "set_pipe": "#hivm.pipe<PIPE_M>",
+          "static_event_id": "#hivm.event<EVENT_ID1>",
+          "wait_pipe": "#hivm.pipe<PIPE_MTE1>"
+        }
+      },
+      {
+        "cmd": "setflag",
+        "p": "M",
+        "q": "FIX",
+        "event": 0,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "set_pipe": "#hivm.pipe<PIPE_M>",
+          "static_event_id": "#hivm.event<EVENT_ID0>",
+          "wait_pipe": "#hivm.pipe<PIPE_FIX>"
+        }
+      },
+      {
+        "cmd": "waitflag",
+        "p": "M",
+        "q": "FIX",
+        "event": 0,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "set_pipe": "#hivm.pipe<PIPE_M>",
+          "static_event_id": "#hivm.event<EVENT_ID0>",
+          "wait_pipe": "#hivm.pipe<PIPE_FIX>"
+        }
+      },
+      {
+        "cmd": "issue",
+        "p": "FIX",
+        "fn": "fixpipe",
+        "write_operand": 1,
+        "read_operands": [
+          0
+        ],
+        "args": [
+          12,
+          2
+        ],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "dma_mode": "#hivm.dma_mode<nz2nd>",
+          "operandSegmentSizes": "array<i32: 1, 1, 0, 0>"
+        }
+      },
+      {
+        "cmd": "return",
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {}
+      }
+    ],
+    "core_kind": null
+  }
+}

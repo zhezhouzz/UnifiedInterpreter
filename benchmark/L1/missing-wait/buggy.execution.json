@@ -1,0 +1,15 @@
+{
+  "verdict": "race",
+  "states_discovered": 17,
+  "witness": [
+    "0:0 arith.constant",
+    "0:1 arith.constant",
+    "0:2 hivm.hir.pointer_cast",
+    "0:3 hivm.hir.pointer_cast",
+    "0:4 issue",
+    "0:5 setflag",
+    "0:6 issue",
+    "0:6 issue.done[V] read ub:0:0=uninit"
+  ],
+  "observation": "0:6 issue.done[V] read ub:0:0=uninit"
+}

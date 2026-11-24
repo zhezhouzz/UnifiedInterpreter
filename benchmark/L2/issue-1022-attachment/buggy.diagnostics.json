@@ -1,0 +1,26 @@
+[
+  {
+    "function": "initialized",
+    "location": "loc(\"<stdin>\":11:10)",
+    "op": "scf.for",
+    "reason": "iteration-dependent carried view"
+  },
+  {
+    "function": "external_init",
+    "location": "loc(\"<stdin>\":27:10)",
+    "op": "scf.for",
+    "reason": "iteration-dependent carried view"
+  },
+  {
+    "function": "single_update",
+    "location": "loc(\"<stdin>\":39:10)",
+    "op": "scf.for",
+    "reason": "iteration-dependent carried view"
+  },
+  {
+    "function": "scalar_writer",
+    "location": "loc(\"<stdin>\":50:10)",
+    "op": "scf.for",
+    "reason": "iteration-dependent carried view"
+  }
+]

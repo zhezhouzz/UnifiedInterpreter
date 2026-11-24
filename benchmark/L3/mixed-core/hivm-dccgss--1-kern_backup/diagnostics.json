@@ -1,0 +1,38 @@
+[
+  {
+    "function": "kern_mix_aic",
+    "location": "loc(\"<stdin>\":9:5)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kern_mix_aic",
+    "location": "loc(\"<stdin>\":13:5)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kern_mix_aic",
+    "location": "loc(\"<stdin>\":14:5)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kern_mix_aiv",
+    "location": "loc(\"<stdin>\":18:5)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kern_mix_aiv",
+    "location": "loc(\"<stdin>\":19:5)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kern_mix_aiv",
+    "location": "loc(\"<stdin>\":26:5)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  }
+]

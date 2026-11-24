@@ -1,0 +1,14 @@
+[
+  {
+    "function": "test_cube",
+    "location": "loc(\"<stdin>\":4:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_cube",
+    "location": "loc(\"<stdin>\":5:10)",
+    "op": "scf.for",
+    "reason": "expected one invariant yielded view"
+  }
+]

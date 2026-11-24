@@ -1,0 +1,8 @@
+[
+  {
+    "function": "test_scf_if_0",
+    "location": "loc(\"<stdin>\":7:10)",
+    "op": "scf.if",
+    "reason": "loop-carried values or yielded joins need bindings"
+  }
+]

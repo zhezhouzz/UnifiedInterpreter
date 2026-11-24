@@ -1,0 +1,14 @@
+[
+  {
+    "function": "test_inner_yielded_db_anchored_outer",
+    "location": "loc(\"<stdin>\":13:12)",
+    "op": "hivm.hir.multi_buffer_counter",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_inner_yielded_db_anchored_outer",
+    "location": "loc(\"<stdin>\":23:12)",
+    "op": "scf.for",
+    "reason": "iteration-dependent carried view"
+  }
+]

@@ -1,6 +1,0 @@
-run {
-  write[unit_load@PIPE_MTE2](UB_BYTE_0, 0);
-  waitflag[PIPE_MTE2, PIPE_V](EVENT_ID0);
-  x2 := read[unit_vabs@PIPE_V](UB_BYTE_0);
-  return()
-}

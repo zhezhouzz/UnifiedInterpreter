@@ -1,0 +1,22 @@
+{
+  "id": "dma/dma-ops--13-hivm_memref_store_ub_to_gm",
+  "tier": "L3",
+  "category": "dma",
+  "source_ref": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/IR/dma-ops.mlir",
+  "chip_profile": null,
+  "core_ratio": null,
+  "compile_argv": [
+    "bishengir-opt",
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "entry_functions": [
+    "hivm_memref_store_ub_to_gm"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "split_index": 13,
+  "upstream_path": "bishengir/test/Dialect/HIVM/IR/dma-ops.mlir"
+}

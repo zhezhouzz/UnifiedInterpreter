@@ -1,0 +1,26 @@
+[
+  {
+    "function": "nd_to_fractal_aligned_f16",
+    "location": "loc(\"<stdin>\":3:17)",
+    "op": "tensor.expand_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "nd_to_fractal_aligned_f16",
+    "location": "loc(\"<stdin>\":4:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "nd_to_fractal_aligned_f16",
+    "location": "loc(\"<stdin>\":5:10)",
+    "op": "hivm.hir.vtranspose",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "nd_to_fractal_aligned_f16",
+    "location": "loc(\"<stdin>\":6:19)",
+    "op": "tensor.expand_shape",
+    "reason": "missing Core interpretation"
+  }
+]

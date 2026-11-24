@@ -1,4 +1,0 @@
-run {
-  work_13 := compute[unit_vcast@PIPE_V]();
-  return()
-}

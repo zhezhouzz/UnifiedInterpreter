@@ -1,0 +1,22 @@
+{
+  "id": "repair-regression/issue-920-mr-5025",
+  "tier": "L3",
+  "category": "repair-regression",
+  "source_ref": "https://gitcode.com/Ascend/AscendNPU-IR/blob/3c6f582cd505845e7465f4344bbf96af22c3ec2d/bishengir/test/Dialect/HIVM/cv-pipelining-buffer-feedback-cycle.mlir",
+  "chip_profile": "Ascend950PR_9579",
+  "core_ratio": null,
+  "compile_argv": [
+    "bishengir-opt",
+    "-cv-pipelining=pipeline-mode=skew enable-preload=true set-depth-in-unroll-mode=2 bypass-shape-registry=true"
+  ],
+  "entry_functions": [
+    "feedback_cycle",
+    "feedback_cycle_hoisted",
+    "forwarding_only"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "split_index": 0,
+  "upstream_path": "bishengir/test/Dialect/HIVM/cv-pipelining-buffer-feedback-cycle.mlir"
+}

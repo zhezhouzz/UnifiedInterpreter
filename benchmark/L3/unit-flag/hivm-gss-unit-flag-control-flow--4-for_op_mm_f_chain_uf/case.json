@@ -1,0 +1,22 @@
+{
+  "id": "unit-flag/hivm-gss-unit-flag-control-flow--4-for_op_mm_f_chain_uf",
+  "tier": "L3",
+  "category": "unit-flag",
+  "source_ref": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/SyncSolver/hivm-gss-unit-flag-control-flow.mlir",
+  "chip_profile": null,
+  "core_ratio": null,
+  "compile_argv": [
+    "bishengir-opt",
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "entry_functions": [
+    "for_op_mm_f_chain_uf"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "split_index": 4,
+  "upstream_path": "bishengir/test/Dialect/HIVM/SyncSolver/hivm-gss-unit-flag-control-flow.mlir"
+}

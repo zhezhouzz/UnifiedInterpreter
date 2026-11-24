@@ -1,5 +1,0 @@
-run {
-  work_8 := compute[unit_load@PIPE_MTE2]();
-  setflag[PIPE_MTE2, PIPE_FIX](EVENT_ID0);
-  return()
-}

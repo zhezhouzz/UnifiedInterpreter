@@ -1,0 +1,80 @@
+[
+  {
+    "function": "feedback_cycle",
+    "location": "loc(\"<stdin>\":14:7)",
+    "op": "scope.scope",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "feedback_cycle",
+    "location": "loc(\"<stdin>\":51:12)",
+    "op": "bufferization.to_tensor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "feedback_cycle",
+    "location": "loc(\"<stdin>\":52:12)",
+    "op": "bufferization.to_tensor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "feedback_cycle",
+    "location": "loc(\"<stdin>\":53:7)",
+    "op": "scope.scope",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "feedback_cycle_hoisted",
+    "location": "loc(\"<stdin>\":75:5)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "feedback_cycle_hoisted",
+    "location": "loc(\"<stdin>\":79:7)",
+    "op": "scope.scope",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "feedback_cycle_hoisted",
+    "location": "loc(\"<stdin>\":114:12)",
+    "op": "bufferization.to_tensor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "feedback_cycle_hoisted",
+    "location": "loc(\"<stdin>\":115:12)",
+    "op": "bufferization.to_tensor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "feedback_cycle_hoisted",
+    "location": "loc(\"<stdin>\":116:7)",
+    "op": "scope.scope",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "forwarding_only",
+    "location": "loc(\"<stdin>\":137:7)",
+    "op": "scope.scope",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "forwarding_only",
+    "location": "loc(\"<stdin>\":168:12)",
+    "op": "bufferization.to_tensor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "forwarding_only",
+    "location": "loc(\"<stdin>\":169:12)",
+    "op": "bufferization.to_tensor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "forwarding_only",
+    "location": "loc(\"<stdin>\":170:7)",
+    "op": "scope.scope",
+    "reason": "missing Core interpretation"
+  }
+]

@@ -1,0 +1,14 @@
+[
+  {
+    "function": "test_vabs_b64",
+    "location": "loc(\"<stdin>\":3:14)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "test_vabs_b64",
+    "location": "loc(\"<stdin>\":4:16)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  }
+]

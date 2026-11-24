@@ -1,0 +1,8 @@
+[
+  {
+    "function": "transpose2d",
+    "location": "loc(\"<stdin>\":3:5)",
+    "op": "hivm.hir.vtranspose",
+    "reason": "missing Core interpretation"
+  }
+]

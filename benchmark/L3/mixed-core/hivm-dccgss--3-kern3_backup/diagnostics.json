@@ -1,0 +1,44 @@
+[
+  {
+    "function": "kern3_mix_aic",
+    "location": "loc(\"<stdin>\":10:5)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kern3_mix_aic",
+    "location": "loc(\"<stdin>\":25:5)",
+    "op": "hivm.hir.mmadL1",
+    "reason": "mmadL1 sync_related_args require internal MTE1/M protocol"
+  },
+  {
+    "function": "kern3_mix_aic",
+    "location": "loc(\"<stdin>\":31:5)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kern3_mix_aic",
+    "location": "loc(\"<stdin>\":32:5)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kern3_mix_aiv",
+    "location": "loc(\"<stdin>\":36:5)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kern3_mix_aiv",
+    "location": "loc(\"<stdin>\":37:5)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kern3_mix_aiv",
+    "location": "loc(\"<stdin>\":44:5)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  }
+]

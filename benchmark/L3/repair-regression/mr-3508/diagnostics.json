@@ -1,0 +1,26 @@
+[
+  {
+    "function": "test_block_sync_loop",
+    "location": "loc(\"<stdin>\":3:5)",
+    "op": "hivm.hir.set_ffts_base_addr",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_block_sync_loop",
+    "location": "loc(\"<stdin>\":33:10)",
+    "op": "memref_ext.alloc_workspace",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_block_sync_loop",
+    "location": "loc(\"<stdin>\":34:10)",
+    "op": "memref_ext.alloc_workspace",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_block_sync_loop",
+    "location": "loc(\"<stdin>\":35:10)",
+    "op": "memref_ext.alloc_workspace",
+    "reason": "missing Core interpretation"
+  }
+]

@@ -1,0 +1,32 @@
+[
+  {
+    "function": "rtz_broadcast_normalized",
+    "location": "loc(\"<stdin>\":3:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "rtz_broadcast_normalized",
+    "location": "loc(\"<stdin>\":4:17)",
+    "op": "tensor.expand_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "rtz_broadcast_normalized",
+    "location": "loc(\"<stdin>\":5:10)",
+    "op": "hivm.hir.vbrc",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "rtz_broadcast_normalized",
+    "location": "loc(\"<stdin>\":6:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "rtz_broadcast_normalized",
+    "location": "loc(\"<stdin>\":7:10)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  }
+]

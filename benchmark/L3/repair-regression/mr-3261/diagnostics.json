@@ -1,0 +1,128 @@
+[
+  {
+    "function": "_sdpa_infer_kernel_mix_aic",
+    "location": "loc(\"<stdin>\":43:5)",
+    "op": "hivm.hir.set_ffts_base_addr",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_sdpa_infer_kernel_mix_aic",
+    "location": "loc(\"<stdin>\":55:13)",
+    "op": "memref.view",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_sdpa_infer_kernel_mix_aic",
+    "location": "loc(\"<stdin>\":57:15)",
+    "op": "memref.view",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_sdpa_infer_kernel_mix_aic",
+    "location": "loc(\"<stdin>\":59:15)",
+    "op": "memref.view",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_sdpa_infer_kernel_mix_aic",
+    "location": "loc(\"<stdin>\":62:7)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_sdpa_infer_kernel_mix_aic",
+    "location": "loc(\"<stdin>\":79:13)",
+    "op": "arith.maxsi",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_sdpa_infer_kernel_mix_aic",
+    "location": "loc(\"<stdin>\":90:15)",
+    "op": "scf.for",
+    "reason": "general loop carries require a Core state representation"
+  },
+  {
+    "function": "_sdpa_infer_kernel_mix_aiv",
+    "location": "loc(\"<stdin>\":241:13)",
+    "op": "memref.view",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_sdpa_infer_kernel_mix_aiv",
+    "location": "loc(\"<stdin>\":242:15)",
+    "op": "memref.view",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_sdpa_infer_kernel_mix_aiv",
+    "location": "loc(\"<stdin>\":243:15)",
+    "op": "memref.view",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_sdpa_infer_kernel_mix_aiv",
+    "location": "loc(\"<stdin>\":247:5)",
+    "op": "hivm.hir.set_ffts_base_addr",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_sdpa_infer_kernel_mix_aiv",
+    "location": "loc(\"<stdin>\":254:7)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_sdpa_infer_kernel_mix_aiv",
+    "location": "loc(\"<stdin>\":266:13)",
+    "op": "arith.maxsi",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_sdpa_infer_kernel_mix_aiv",
+    "location": "loc(\"<stdin>\":282:25)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_sdpa_infer_kernel_mix_aiv",
+    "location": "loc(\"<stdin>\":284:15)",
+    "op": "scf.for",
+    "reason": "general loop carries require a Core state representation"
+  },
+  {
+    "function": "_sdpa_infer_kernel_mix_aiv",
+    "location": "loc(\"<stdin>\":433:7)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_sdpa_infer_kernel_mix_aiv",
+    "location": "loc(\"<stdin>\":438:23)",
+    "op": "memref.expand_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_sdpa_infer_kernel_mix_aiv",
+    "location": "loc(\"<stdin>\":441:7)",
+    "op": "hivm.hir.vdiv",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_sdpa_infer_kernel_mix_aiv",
+    "location": "loc(\"<stdin>\":442:27)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_sdpa_infer_kernel_mix_aiv",
+    "location": "loc(\"<stdin>\":443:27)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_sdpa_infer_kernel_mix_aiv",
+    "location": "loc(\"<stdin>\":446:27)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  }
+]
