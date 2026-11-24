@@ -224,7 +224,7 @@ O 的每个元素应为 `0.75`，log_sum_exp 的每个元素应为 `log(128)`。
 | `--ir PATH` | 指定本次编译生成的 MLIR |
 | `--kernel vector-add/row-sum` | 选择小型 kernel 的输入绑定和参考计算 |
 | `--length N` | 指定动态 vector-add 的输入长度 |
-| `--input PATH` | 指定 attention 输入 JSON |
+| `--input PATH` | 指定 attention 输入或 `kernel-example` 的具名参数 JSON |
 | `--output PATH` | 指定结果 JSON，省略时输出到终端 |
 | `--trace PATH` | 指定原语调用 JSONL |
 | `--max-steps N` | 指定正整数执行预算，默认 1000000 |
@@ -245,6 +245,12 @@ O 的每个元素应为 `0.75`，log_sum_exp 的每个元素应为 `log(128)`。
 | `unsupported` 或阶段不匹配 | 根据源码位置检查操作、类型、属性和 `--stage` |
 | 执行预算耗尽 | 检查循环边界和操作数量 |
 | 参考比较失败 | 阅读结果误差，通过 trace 定位相关操作 |
+
+### 运行带具名参数的 IR
+
+`kernel-example --stage hfusion --ir PATH --input INPUT.json` 按 SSA 参数名绑定并执行单次 kernel 调用。JSON 顶层需要提供入口函数的所有参数。标量写成数字，memref 写成含 `shape` 和按行展开的 `data` 的对象。对需要读回的 memref 设置 `output: true`。省略 `data` 会分配未初始化的缓冲区，读回之前需要写满。
+
+带 `--trace` 运行时，`hfusion.print` 和 `hivm.hir.debug` 的打印记录包含在 `device_print` 事件中。输出 JSON 中的非有限浮点值以字符串保存。计算沿用 host-float64 模型，`bf16`、`f16` 和 `f32` 保留 IR 类型标记。
 
 ## 7. 运行仓库回归测试
 

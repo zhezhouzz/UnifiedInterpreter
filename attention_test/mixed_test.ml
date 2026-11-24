@@ -14,8 +14,8 @@ let () =
     check op.region) ops in
   check program.body;
   let loop = List.find (fun op -> op.Parser.opcode = "scf.for") program.body in
-  let hf = List.find (fun op -> op.Parser.result = Some "%filled") loop.region in
-  let hv = List.find (fun op -> op.Parser.result = Some "%added") loop.region in
+  let hf = List.find (fun op -> List.mem_assoc "%filled" op.Parser.results) loop.region in
+  let hv = List.find (fun op -> List.mem_assoc "%added" op.Parser.results) loop.region in
   assert (hf.stage = Stage.HFusion && hv.stage = Stage.HIVM);
   let bad = {hf with stage=Stage.HIVM} in
   (match Validate.program {program with body=[bad]} with
@@ -28,7 +28,7 @@ let () =
   let env,_ = Runner.with_handlers ctx (fun () ->
     Runner.execute_block ctx [] program.body) in
   (match List.assoc "%result" env with
-  | Runner.Tensor result -> assert (E.elements1 result = E.Ok [26.;26.])
+  | Runner.Tensor result -> assert (E.elements1 result = E.Ok [Numeric.Floating 26.;Numeric.Floating 26.])
   | _ -> assert false);
   assert ((!(ctx.state)).marker = 73);
   List.iter (fun (opcode,stage,entry) ->
@@ -48,7 +48,7 @@ let () =
     | _ -> failwith "wrong-stage computation handler was available"
     | exception Effect.Unhandled _ -> ())
     [hf,(fun () -> Effect.perform (Handlers.HIVM (E.UnaryRequest (E.VExp,value,value))));
-     hv,(fun () -> Effect.perform (Handlers.HFusion (Handlers.Fill (E.Float32Type,0.,value))))];
+     hv,(fun () -> Effect.perform (Handlers.HFusion (Handlers.Fill (E.Float32Type,Numeric.Floating 0.,value))))];
   let before = ctx.calls in
   (match Runner.with_handlers ctx (fun () -> Runner.execute_block ctx [] [bad]) with
   | _ -> failwith "incorrect stage executed"

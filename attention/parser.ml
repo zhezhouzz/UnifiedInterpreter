@@ -13,12 +13,11 @@ let index_expr = function
   | `Assoc ["ssa", `String name] -> Dynamic name
   | _ -> invalid_arg "invalid dynamic index expression"
 type operation = {
-  result : string option;
+  results : (string * typ) list;
   opcode : string;
   stage : Stage.t;
   operands : string list;
   operand_types : typ list;
-  result_type : typ option;
   inputs : string list;
   outputs : string list;
   attributes : (string * Yojson.Safe.t) list;
@@ -29,8 +28,11 @@ type operation = {
 }
 type program = { name : string; arguments : (string * typ) list; body : operation list }
 
+let result_type op = match op.results with [_,ty] -> Some ty | _ -> None
+
 let scalar_type = function
-  | "f16" -> E.Float16Type | "f32" -> E.Float32Type | "index" -> E.IndexType
+  | "f16" -> E.Float16Type | "bf16" -> E.BFloat16Type
+  | "f32" -> E.Float32Type | "index" -> E.IndexType
   | "i1" -> E.IntegerType (1,E.Signless) | "i8" -> E.IntegerType (8,E.Signless)
   | "i32" -> E.IntegerType (32,E.Signless) | "i64" -> E.IntegerType (64,E.Signless)
   | s -> invalid_arg ("unsupported scalar type " ^ s)
@@ -54,15 +56,13 @@ let span json = {
   stop = position (member "stop" json);
 }
 let argument json = json |> member "name" |> to_string, typ (member "type" json)
-let optional f = function `Null -> None | json -> Some (f json)
 let strings json = json |> to_list |> List.map to_string
 let rec operation json = {
-  result = optional to_string (member "result" json);
+  results = json |> member "results" |> to_list |> List.map argument;
   opcode = json |> member "opcode" |> to_string;
   stage = json |> member "opcode" |> to_string |> Stage.of_opcode;
   operands = strings (member "operands" json);
   operand_types = json |> member "operand_types" |> to_list |> List.map typ;
-  result_type = optional typ (member "result_type" json);
   inputs = strings (member "inputs" json);
   outputs = strings (member "outputs" json);
   attributes = json |> member "attributes" |> to_assoc;

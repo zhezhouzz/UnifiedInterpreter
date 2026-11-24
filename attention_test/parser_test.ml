@@ -53,7 +53,7 @@ let () =
   let span = (List.hd p.body).Parser.span in
   let rec normalize fixture (op : Parser.operation) =
     {op with span; region=List.map (normalize fixture) op.region;
-      opcode=(if fixture && op.result = Some "%37" then "hivm.hir.vdiv" else op.opcode)} in
+      opcode=(if fixture && List.mem_assoc "%37" op.results then "hivm.hir.vdiv" else op.opcode)} in
   assert (p.arguments = fixture.arguments);
   assert (List.map (normalize false) p.body = List.map (normalize true) fixture.body);
   let first = List.hd p.body in

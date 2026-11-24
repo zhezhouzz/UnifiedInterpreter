@@ -35,8 +35,9 @@ let run ?stage ?(max_steps=1000000) ?(trace=ignore) ~file a b =
         (E.sem_memref_alloc E.ASGM ty [length]) in
     let input data =
       let id = allocate E.Float32Type n in
+      let cells = List.map (fun x -> Numeric.Floating x) (Array.to_list data) in
       Effect.perform (Handlers.Memory ("initialize_input",E.write_result
-        (E.DefinedTensor (E.PackTensor ([n],E.Float32Type,Array.to_list data))) id)); id in
+        (E.DefinedTensor (E.PackTensor ([n],E.Float32Type,cells))) id)); id in
     let x = input a and y = input b in
     let z = allocate E.Float32Type n in
     let lock = allocate (scalar_type "i8") 1 and workspace = allocate (scalar_type "i8") 1 in
@@ -60,5 +61,5 @@ let run ?stage ?(max_steps=1000000) ?(trace=ignore) ~file a b =
         {E.access_restrict=false;access_writable=false})))) in
     let _,_,data = Handlers.packed tensor in
     if (!state).marker <> 73 then failwith "memory lens modified independent state";
-    {Kernel.outputs=[{Kernel.name="%out";shape=[n];data=Array.of_list data}];
+    {Kernel.outputs=[{Kernel.name="%out";shape=[n];data=Array.of_list (List.map Numeric.as_float data)}];
       steps=ctx.steps;calls=ctx.calls})

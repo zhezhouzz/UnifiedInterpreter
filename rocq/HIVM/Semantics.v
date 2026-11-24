@@ -12,8 +12,11 @@ Set Implicit Arguments.
 
 Definition sem_empty {S} (sh : list nat) (ty : mlir_type)
     : result runtime_error (value S) :=
-  if supported_shape sh && (f16 ty || f32 ty)
-  then Ok (EmptyTensor sh ty) else Error UnsupportedInstruction.
+  match ty with
+  | Float16Type | BFloat16Type | Float32Type | IndexType
+  | IntegerType (1 | 8 | 32 | 64) Signless => Ok (EmptyTensor sh ty)
+  | _ => Error UnsupportedInstruction
+  end.
 
 Definition sem_extract_slice {S} (input : value S)
     (offsets sizes strides : list nat) : result runtime_error (value S) :=
@@ -48,12 +51,10 @@ Definition expand_operand {S} (dst : value S) (arg : operand S)
 
 Definition sem_binary {S} `{Numeric S} (op : binary_op)
     (left right : operand S) (dst : value S) : result runtime_error (value S) :=
-  if f32 (element_type dst) && supported_shape (shape dst) then
-    xs <-? expand_operand dst left ;;
-    ys <-? expand_operand dst right ;;
-    zs <-? map2_scalar_result (number_binary op (element_type dst)) xs ys ;;
-    make_value (shape dst) (element_type dst) zs
-  else Error UnsupportedInstruction.
+  xs <-? expand_operand dst left ;;
+  ys <-? expand_operand dst right ;;
+  zs <-? map2_scalar_result (number_binary op (element_type dst)) xs ys ;;
+  make_value (shape dst) (element_type dst) zs.
 
 Definition sem_unary {S} `{Numeric S} (op : unary_op)
     (input dst : value S) : result runtime_error (value S) :=
@@ -65,25 +66,13 @@ Definition sem_unary {S} `{Numeric S} (op : unary_op)
 
 Definition sem_broadcast {S} (input : operand S) (dst : value S)
     (dims : list nat) : result runtime_error (value S) :=
-  if f32 (element_type dst) && supported_shape (shape dst) then
-    match input with
-    | ScalarOperand ty x =>
-        if shape_eq dims [] && f32 ty
-        then make_value (shape dst) ty (repeat x (num_elements (shape dst)))
-        else Error UnsupportedInstruction
-    | TensorOperand src =>
-        match shape src, shape dst with
-        | [m;one], [m';n] =>
-            if shape_eq dims [1] && Nat.eqb m m' && Nat.eqb one 1 &&
-               f32 (element_type src) then
-              xs <-? elements src ;;
-              make_value (shape dst) (element_type dst)
-                (flat_map (fun x => repeat x n) xs)
-            else Error InvalidShape
-        | _,_ => Error UnsupportedInstruction
-        end
-    end
-  else Error UnsupportedInstruction.
+  match input with
+  | ScalarOperand ty x =>
+      if shape_eq dims [] && mlir_element_type_eqb ty (element_type dst)
+      then make_value (shape dst) ty (repeat x (num_elements (shape dst)))
+      else Error InvalidShape
+  | TensorOperand src => broadcast_tensor false src dst dims
+  end.
 
 Fixpoint reduce_values {S} `{Numeric S} (op : reduce_op) (ty : mlir_type)
     (xs : list S) (acc : S) : result runtime_error S :=
@@ -122,8 +111,12 @@ Definition sem_reduce {S} `{Numeric S} (op : reduce_op)
 
 Definition sem_cast {S} `{Numeric S} (spec : cast_spec)
     (input dst : value S) : result runtime_error (value S) :=
-  if cast_rint spec && cast_signed spec && f32 (element_type input) &&
-     f16 (element_type dst) && supported_shape (shape input) then
+  let supported := match element_type input, element_type dst with
+    | Float32Type, ty => matrix_element_type ty
+    | IntegerType _ Signless, (IntegerType _ Signless | Float32Type) => true
+    | _,_ => false
+    end in
+  if cast_rint spec && cast_signed spec && supported then
     if shape_eq (shape input) (shape dst) then
       xs <-? elements input ;;
       ys <-? map_scalar_result
@@ -173,7 +166,9 @@ Definition sem_mmad {S} `{Numeric S} (spec : mm_spec)
             else Nat.eqb b0 k && Nat.eqb b1 n) &&
            supported_shape (shape a) && supported_shape (shape b) &&
            supported_shape (shape dst) &&
-           f16 (element_type a) && f16 (element_type b) && f32 (element_type dst)
+           matrix_element_type (element_type a) &&
+           mlir_element_type_eqb (element_type a) (element_type b) &&
+           f32 (element_type dst)
         then
           av <-? elements a ;;
           bv <-? elements b ;;
@@ -184,7 +179,7 @@ Definition sem_mmad {S} `{Numeric S} (spec : mm_spec)
             else matrix_columns n (matrix_rows k n bv) in
           result <-? matrix_product
             (fun x y acc => scalar_failure
-              (number_mac Float16Type Float32Type x y acc))
+              (number_mac (element_type a) Float32Type x y acc))
             (matrix_rows m k av) columns (matrix_rows m n init) ;;
           make_value [m;n] Float32Type result
         else Error InvalidShape
@@ -206,9 +201,7 @@ Definition sem_reshape {S} (expanding : bool) (input : value S)
     : result runtime_error (value S) :=
   let expanded := if expanding then target else shape input in
   let collapsed := if expanding then shape input else target in
-  if valid_reassociation expanded collapsed groups &&
-     supported_shape target && supported_shape (shape input) &&
-     (f16 (element_type input) || f32 (element_type input)) then
+  if valid_reassociation expanded collapsed groups then
     match input with
     | EmptyTensor _ ty => Ok (EmptyTensor target ty)
     | DefinedTensor _ =>
@@ -221,7 +214,7 @@ Lemma reshape_preserves_elements {S} expanding (input : value S) target groups o
   elements input = Ok xs -> sem_reshape expanding input target groups = Ok out ->
   elements out = Ok xs.
 Proof.
-  unfold sem_reshape. destruct (_ && _ && _ && _) eqn:valid; try discriminate.
+  unfold sem_reshape. destruct (valid_reassociation _ _) eqn:valid; try discriminate.
   destruct input as [sh ty|t]; cbn; intros H Hout; try discriminate.
   rewrite H in Hout. cbn in Hout. eapply make_value_elements; eauto.
 Qed.
@@ -230,8 +223,7 @@ Lemma binary_preserves_shape_type {S} `{Numeric S} op left right dst out :
   sem_binary op left right dst = Ok out ->
   shape out = shape dst /\ element_type out = element_type dst.
 Proof.
-  unfold sem_binary. destruct (_ && _); try discriminate.
-  unfold result_bind.
+  unfold sem_binary, result_bind.
   destruct (expand_operand dst left); try discriminate.
   destruct (expand_operand dst right); try discriminate.
   destruct (map2_scalar_result _ _ _); try discriminate.
