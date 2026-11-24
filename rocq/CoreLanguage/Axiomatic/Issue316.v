@@ -6,18 +6,25 @@ Set Implicit Arguments.
 (* GitCode Ascend/AscendNPU-IR #316，第 2.2、2.3 节。 *)
 Inductive issue_pipe := MTE2 | Vector.
 Inductive issue_resource := TransferEngine | VectorUnit.
-Definition input_addresses count := map (fun i => ExternalMemory (S i)) (seq 0 count).
-Definition output := ExternalMemory 0.
-Definition is_buffer a :=
-  match a with Allocated (BeforeRun index) => index < 2 | _ => False end.
+Definition input_addresses count : list memory_resource := map (fun i => 2 * S i) (seq 0 count).
+Definition output : memory_resource := 0.
+Definition buffer_a layout := address_at layout (BeforeRun 0).
+Definition buffer_b layout := address_at layout (BeforeRun 1).
+Definition is_buffer layout a := a = buffer_a layout \/ a = buffer_b layout.
 
-Definition target (count : nat) : @configuration issue_pipe issue_resource :=
+Definition buffers_disjoint layout count :=
+  forall a, is_buffer layout a -> ~ In a (output :: input_addresses count).
+
+Definition target layout (count : nat) : @configuration issue_pipe issue_resource :=
   {| declared_pipeline := fun _ => True;
      declared_resource := fun _ => True;
      can_read := fun r a => match r with
-       | TransferEngine => In a (input_addresses count) | VectorUnit => is_buffer a end;
+       | TransferEngine => In a (input_addresses count) | VectorUnit => is_buffer layout a end;
      can_write := fun r a => match r with
-       | TransferEngine => is_buffer a | VectorUnit => a = output end |}.
+       | TransferEngine => is_buffer layout a | VectorUnit => a = output end |}.
+
+Lemma separate_buffers layout : buffer_a layout <> buffer_b layout.
+Proof. apply distinct_allocations. discriminate. Qed.
 
 Section Program.
 Context {F16 : Type}.
@@ -89,7 +96,9 @@ Definition issue316 (count : nat) : @shared_program Tile nat issue_pipe issue_re
      (For s 0 (Nat.min 2 count) initially_free
        (For i 0 count vector_iteration (Return tt [])))])).
 
-Definition branches count := instantiate_shared 0 (issue316 count).
+Context (layout : allocation_layout).
+
+Definition branches count := instantiate_shared layout 0 (issue316 count).
 
 (* 单元素 f16 指数的舍入由目标提供，Vector 对读到的整块数据逐元素计算。 *)
 Definition implements_vexp (exp_f16 : F16 -> F16) (model : Model) :=
@@ -97,8 +106,8 @@ Definition implements_vexp (exp_f16 : F16 -> F16) (model : Model) :=
                     result = VFloat (map_tile exp_f16 xs).
 
 Definition issue316_trace (exp_f16 : F16 -> F16) (model : Model) count t kappa :=
-  implements_vexp exp_f16 model /\
-  shared_program_semantics (target count) model (issue316 count) t kappa.
+  (implements_vexp exp_f16 model /\ buffers_disjoint layout count) /\
+  shared_program_semantics layout (target layout count) model (issue316 count) t kappa.
 
 Example nonzero_loop_bounds :
   expand_loops (For i 3 5 (LoopEnd : Cmd) (Return tt [])) LoopEnd =
@@ -114,7 +123,7 @@ Definition variable_type (v : var) : category :=
   match v with 0 | 1 | 6 | 9 => TMemory | 2 => TPipe | 3 | 4 | 12 => TInt
   | 5 | 13 => TBool | 7 | 8 | 14 => TEvent | _ => TFloat end.
 
-Example issue316_well_formed count : well_formed (target count) (branches count).
+Example issue316_well_formed count : well_formed (target layout count) (branches count).
 Proof.
   split; [discriminate |].
   repeat (apply Forall_cons); try apply Forall_nil.
@@ -158,7 +167,7 @@ Definition consumed (l : @label Tile nat issue_pipe issue_resource) :=
 Definition slot_result (l : @label Tile nat issue_pipe issue_resource) :=
   match l with LAtomic IntMod _ (VInt v) => [v] | _ => [] end.
 
-Definition rotation := [Allocated (BeforeRun 0); Allocated (BeforeRun 1); Allocated (BeforeRun 0)].
+Definition rotation := [buffer_a layout; buffer_b layout; buffer_a layout].
 
 (* 保留两个分支中与 bufA 复用相关的发起，检查 A3、A5 所用的 pipeline 和先后关系。 *)
 Inductive reuse_step := WaitFreeA | WriteBufA | SetFreeA | WriteOutput.
@@ -166,8 +175,10 @@ Definition reuse_steps (l : @label Tile nat issue_pipe issue_resource) :=
   match l with
   | LWaitFlagStart Vector MTE2 2 => [WaitFreeA]
   | LSetFlagStart Vector MTE2 2 => [SetFreeA]
-  | LWriteStart (Dispatch TransferEngine (Some MTE2)) (Allocated (BeforeRun 0)) _ => [WriteBufA]
-  | LWriteStart (Dispatch VectorUnit (Some Vector)) (ExternalMemory 0) _ => [WriteOutput]
+  | LWriteStart (Dispatch TransferEngine (Some MTE2)) a _ =>
+      if Nat.eqb a (buffer_a layout) then [WriteBufA] else []
+  | LWriteStart (Dispatch VectorUnit (Some Vector)) a _ =>
+      if Nat.eqb a output then [WriteOutput] else []
   | _ => []
   end.
 
@@ -192,7 +203,7 @@ Local Ltac generate_events tile exp_f16 computes :=
     | apply (proj2 (computes tile _)); reflexivity ].
 
 Example zero_iterations (model : Model) :
-  exists events, program_events model (annotate_program (branches 0)) events [] /\
+  exists events, program_events layout model (annotate_program (branches 0)) events [] /\
     map (fun e => kind (payload e)) events = [ReturnEvent; ReturnEvent].
 Proof.
   eexists; split.
@@ -203,9 +214,9 @@ Qed.
 
 Example one_iteration (model : Model) (exp_f16 : F16 -> F16)
     (tile : Tile) (computes : implements_vexp exp_f16 model) :
-  exists events uses, program_events model (annotate_program (branches 1)) events uses /\
-    flat_map (fun e => transferred (payload e)) events = [Allocated (BeforeRun 0)] /\
-    flat_map (fun e => consumed (payload e)) events = [Allocated (BeforeRun 0)] /\
+  exists events uses, program_events layout model (annotate_program (branches 1)) events uses /\
+    flat_map (fun e => transferred (payload e)) events = [buffer_a layout] /\
+    flat_map (fun e => consumed (payload e)) events = [buffer_a layout] /\
     flat_map (fun e => cross_flag (payload e)) events =
       [(FlagWait,2); (FlagSet,0); (FlagSet,2); (FlagWait,0); (FlagSet,2)].
 Proof.
@@ -214,7 +225,7 @@ Qed.
 
 Example three_iteration_events (model : Model) (exp_f16 : F16 -> F16)
     (tile : Tile) (computes : implements_vexp exp_f16 model) :
-  exists events uses, program_events model (annotate_program (branches 3)) events uses /\
+  exists events uses, program_events layout model (annotate_program (branches 3)) events uses /\
     flat_map (fun e => transferred (payload e)) events = rotation /\
     flat_map (fun e => consumed (payload e)) events = rotation /\
     flat_map (fun e => slot_result (payload e)) events = [0;1;0;0;1;0]%Z /\
@@ -231,7 +242,11 @@ Example three_iteration_events (model : Model) (exp_f16 : F16 -> F16)
 Proof.
   eexists; eexists; split.
   - generate_events tile exp_f16 computes.
-  - repeat split; reflexivity.
+  - repeat split; try reflexivity.
+    pose proof (not_eq_sym (separate_buffers layout)) as different.
+    apply Nat.eqb_neq in different. unfold buffer_a, buffer_b in different.
+    cbn [flat_map reuse_steps payload app]. unfold buffer_a.
+    now rewrite !Nat.eqb_refl, different.
 Qed.
 
 End Program.
@@ -274,9 +289,6 @@ Proof.
   exists history. reflexivity.
 Qed.
 
-Example separate_buffers : Allocated (BeforeRun 0) <> Allocated (BeforeRun 1).
-Proof. discriminate. Qed.
-
 Corollary freeA_trace_prefix {F16} (p : @program (@Tile F16) nat issue_pipe issue_resource op_id)
     t kappa history :
   A4 p t kappa ->
@@ -289,8 +301,9 @@ Proof.
   eapply A4_projected_word; eassumption.
 Qed.
 
-Example first_slot_readable : can_read (target 3) VectorUnit (Allocated (BeforeRun 0)).
-Proof. cbn; repeat constructor. Qed.
+Example first_slot_readable layout : can_read (target layout 3) VectorUnit (buffer_a layout).
+Proof. now left. Qed.
 
-Example mte2_cannot_read_ub : ~ can_read (target 3) TransferEngine (Allocated (BeforeRun 0)).
-Proof. cbn; intuition discriminate. Qed.
+Example mte2_cannot_read_ub layout count :
+  buffers_disjoint layout count -> ~ can_read (target layout count) TransferEngine (buffer_a layout).
+Proof. intros disjoint reads. eapply disjoint; [now left | now right]. Qed.

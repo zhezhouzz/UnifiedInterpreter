@@ -1,4 +1,4 @@
-From Stdlib Require Import List ZArith.
+From Stdlib Require Import List ZArith Lia Arith.Cantor.
 Import ListNotations.
 Set Implicit Arguments.
 
@@ -7,10 +7,35 @@ Definition op_id := (positive * positive)%type.
 Definition thread (o : op_id) := fst o.
 
 Inductive allocation_site := BeforeRun (index : nat) | InBranch (operation : op_id).
-Inductive memory_resource := ExternalMemory (name : nat) | Allocated (site : allocation_site).
+Definition memory_resource := nat.
 
-Lemma distinct_allocations a b : a <> b -> Allocated a <> Allocated b.
-Proof. congruence. Qed.
+Record allocation_layout := {
+  address_at : allocation_site -> memory_resource;
+  addresses_injective : forall a b, address_at a = address_at b -> a = b
+}.
+
+Lemma distinct_allocations layout a b : a <> b -> address_at layout a <> address_at layout b.
+Proof. intros different equal. apply different. now apply (addresses_injective layout). Qed.
+
+(* 一个可用的地址布局：偶数地址留给外部内存。 *)
+Definition odd_address (site : allocation_site) : memory_resource :=
+  match site with
+  | BeforeRun k => 4 * k + 1
+  | InBranch (j, path) => 4 * Cantor.to_nat (Pos.to_nat j, Pos.to_nat path) + 3
+  end.
+
+Lemma odd_address_injective a b : odd_address a = odd_address b -> a = b.
+Proof.
+  destruct a as [a|[ja pa]], b as [b|[jb pb]];
+    intros same; cbn [odd_address] in same; try solve [f_equal; lia | lia].
+  assert (eq : Cantor.to_nat (Pos.to_nat ja, Pos.to_nat pa) =
+    Cantor.to_nat (Pos.to_nat jb, Pos.to_nat pb)) by lia.
+  apply Cantor.to_nat_inj in eq. injection eq as same_j same_p.
+  apply Pos2Nat.inj in same_j, same_p. now subst.
+Qed.
+
+Definition odd_allocation_layout : allocation_layout :=
+  {| address_at := odd_address; addresses_injective := odd_address_injective |}.
 
 Inductive atomic_op :=
 | IntAdd | IntSub | IntMul | IntMod | IntEq | IntLt
@@ -65,12 +90,13 @@ Inductive shared_program :=
 | SharedAlloc (x : var) (body : shared_program).
 
 (* 并发前的每次申请得到独立地址，各分支继承同一绑定。 *)
-Fixpoint instantiate_shared (index : nat) (p : shared_program) : program unit :=
+Fixpoint instantiate_shared (layout : allocation_layout) (index : nat)
+    (p : shared_program) : program unit :=
   match p with
   | Run branches => branches
   | SharedAlloc x body =>
-      map (CAlias x (Literal (VMemory (Allocated (BeforeRun index)))))
-          (instantiate_shared (S index) body)
+      map (CAlias x (Literal (VMemory (address_at layout (BeforeRun index)))))
+          (instantiate_shared layout (S index) body)
   end.
 
 (* 循环体在 LoopEnd 处接续下一轮。Return 直接结束并发分支。 *)

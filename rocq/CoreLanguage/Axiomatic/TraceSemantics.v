@@ -36,8 +36,12 @@ Qed.
 
 Inductive flag_letter := FlagSet | FlagWait.
 
+Local Definition operation_eq_dec (x y : op_id) : {x = y} + {x <> y}.
+Proof. decide equality; apply Pos.eq_dec. Defined.
+
 Section Semantics.
 Context {Float EventId Pipe Unit : Type}.
+Context (layout : allocation_layout).
 Local Notation Val := (@value Float EventId Pipe).
 Local Notation Program := (@program Float EventId Pipe Unit op_id).
 Local Notation EventRecordType := (@event_record Float EventId Pipe Unit).
@@ -49,7 +53,7 @@ Local Notation Kappa := (@interpretation Float EventId Pipe Unit).
 Definition candidate_witness (model : Model) (p : Program)
     (t : list EventId) (kappa : Kappa) (uses : list Use) : Prop :=
   exists events ordered,
-    program_events model p events uses /\ NoDup events /\
+    program_events layout model p events uses /\ NoDup events /\
     Permutation events ordered /\ prefix (map kappa t) ordered.
 
 Definition Cand (model : Model) (p : Program) (t : list EventId) (kappa : Kappa) : Prop :=
@@ -57,7 +61,7 @@ Definition Cand (model : Model) (p : Program) (t : list EventId) (kappa : Kappa)
 
 Lemma allocated_address_in_trace model p t kappa e address :
   Cand model p t kappa -> In e t -> payload (kappa e) = LAlloc address ->
-  address = Allocated (InBranch (owner (kappa e))).
+  address = address_at layout (InBranch (owner (kappa e))).
 Proof.
   intros (uses & events & ordered & generated & _ & perm & suffix & eq) member allocated.
   assert (present : In (kappa e) events).
@@ -89,6 +93,8 @@ Proof.
   intros equal. apply different. eapply candidate_record_injective; eauto.
   pose proof (allocated_address_in_trace e candidate emitted_e label_e) as ae.
   pose proof (allocated_address_in_trace d candidate emitted_d label_d) as ad.
+  assert (sites : InBranch (owner (kappa e)) = InBranch (owner (kappa d))).
+  { apply (addresses_injective layout). congruence. }
   destruct (kappa e), (kappa d); cbn in *; congruence.
 Qed.
 
@@ -189,10 +195,62 @@ Definition completed_result_values (p : Program) (t : list EventId)
     result_event kappa (producer use) d result ->
     earlier t d e -> used_value use = result.
 
+Local Definition prior_start (phase : event_kind) (o : op_id) (past : list EventRecordType) :=
+  option_map payload (find (fun e => if operation_eq_dec (owner e) o then
+    match phase, kind (payload e) with
+    | ReadStart, ReadStart | WriteStart, WriteStart => true
+    | _, _ => false
+    end else false) past).
+
+(* 前缀按最近事件在前的顺序排列。写入地址与值取自该写入的发起事件。 *)
+Local Fixpoint latest_write (address : memory_resource)
+    (past : list EventRecordType) : option Val :=
+  match past with
+  | [] => None
+  | e :: earlier_events =>
+      match payload e with
+      | LWriteEnd =>
+          match prior_start WriteStart (owner e) earlier_events with
+          | Some (LWriteStart _ written data) =>
+              if Nat.eqb written address then Some data else latest_write address earlier_events
+          | _ => latest_write address earlier_events
+          end
+      | _ => latest_write address earlier_events
+      end
+  end.
+
+Local Fixpoint memory_history (past events : list EventRecordType) : Prop :=
+  match events with
+  | [] => True
+  | e :: rest =>
+    (match payload e with
+    | LReadEnd result =>
+        match prior_start ReadStart (owner e) past with
+        | Some (LReadStart _ address) =>
+            match latest_write address past with
+            | Some data => data = result
+            | None => True
+            end
+        | _ => False
+        end
+    | LWriteEnd =>
+        match prior_start WriteStart (owner e) past with
+        | Some (LWriteStart _ _ _) => True
+        | _ => False
+        end
+    | LAlloc address => latest_write address past = None
+    | _ => True
+    end) /\ memory_history (e :: past) rest
+  end.
+
+Definition memory_values (t : list EventId) (kappa : Kappa) : Prop :=
+  memory_history [] (map kappa t).
+
 Definition trace_semantics (model : Model) (p : Program)
     (t : list EventId) (kappa : Kappa) : Prop :=
   exists uses, candidate_witness model p t kappa uses /\
-    A_sync p t kappa /\ completed_result_values p t kappa uses.
+    A_sync p t kappa /\ completed_result_values p t kappa uses /\
+    memory_values t kappa.
 
 Definition target_allows (cfg : @configuration Pipe Unit)
     (l : @label Float EventId Pipe Unit) : Prop :=
@@ -223,6 +281,6 @@ Definition raw_program_semantics
     program_semantics cfg model annotated t kappa.
 
 Definition shared_program_semantics cfg model (p : @shared_program Float EventId Pipe Unit) :=
-  raw_program_semantics cfg model (instantiate_shared 0 p).
+  raw_program_semantics cfg model (instantiate_shared layout 0 p).
 
 End Semantics.

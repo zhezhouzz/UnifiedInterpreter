@@ -76,8 +76,8 @@ Local Notation Model := (@computation_model F E P U).
 Definition start_list (events : list Rec) := filter (fun r => is_start (kind (payload r))) events.
 Definition descriptor (r : Rec) := (owner r, event_head (kind (payload r))).
 
-Local Lemma generated_ops (model : Model) rho c es uses :
-  command_events model rho c es uses ->
+Local Lemma generated_ops layout (model : Model) rho c es uses :
+  command_events layout model rho c es uses ->
   subsequence (map descriptor (start_list es)) (operations c).
 Proof.
   induction 1; cbn in *; auto using SubEmpty, SubKeep.
@@ -93,19 +93,19 @@ Proof. intros weak sorted. induction sorted as [|a l s IH all]; constructor; aut
   apply Forall_forall; intros b member. apply weak. exact (proj1 (Forall_forall _ _) all b member).
 Qed.
 
-Local Lemma generated_owner (model : Model) rho c es uses r :
-  command_events model rho c es uses -> In r (start_list es) -> In (owner r) (op_ids c).
+Local Lemma generated_owner layout (model : Model) rho c es uses r :
+  command_events layout model rho c es uses -> In r (start_list es) -> In (owner r) (op_ids c).
 Proof.
   intros gen member. apply in_map_iff. exists (descriptor r); split; [reflexivity |].
   eapply sub_incl; [exact (generated_ops gen) | now apply in_map].
 Qed.
 
-Local Lemma generated_order (model : Model) rho c es uses :
-  command_events model rho c es uses ->
+Local Lemma generated_order layout (model : Model) rho c es uses :
+  command_events layout model rho c es uses ->
   StronglySorted (fun a b => In (owner a, owner b) (program_order c)) (start_list es).
 Proof.
   intros gen. induction gen; cbn; try assumption; try constructor; try constructor.
-  all: try match goal with H : command_events _ _ (if ?b then _ else _) _ _ |- _ =>
+  all: try match goal with H : command_events _ _ _ (if ?b then _ else _) _ _ |- _ =>
     destruct b; cbn in * end.
   all: try solve [eapply sorted_weaken; [ | eassumption]; intros; apply in_or_app; right;
     first [assumption | apply in_or_app; auto]].
@@ -208,6 +208,7 @@ End TraceOrder.
 
 Section Addresses.
 Context {F16 : Type}.
+Context (allocation : allocation_layout).
 Local Notation V := (@value (@Tile F16) nat issue_pipe).
 Local Notation Arg := (@operand (@Tile F16) nat issue_pipe).
 Local Notation Cmd := (@command (@Tile F16) nat issue_pipe issue_resource).
@@ -319,8 +320,8 @@ Proof.
     eexists; repeat split; congruence.
 Qed.
 
-Local Lemma summary_sound side (model : Model) rho c es uses :
-  command_events model rho c es uses -> forall env expected, agrees env rho ->
+Local Lemma summary_sound side layout (model : Model) rho c es uses :
+  command_events layout model rho c es uses -> forall env expected, agrees env rho ->
   summary side env c = Some expected -> prefix (flat_map (addresses side) es) expected.
 Proof.
   intros gen. induction gen; intros env expected ag check; cbn in check;
@@ -352,12 +353,12 @@ Proof.
 Qed.
 
 Definition iteration_buffer (index : nat) :=
-  Allocated (BeforeRun (if Z.eqb (Z.of_nat index mod 2) 0 then 0 else 1)).
+  if Z.eqb (Z.of_nat index mod 2) 0 then buffer_a allocation else buffer_b allocation.
 Definition buffer_sequence count := map iteration_buffer (seq 0 count).
 
 Local Definition stable (env : facts) pipe :=
-  env bufA = Some (VMemory (Allocated (BeforeRun 0))) /\
-  env bufB = Some (VMemory (Allocated (BeforeRun 1))) /\
+  env bufA = Some (VMemory (buffer_a allocation)) /\
+  env bufB = Some (VMemory (buffer_b allocation)) /\
   env active = Some (VPipe pipe).
 Local Definition iterations index indices (body next : Cmd unit) :=
   fold_right (fun k n => CAlias index (integer (Z.of_nat k)) (expand_loops body n)) next indices.
@@ -403,17 +404,17 @@ Local Definition expected branch view count :=
   | _,_ => [] end.
 
 Local Lemma source_summaries count view :
-  map (summary view (fun _ => None)) (expand_program (@branches F16 count)) =
+  map (summary view (fun _ => None)) (expand_program (@branches F16 allocation count)) =
   [Some (expected Moving view count); Some (expected Computing view count)].
 Proof.
   unfold branches, issue316, expand_program, instantiate_shared. cbn [List.map expand_loops].
   change (summary view
-    (assign (assign (assign (fun _ => None) bufA (Some (VMemory (Allocated (BeforeRun 0)))))
-      bufB (Some (VMemory (Allocated (BeforeRun 1))))) active (Some (VPipe MTE2)))
+    (assign (assign (assign (fun _ => None) bufA (Some (VMemory (buffer_a allocation))))
+      bufB (Some (VMemory (buffer_b allocation)))) active (Some (VPipe MTE2)))
     (iterations i (seq 0 (count - 0)) (load_iteration count) (Return tt [])) ::
     summary view
-    (assign (assign (assign (fun _ => None) bufA (Some (VMemory (Allocated (BeforeRun 0)))))
-      bufB (Some (VMemory (Allocated (BeforeRun 1))))) active (Some (VPipe Vector)))
+    (assign (assign (assign (fun _ => None) bufA (Some (VMemory (buffer_a allocation))))
+      bufB (Some (VMemory (buffer_b allocation)))) active (Some (VPipe Vector)))
     (iterations s (seq 0 (Nat.min 2 count - 0)) initially_free
         (iterations i (seq 0 (count - 0)) vector_iteration (Return tt []))) :: [] =
         [Some (expected Moving view count); Some (expected Computing view count)]).
@@ -449,8 +450,9 @@ Proof.
   - apply IH. intros v H. apply threaded. apply filter_In in H. apply filter_In; cbn; tauto.
 Qed.
 
-Local Lemma observed_branches (model : Model) c d a b au bu t k :
-  command_events model empty_environment c a au -> command_events model empty_environment d b bu ->
+Local Lemma observed_branches layout (model : Model) c d a b au bu t k :
+  command_events layout model empty_environment c a au ->
+  command_events layout model empty_environment d b bu ->
   annotations_valid [c;d] -> A2 [c;d] t k ->
   NoDup (map k t) -> incl (map k t) (a++b) ->
   prefix (filter (on_branch 1) (map k t)) (start_list a) /\
@@ -506,7 +508,7 @@ Local Lemma flat_after_map {A B C} (f : A -> B) (g : B -> list C) xs :
 Proof. induction xs; cbn; congruence. Qed.
 
 Theorem issue316_buffer_selection exp_f16 (model : Model) count t kappa :
-  issue316_trace exp_f16 model count t kappa ->
+  issue316_trace allocation exp_f16 model count t kappa ->
   prefix (flat_map (fun e => transferred (payload (kappa e))) t) (buffer_sequence count) /\
   prefix (flat_map (fun e => consumed (payload (kappa e))) t) (buffer_sequence count).
 Proof.
@@ -517,10 +519,10 @@ Proof.
   destruct p as [|c [|d [|extra rest]]]; cbn in size; try discriminate.
   destruct witness as (events & ordered & gen & unique & perm & suffix & cut).
   inversion gen; subst; clear gen.
-  match goal with h : program_events _ [_] _ _ |- _ => inversion h; subst; clear h end.
-  match goal with h : program_events _ [] _ _ |- _ => inversion h; subst; clear h end.
+  match goal with h : program_events _ _ [_] _ _ |- _ => inversion h; subst; clear h end.
+  match goal with h : program_events _ _ [] _ _ |- _ => inversion h; subst; clear h end.
   rewrite !app_nil_r in *.
-  match goal with ga : command_events _ _ c ?a _, gb : command_events _ _ d ?b _ |- _ =>
+  match goal with ga : command_events _ _ _ c ?a _, gb : command_events _ _ _ d ?b _ |- _ =>
     rename a into left_events, b into right_events, ga into left_gen, gb into right_gen end.
   assert (included : incl (map kappa t) (left_events ++ right_events)).
   { intros r hr. eapply Permutation_in; [apply Permutation_sym; exact perm |].
@@ -558,7 +560,7 @@ Proof.
 Qed.
 
 Corollary issue316_iteration_address exp_f16 (model : Model) count t kappa index addr :
-  issue316_trace exp_f16 model count t kappa ->
+  issue316_trace allocation exp_f16 model count t kappa ->
   (nth_error (flat_map (fun e => transferred (payload (kappa e))) t) index = Some addr \/
    nth_error (flat_map (fun e => consumed (payload (kappa e))) t) index = Some addr) ->
   index < count /\ addr = iteration_buffer index.

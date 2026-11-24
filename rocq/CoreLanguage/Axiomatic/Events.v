@@ -136,6 +136,9 @@ Inductive execution_values rho o (vs : list (@operand Float EventId Pipe)) :
     execution_values rho o vs (Some v) (Some p) args uses.
 
 (* 列表枚举有限事件集合；Cand 中的 NoDup 和排列条件消除列表顺序的意义。 *)
+Section Allocation.
+Context (layout : allocation_layout).
+
 Inductive command_events (model : computation_model)
     : environment -> Cmd -> list K -> list use_record -> Prop :=
 | EventsStop : forall rho c,
@@ -150,7 +153,7 @@ Inductive command_events (model : computation_model)
     command_events model (bind rho x selected) n events uses ->
     command_events model rho (Select x condition yes no n) events uses
 | EventsAlloc : forall rho o x n events uses,
-    let address := Allocated (InBranch o) in
+    let address := address_at layout (InBranch o) in
     command_events model (bind rho x (Known (VMemory address))) n events uses ->
     command_events model rho (Alloc o x n) (EventRecord o (LAlloc address) :: events) uses
 | EventsAtomic : forall rho o x f vs n args result events uses rest,
@@ -212,7 +215,7 @@ Inductive program_events (model : computation_model)
 
 Definition allocation_origin (e : event_record) :=
   match payload e with
-  | LAlloc a => a = Allocated (InBranch (owner e))
+  | LAlloc a => a = address_at layout (InBranch (owner e))
   | _ => True
   end.
 
@@ -228,4 +231,5 @@ Proof.
   induction 1; [constructor |]. apply Forall_app; split; eauto using command_allocation_origins.
 Qed.
 
+End Allocation.
 End Events.

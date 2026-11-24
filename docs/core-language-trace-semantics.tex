@@ -45,11 +45,15 @@ p,q\in\Pipe,\quad b\in\Bool,\quad\varepsilon\in\Eid,\\
 \end{gathered}
 \]
 $\uplus$ 是带类别标记的不交并，注入记号省略。
-内存地址 $a\in\mathsf{Memory}$ 标识整个资源。外部地址、并发前第 $k$ 次
-申请的地址 $\mathsf{shared}(k)$、分支中动态操作 $o$ 申请的地址
-$\mathsf{local}(o)$ 分属三个不交的集合，各自按标识判定相等。
+内存地址 $a\in\mathsf{Memory}=\mathbb N$ 标识整个资源。相同的数值地址指向同一个资源。
+执行配置提供单射
+\[
+\lambda:\mathbb N\uplus\Ops\longrightarrow\mathbb N .
+\]
+输入分别是并发前申请的序号和分支内申请的动态操作标识。
+记两个输入类别的输出为 $\lambda_{\rm shared}(k)$ 和 $\lambda_{\rm local}(o)$。
 并发前的 $x:=\kw{alloc}();P$ 按声明顺序从 $k=0$ 起实例化，
-将 $x$ 绑定为 $\mathsf{shared}(k)$ 并传给每个分支，然后生成并发部分的 trace。
+将 $x$ 绑定为 $\lambda_{\rm shared}(k)$ 并传给每个分支，然后生成并发部分的 trace。
 $\seq{}$ 表示空序列，$uv$ 表示序列连接。
 
 \subsection{有限循环的展开}
@@ -110,7 +114,7 @@ read & $(\kw{read\_start},(h,\pi,a))$ & $(\kw{read\_end},\nu)$ \\
 write & $(\kw{write\_start},(h,\pi,a,\nu))$ & $(\kw{write\_end},())$ \\
 compute & $(\kw{compute\_start},(h,\pi,\bar\nu))$ & $(\kw{compute\_end},\nu)$ \\
 原子计算 & $(\kw{atomic},(f,\bar\nu,\nu))$ & 同一事件 \\
-分支内申请 & $(\kw{alloc},\mathsf{local}(o))$ & 同一事件 \\
+分支内申请 & $(\kw{alloc},\lambda_{\rm local}(o))$ & 同一事件 \\
 setflag & $(\kw{set\_flag\_start},(p,q,\varepsilon))$ & $(\kw{set\_flag\_end},())$ \\
 waitflag & $(\kw{wait\_flag\_start},(p,q,\varepsilon))$ & $(\kw{wait\_flag\_end},())$ \\
 if & $(\kw{branch},b)$ & 同一事件 \\
@@ -202,7 +206,7 @@ $U$ 是操作数使用记录序列。令 $Z=\{(\varnothing,\seq{})\}$。
 &\hspace{4em}(E,U)\in\mathcal E_{\rho[x\mapsto\kw{Async}(o)]}(C)\}.
 \end{aligned}
 \]
-读取的完成结果遍历 $\Val$，
+读取的候选完成结果遍历 $\Val$，实际允许的结果由内存取值约束确定。
 以上规则要求 $|Q'(\pi)|=|Q(d)|$。计算的完成结果由发起时取得的输入和 $\mathsf{Comp}_h$ 关联。
 read 和 compute 的结果名称均绑定为 $\kw{Async}(o)$。
 别名直接传递绑定；操作数的实际取值发生在使用命令的发起事件处。
@@ -214,7 +218,7 @@ read 和 compute 的结果名称均绑定为 $\kw{Async}(o)$。
 从 $\rho[x\mapsto\kw{Known}(\nu)]$ 继续生成 $C$ 并连接使用记录。
 取余的除数为零或地址表索引越界时，运算未定义，当前位置只能产生停止前缀。
 分支内 $x:=\kw{alloc}();C$ 在 $o$ 生成单个申请事件，
-从 $\rho[x\mapsto\kw{Known}(\mathsf{local}(o))]$ 继续。
+从 $\rho[x\mapsto\kw{Known}(\lambda_{\rm local}(o))]$ 继续。
 两条规则皆包含停止选项 $Z$。不同动态申请位置取得不同地址，包括同一循环体的不同迭代。
 
 对于 $\kw{let}\ x=\kw{select}(v_b,v_1,v_2)\ \kw{in}\ C$，要求
@@ -484,6 +488,23 @@ read 和 compute 的结果均允许提前使用，每次使用的候选值由 $\
 compute 的输入在 compute\_start 处取值；其 compute\_end 的结果由
 这些实际输入与执行资源的关系 $\mathsf{Comp}_h$ 关联。
 
+\subsection{内存取值}
+
+每个缓冲区用一个地址表示。
+记 $W_t(a,j)$ 为 $e_j$ 之前所有向地址 $a$ 写入的完成事件的位置集合。
+写入完成事件的地址和写入值取自同一动态操作更早的写入发起事件。
+记 $\nu_i$ 为位置 $i$ 的写入值。对每个读取完成事件
+$\kappa(e_j)=(o,\kw{read\_end},\nu)$，从同一动态操作 $o$ 更早的读取发起事件取得地址 $a$，要求
+\[
+W_t(a,j)\ne\varnothing
+\quad\Longrightarrow\quad
+\nu=\nu_{\max W_t(a,j)} .
+\]
+若 $W_t(a,j)=\varnothing$，内存取值约束允许任意 $\nu\in\Val$。
+分支内申请地址 $a$ 的事件 $e_j$ 要求 $W_t(a,j)=\varnothing$。
+这些条件共同定义 $\mathcal A_{\rm mem}(t,\kappa)$。
+查找先前写入时比较地址，并使用整个 trace 的事件顺序。
+
 \section{允许的 Trace}
 
 令 $\mathcal A_{\rm sync}=\{\mathrm{A1},\ldots,\mathrm{A5}\}$。
@@ -493,15 +514,17 @@ compute 的输入在 compute\_start 处取值；其 compute\_end 的结果由
 (t,\kappa)\models\mathcal A_{\rm sync}
 \quad\Longleftrightarrow\quad
 \bigwedge_{i=1}^{5}\mathrm{A}i(P,t,\kappa),\\
-\llbracket P\rrbracket_{\rm sync}
+\llbracket P\rrbracket_{\rm sync}^{\lambda}
 =\{(t,\kappa)\mid\exists U.\
 \mathsf{Witness}(P,t,\kappa,U)\\
 \hspace{7em}\land\ (t,\kappa)\models\mathcal A_{\rm sync}
-\land\mathcal A_{\rm val}(P,t,\kappa,U)\}.
+\land\mathcal A_{\rm val}(P,t,\kappa,U)
+\land\mathcal A_{\rm mem}(t,\kappa)\}.
 \end{gathered}
 \]
 $\mathrm{A}i(P,t,\kappa)$ 表示第 $i$ 项公理在给定程序及候选 trace 上成立。
 候选生成与取值约束使用同一个使用记录序列 $U$。
+候选生成使用布局 $\lambda$。
 源程序 $P_0$ 接受 $(t,\kappa)$，当且仅当存在合法标注的 $P$，
 去除其标注后各分支分别等于 $X(B_j,\kw{LoopEnd})$，
 且 $(t,\kappa)$ 满足目标配置下 $P$ 的程序语义。
