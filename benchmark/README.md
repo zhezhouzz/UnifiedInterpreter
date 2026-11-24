@@ -1,71 +1,122 @@
-# 分核与同步插入后的 HIVM Benchmark
+# AscendNPU-IR HIVM 同步与并发语义 Benchmark
 
-[新版 trace 语料、原生 MLIR parser 与三分钟演示](corpus/README.md) · [逐例索引](corpus/CATALOG.md) · [GitCode issue 与修复测试](corpus/evidence/README.md)
+本目录是 **UnifiedInterpreter** 面向华为 AscendNPU-IR 的 **HIVM 同步与并发语义验证 Benchmark 总入口**。核心目标有两个：
 
+1. **向华为展示工具的实际价值**：对真实的 post-sync HIVM MLIR，自动检测同步缺失、非法同步协议、多缓冲槽位覆盖、跨核交接缺陷与死锁，并给出最短可执行反例（witness）或数值差异。
+2. **反推核心语言（CoreLang）与前端翻译演进**：用真实编译器产物的实测诊断数据，明确核心语言必须覆盖的同步原语、内存模型与控制流优先级。
 
-2026-11-23。本机 bishengir-opt 1.2.0，报告源提交 fbdf863a8c8c268e5cfea0d5f1d921e227267fd5，LLVM 19.1.7。本文将每个源 kernel/上游回归函数计作一个输入族，芯片、pass 开关、变异和随机数据记作变体。目录中的材料用于选择下一批翻译目标。
+> **快速导航**：[精选同步 Issue 与修复靶场](SYNC_ISSUES.md) · [芯片配置与分核参数](profiles/README.md) · [语料库运行与工具手册](corpus/README.md) · [212 例全量逐例索引](corpus/CATALOG.md) · [开发者 Skill](SKILL.md)
 
-## 第一批入口
+---
 
-| 来源 | 输入 | 供分析的产物 |
+## 1. Benchmark 分层体系（L1 – L4）
+
+为避免“批量抓来的原始素材”掩盖“给华为看的核心能力”，所有用例按 **四层金字塔** 组织：
+
+| 层级 | 名称与定位 | 规模与内容 | 给谁看 / 用来干什么 |
+|---|---|---|---|
+| **L1** | **核心演示集（Showcase）** | 精选 6 组正负对照与真实回归（见 §2） | **对外演示与组会 3 分钟 Demo**：展示工具从真实 HIVM 到最短反例 witness 的完整闭环 |
+| **L2** | **同步与并发真实靶场（Target Bug Suite）** | 从 72 个原始 issue 与 39 个 MR 中精选出的 **18 个纯同步/并发 Issue + 6 个独立修复 MR**（见 [SYNC_ISSUES.md](SYNC_ISSUES.md)） | **华为痛点对齐与能力路线图**：覆盖核内 flag、pipe_barrier、多缓冲、CV 流水与 MIX 1:2 跨核死锁 |
+| **L3** | **自动化回归底座（Regression Corpus）** | 16 个来源组、**212 个去重可重放 MLIR 输入** + 原生 BiShengIR Dialect Parser + 诊断基线（见 [corpus/CATALOG.md](corpus/CATALOG.md)） | **持续回归与覆盖率度量**：统计真实 HIVM 中哪些结构已可整函数翻译、哪些仍是语义/前端缺口 |
+| **L4** | **原始证据归档（Raw Archive）** | 72 份 GitCode issue 原文、39 个修复 patch、8 份报告者 ZIP、Triton/分布式教程源码（见 [corpus/evidence/README.md](corpus/evidence/README.md)） | **溯源与后续取材池**：含约 50 个非同步类 issue，不计入同步验证通过率 |
+
+---
+
+## 2. L1 核心演示集（面向华为的 3 分钟闭环）
+
+| 演示主题 | 入口材料 | 检验性质与当前结果 |
 |---|---|---|
-| 手写 Triton | [masked add 源码](triton/kernels.py)、[此次重放起点 HFusion](triton/add.hfusion.mlir) | [910B1 开启同步](triton/910B1-on.mlir)、[关闭同步](triton/910B1-off.mlir)；跨芯片用 [910B1](triton/910B1-on.after-gss.mlir) 和 [950PR](triton/950-on.mlir) 的同一 GSS 后捕获点 |
-| 官方 MLIR 选段 | [kern3 的 backup、AIC、AIV 三个函数](official/mix.mlir) | [跨核同步后](official/mix-v2.mlir)、[跨核和核内同步后](official/mix-both.mlir)。入口为设备端 AIC/AIV 函数 |
-| Issue 与修复回归 | [#920 修复 MR 的三个函数](issue920/920.mlir) | [旧版 CV pass 输出](issue920/920-exact.mlir)、[FileCheck 诊断](issue920/920-exact.check)。仍待收集分核及同步插入后的双端产物 |
+| **1. 核内缺 `wait` 提前读** | [正常版 HIVM](corpus/handwritten/ready-and-drain/hivm.mlir) · [正常 core](corpus/handwritten/ready-and-drain/watch-ub0.core) vs [缺 wait core](corpus/handwritten/ready-without-wait/watch-ub0.core) | 正常版穷尽 21 个状态无提前读；删去 `wait` 后给出 **3 步最短反例**：`load.start → set.start → V.start`（load 尚未完成即读取 UB） |
+| **2. 同步协议合法性（A4）** | [重复 set](corpus/handwritten/overlapping-sets/expected.core) vs [反方向同号事件](corpus/handwritten/independent-directions/expected.core) · [错误消费 pipe](corpus/handwritten/wrong-consumer-pipe/case.json) | 同键 `S₁ S₂ W₁ W₂` 在第 2 个完成事件违反 A4；反方向 `(V, MTE2, 0)` 与 `(MTE2, V, 0)` 键独立通过 |
+| **3. 真实 Triton 算子开关同步差分** | [masked add 源码](triton/kernels.py) · [910B1 开 sync](triton/910B1-on.mlir) vs [关 sync](triton/910B1-off.mlir) · [950PR 跨芯片](triton/950-on.mlir) | 同一 HFusion 输入只切换 `disable-hivm-auto-inject-sync`，静态 set/wait/barrier 为 `4/4/1` vs `0/0/0`；910B1 与 950PR 同捕点结构对照可重放 |
+| **4. 混合核（MIX）AIC ↔ AIV 交接** | [kern3 三函数](official/mix.mlir) → [跨核+核内 sync](official/mix-both.mlir) · [opsem `_attn_fwd` 建模](../docs/core-language-opsem.tex) | 覆盖 `fixpipe` 写 workspace → `sync_block_set[FIX, S]` → `sync_block_wait[FIX, S]` → `load` 的 1:1 / 1:2 跨核交接 |
+| **5. 真实同步回归：#920 & #316** | [#920 反馈环回归](issue920/920.mlir)（[!5025](corpus/evidence/repairs/issue-920-mr-5025/repair.json)）· [#316 双缓冲正文](corpus/evidence/issues/316/report.md) | #920 在本机固定编译器上复现上游禁止的 2 处 feedback loop skew；#316 为多缓冲 `bufA/bufB` 轮换标杆 |
+| **6. 延展展示（非同步类）：#981 内存别名误编译** | [#981 原始 MLIR](corpus/evidence/issues/981/quoted/fragment-1.mlir) → [本机 `canonicalize-ext` 输出](corpus/evidence/issues/981/local-canonicalize.mlir) | **非同步类加分项**：展示引入内存/subview 模型后，可直接定位真实编译器 bug——输入 `7` 时，被覆盖 subview 内的 lane `0, 63` 由 `0` 错变为 `7`，边界外 lane `64, 127` 保持 `7` |
 
-[分代参数与活动流约定](profiles/README.md) · [重放脚本](replay.py) · [参考输出](actual.txt) · [工具版本与二进制指纹](toolchain.txt)。官方选段及回归输入随附 [AscendNPU-IR 许可和声明](licenses/)。
-
-## 收集方法与后续计划
-
-1. **固定来源与入口层。** 保存仓库、commit、函数和 specialization。手写 Triton 同时登记源码与最后一个可重放的前端产物；issue 记录受影响版、修复 MR 和该测试原始 RUN 行。
-2. **确定观察点。** 纯 AIV 在核内同步插入后抓函数；MIX 取同一次编译分核后的 AIC/AIV，确认跨核和核内同步已落实。记录 buffer/view 别名、跨函数参数映射和实际活动 sub-block；有 outlined 函数时一起收集。
-3. **建立差分。** 固定输入、芯片和捕获点，只换一个 pass 开关；另外单独做同阶段跨芯片对照。保留日志中的 pass 证据，用 bishengir-opt 复核 IR，再对比有向键、读写位置和收件人。
-4. **转 core 并验收。** 优先翻译 add 与 kern3；给定初始 GM/UB、期望值与允许观察，分别检查最终内存、阻塞和通知残留。第二批补 barrier、B0/B1/B0 重用、1:2 与回退、attention 交接。后续 fuzz 可按固定种子变输入、别名偏移、event ID、遗漏等待与 sub-block guard，保存最小见证。第一批当前交付的是编译样例与结构差分。
-
-## 输入目录
-
-| 来源 / 函数 | 现有输入与编译阶段 | 建议观察与优先级 |
-|---|---|---|
-| 手写 Triton / add_kernel | triton/kernels.py 中的带边界 mask 的 add；triton/add.hfusion.mlir 是同提交的编译归档。此轮从 HFusion 重新编译到同步后 AIV；两代芯片均已取样。 | 第一批。固定满 tile 与尾 tile；比较有效 lane 的输出和无效 lane 的访存。保留条件分支，或给出输入并声明取了哪个分支。 |
-| 手写 Triton / vector_add、row_sum | 同一 kernels.py，前者静态展开两个 tile，后者按行归约，上游有 TTIR、HFusion、HIVM 和 provenance。两者此次只登记。 | 第二批。前者适合检验跨 tile 的 UB 重用，后者检验 reduce 与 store 的依赖；以实际 post-sync IR 确认重用或依赖再入库。 |
-| 官方同步测试 / kern3_mix_aic + kern3_mix_aiv | official/mix.mlir 是 hivm-dccgss.mlir 的第三个 module，输入已拆为 backup/AIC/AIV。mix-v2.mlir 为 delayed solver 后，mix-both.mlir 再应用核内 GraphSyncSolver。 | 第一批 MIX。选同一 arg1 的 GM 单元，研究 Cube fixpipe 写与 Vector load 读的时序。core 的运行主体只取两个设备函数。保留 backup 作来源对照；anchor 是编译器标记。该单测没有确定运行时 1:2 比例。mmad、nd2nz 若抽象为给定数据须声明。 |
-| 官方编译测试 / test_brc_mul__kernel0、test_clampf | 同版 bishengir/test/bishengir-compile/triton/compile-triton-{brc-mul,clampf}.mlir，前次调查已抓到 post-sync AIV。先选 brc-mul；clampf 内有多处 pipe_barrier。 | 第二批。前者扩展算子；后者适合单独删 barrier，比对同管道读写依赖。没有为这两条建立数值 oracle。 |
-| 官方 multibuffer / multi_buffer_alloc_manual_for_vadd | bishengir/test/Dialect/HIVM/enable-multi-buffer.mlir，全文件按 RUN 执行 enable-multi-buffer、lower-multi-buffer-counter，FileCheck 通过。 | 第二批。阶段是 slot 轮换，仍需走同步插入。截三轮 B0/B1/B0，同时检查数据就绪和覆写时机。关联 #316 特性需求。 |
-| 官方 subtiling / mm_01_mix_aiv 及 simple_testcase_dynamic | bishengir/test/Dialect/HIVM/tile-and-bind-sub-block.mlir，按 RUN 执行 bind-sub-block、FileCheck 通过。动态样本实际报告 revert。 | 作为 1:2 与回退候选。记录 sub-block guard、每个参与者、地址区间与匹配 Cube 函数，补齐同步后模块，再做运行用例。仅有 AIV 或开启 tiling 不能证明双接收者均参与。 |
-| 官方 attention 教程 / _attn_fwd | UnifiedInterpreter 归档 Triton 源、阶段化 IR 与 specialization，现有 attention_hivm_lowered.mlir 有已拆分的 AIC/AIV。 | 第二批真实 kernel。先抽一条 workspace producer/consumer 链；记录 flag、视图与参数对应后再对整 kernel 扩展。不把整段 attention 计作已支持。 |
-| GitCode #920 / feedback_cycle、feedback_cycle_hoisted、forwarding_only | issue920/920.mlir 来自关联 MR !5025 head 3c6f582cd505845e7465f4344bbf96af22c3ec2d 的 lit 回归文件，入口是 MIX 的 CV-skew pass。 | 第一批回归来源。前两条是应禁止 skew 的 L1/UB 反馈环；后者是允许 skew 的前向对照。当前版本 exact RUN 的 pass 返回 0，FileCheck 在前两条 CHECK-NOT 报错。目标 core 还需得到该例分核及同步后的成对输出。 |
-
-### 来源锚点
-
-- [手写 Triton 和仓库固定 revision](https://github.com/zhezhouzz/UnifiedInterpreter/blob/df70f659d4a7aa7fa75eb27d894388ad8aefc460/examples/kernels/source/kernels.py)；[阶段产物与 provenance](https://github.com/zhezhouzz/UnifiedInterpreter/tree/df70f659d4a7aa7fa75eb27d894388ad8aefc460/artifacts/kernels)。归档生成环境标为 triton-ascend 3.2.0、ascendnpu-ir 1.2.0、Ascend910B1；本次 A5 也是从这份相同 HFusion 开始，前端未针对 A5 重生成。
-- [官方 DCCGSS 单测](https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/SyncSolver/hivm-dccgss.mlir)；[官方同步 pass 说明](https://ascendnpu-ir.gitcode.com/en/developer_guide/features/auto_sync.html)；[官方 subtiling 说明](https://ascendnpu-ir.gitcode.com/en/developer_guide/features/auto_subtiling.html)。
-- [#920](https://gitcode.com/Ascend/AscendNPU-IR/issues/920)；[MR !5025](https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/5025)；[修复分支回归 MLIR](https://gitcode.com/Ascend/AscendNPU-IR/blob/3c6f582cd505845e7465f4344bbf96af22c3ec2d/bishengir/test/Dialect/HIVM/cv-pipelining-buffer-feedback-cycle.mlir)；[#316](https://gitcode.com/Ascend/AscendNPU-IR/issues/316)。
-
-## 重放第一批实验
-
-在本目录运行以下命令，将 BISHENG_BIN 指向同版本的 build/bin。
+一键复现 L1 演示（本机固定工具链 `bishengir-opt 1.2.0`，源提交 `fbdf863a8c8c268e5cfea0d5f1d921e227267fd5`）：
 
 ```sh
-export BISHENG_BIN=/path/to/AscendNPU-IR/build/bin
+# 1) 重放第一批 Triton 差分 / MIX / #920 实验
+export BISHENG_BIN=~/GIT/Distributed/AscendNPU-IR/build/bin
 python3 replay.py --bin "$BISHENG_BIN" --output "$(mktemp -d)"
+
+# 2) 构建原生 MLIR reader 并运行三分钟同步与 #981 演示
+cd corpus
+scratch=$(mktemp -d)
+python3 tools/build_reader.py ~/GIT/Distributed/AscendNPU-IR/build "$scratch/reader"
+python3 tools/demo.py --bin "$BISHENG_BIN" --reader "$scratch/reader"
 ```
 
-重放程序包含完整命令、核函数提取和比对，屏幕输出应与 actual.txt 一致。匹配的本机二进制 SHA-256 在 toolchain.txt。未运行 NPU；无需上传材料。
+---
 
-- **单开关差分**用同一份 add HFusion、同一 910B1 和同一共同下游 dump 点 hivm-add-ffts-to-syncblocksetop。只改 disable-hivm-auto-inject-sync；通过全程 pass 日志确认 GraphSyncSolver 开/关，函数内静态 set/wait/barrier 数量为 4/4/1 与 0/0/0。两份文件均由 bishengir-opt 重解析。关闭同步是负对照配置，错误数值还要在 core 内检查。
-- **芯片对照**用两份 after GraphSyncSolver 的产物 triton/910B1-on.after-gss.mlir、triton/950-on.mlir。910B1 内联 vadd，950PR_9579 把 vector 逻辑放进三个 outlined VF，包内保留定义与调用。两者各有 4/4/1 条静态同步操作。跨芯片是多个 pipeline 差异的合成，不能单独归因于某 pass。
-- **solver 对照**在同一已分核模块显式运行 delayed solver v1 与 v2，两份输出字节相同。再显式组合核内 GraphSyncSolver，得到 mix-both.mlir。该组合用于 fixture 实验；它没有运行全套生产 pipeline。跨核 flag 0 是 FIX→S；统计运行时事件只读 AIC/AIV，不重复计入 backup。
-- **历史回归**使用修复 MR 的原始 RUN 参数，当前编译器给两个反馈环都加上 hivm.cv_pipelined_loop。FileCheck 日志与完整 pass 输出已保存。尝试直接从该 mid-pass 输入启动 950 完整 driver，在 program id / program num 参数类型检查处退出，未达到同步捕获点。尚未以修复版二进制重跑，未做数值复现。
-- 三次 add 的完整 driver 均在晚期返回 1，910B1 缺最终 BiSheng compiler，950 缺 device bitcode。用于比较的是报错前已经输出、并再次解析成功的中间阶段。实际执行过的额外两个官方局部 pass 的命令在下方。
+## 3. 目标语义对齐与实测覆盖缺口
 
-```sh
-b=$(cd "$BISHENG_BIN/../.." && pwd)
-f="$b/bishengir/test/Dialect/HIVM/enable-multi-buffer.mlir"
-"$b/build/bin/bishengir-opt" "$f" -hivm-enable-multi-buffer -hivm-lower-multi-buffer-counter -split-input-file | "$b/build/bin/FileCheck" "$f"
-f="$b/bishengir/test/Dialect/HIVM/tile-and-bind-sub-block.mlir"
-"$b/build/bin/bishengir-opt" "$f" -hivm-bind-sub-block -split-input-file -verify-diagnostics | "$b/build/bin/FileCheck" "$f"
+本仓库当前有两条并行推进的核心语言规范，benchmark 实测数据直接决定了二者如何整合：
+
+- **操作语义规范**（[docs/core-language-opsem.tex](../docs/core-language-opsem.tex)）：直接对齐真实 Ascend AI Core / HIVM——单 AI Core 多流（$\kappa_{0:1}, \kappa_{1:0}, \kappa_{1:1}, \kappa_{1:2}$）、单流多异步队列 $Q_s(p)$、Destination-Passing Style（`issue[p](f, views)` + `foot` + 真实共享内存 $\mu$）、全部 5 种 HIVM 同步原语（`setflag`/`waitflag`/`pipebarrier`/`syncblockset`/`syncblockwait` 含 `S` 标量阻塞与 1:2 正向广播）、动态步长 `for`。**当前待补**：显式 `mem alloc` 原语。
+- **公理化 Trace 规范**（上游 `core_language` 分支 `d331719`）：`run { C1 || ... || Cn }` 并发分支、静态展开有限循环、显式 `alloc()`、异步 SSA 绑定与 A1–A5 + `Aval` 公理，已有 Rocq 形式化与 #316 地址轮换定理证明。**当前缺口**：无 `pipebarrier`、无 `syncblock` 与 1:2 广播、A2 中 `waitflag` 阻塞整条分支（与单流多队列硬件不同）、`read_end` 尚无共享内存 read-from 约束。
+
+### 当前语料库实测基线（诚实口径，[verification.txt](corpus/verification.txt)）
+
+> **注意**：当前 `corpus/` 下的自动翻译器 `tools/elaborate.py` 与 `Fixture.v` 是**过渡版本**——它面向的是上游 `Axiomatic.Syntax` 的直线单流子集，尚未接入 `opsem.tex` 的 `pipebarrier`、跨核 `syncblock`、`for` 与 DPS 内存模型。
+
+| 验证项 | 当前实测结果 | 准确含义 |
+|---|---:|---|
+| `source.mlir` 重编译比对 `hivm.mlir` | **212 / 212** 逐字节一致 | 编译产物完全可重放 |
+| **整函数**自动翻译（`actual.core`） | **17 / 212** 成功（14 手写 + 3 真实 MLIR） | 真实 MLIR 整函数覆盖率低，受下方 Top 缺失特性阻塞 |
+| **显式基本块切片**翻译（`slice.actual.core`） | **197 / 212** 成功（与 expected AST 197/197 一致） | 仅验证基本块内直线片段，**不能等同于整函数验证** |
+| Rocq `Fixture.v` 检查 | **215** 个模块通过 `d331719` 类型检查 | 仅验证能构造上游 AST，**不表示已证明程序安全** |
+
+### 导致真实 HIVM 整函数翻译失败的 Top 阻塞项（212 例统计）
+
+| 阻塞 MLIR 操作 / 结构 | 出现频次 | 根因归属 | 解决路径 |
+|---|---:|---|---|
+| `memref.alloc` / `memref.alloca` | **205 + 18** | `opsem.tex` 尚缺显式 `alloc`；过渡版 elaborator 未接入 | 在 `opsem.tex` 新增 `alloc` 原语并接入前端 |
+| `hivm.hir.pipe_barrier` | **194** | 过渡版上游语法不含 `pipe_barrier`（**`opsem.tex` 已有**） | 前端直接下放到 `opsem.tex` 的 `pipebarrier[p]` |
+| `hivm.hir.vcast` / `nd2nz` / `mmadL1` / `fixpipe` | **95 / 30 / 22 / 21** | 前端算子映射白名单未补全（**`opsem.tex` DPS 原生支持**） | 按 `Operator_d` 补齐抽象算子与读写足迹 `foot` |
+| `scf.for` / `scf.if` | **65 / 14** | 过渡版 elaborator 仅支持直线片段（**`opsem.tex` 已有**） | 对齐统一 CoreLang 后接入控制流翻译 |
+| 跨核 `sync_block_set/wait` 与 MIX 分核 | 覆盖 15 个 MIX 用例 | 过渡版上游语法仅支持核内 `(SW)*`（**`opsem.tex` 已有**） | 保留 AIC/AIV 双流、活动 `core_ratio` 与 1:2 广播配置 |
+
+---
+
+## 4. 新一轮 Benchmark 重建与入库规范（验收标准）
+
+后续对本目录进行推倒重建或扩充时，**统一遵循以下硬性规范**：
+
+1. **主题聚焦**：同步/并发主榜单只收录与 **管道同步、屏障、多缓冲生命周期、跨核同步、死锁/竞争** 相关的用例；与同步无关的 issue（精度、布局、FP8、debug info 等）统一放归档区，不计入主统计。
+2. **优先成对对照（Buggy vs Fixed / Sync-On vs Sync-Off）**：
+   - 每个 L1/L2 核心用例优先提供成对可重放 IR：要么是同一源输入的 `buggy` vs `fixed`（或关 sync vs 开 sync），要么是明确标注的合法/非法变异对。
+3. **统一的单例目录契约（每个用例目录）**：
+   - `case.json`：必含 `id`、`tier`（`L1`/`L2`/`L3`）、`category`（同步缺陷类别）、`source_ref`（仓库/commit/issue/MR）、`chip_profile`（如 `Ascend910B1`/`Ascend950PR_9579`）、`core_ratio`（`0:1`/`1:0`/`1:1`/`1:2`）、`compile_argv`、`entry_functions`（AIC/AIV 列表）、`expected_verdict`（`safe` / `race` / `deadlock` / `protocol_violation` / `wrong_value`）与 `oracle_note`。
+   - `source.mlir`（以及前端源码如 `.py`，若有）与固定编译器实际生成的 `hivm.mlir`（若为成对对照，保存 `buggy.hivm.mlir` 与 `fixed.hivm.mlir`）。
+   - `program.core`（由前端自动生成的整函数 CoreLang，若暂不可整函数翻译，明确记录 `diagnostics.json`，**禁止将手切几行的切片伪装成整函数成功**）。
+4. **严格区分四类结论**：
+   - **可重编译**（`bishengir-opt` 产物字节一致）
+   - **可整函数翻译**（MLIR → CoreLang 无诊断报错）
+   - **可类型/良构检查**（通过静态类型或 Rocq AST 检查）
+   - **已验证安全性 / 检出反例**（真正给出最短 witness 或穷尽无错证明）
+
+---
+
+## 5. 目录结构一览
+
+```text
+benchmark/
+├── README.md                  # 本文件：唯一总入口、分层体系、语义缺口与重建规范
+├── SYNC_ISSUES.md             # L2 精选表：纯同步/并发 GitCode Issue 与修复 MR 靶场
+├── SKILL.md                   # 面向开发者与 Agent 的操作 Skill
+├── profiles/                  # Ascend910B1 / Ascend950PR_9579 芯片参数与核配置
+├── triton/                    # L1：手写 Triton masked add 的开关同步与跨芯片差分
+├── official/                  # L1：官方 MIX kern3 的跨核 + 核内同步产物
+├── issue920/                  # L1：#920 CV-pipelining 反馈环回归复现
+├── replay.py                  # L1 第一批实验一键重放脚本（对照 actual.txt / toolchain.txt）
+├── licenses/                  # AscendNPU-IR 许可证与 NOTICE
+└── corpus/                    # L3/L4 自动化语料库、原生 MLIR reader 与过渡版工具链
+    ├── README.md              # 语料库技术运行手册（build_reader / elaborate / demo / check）
+    ├── CATALOG.md             # 16 组 212 例全量逐例索引
+    ├── verification.txt       # 全量自动化校验基线输出
+    ├── tools/                 # ir.cpp, build_reader.py, elaborate.py, core_to_rocq.py, demo.py, check.py
+    ├── handwritten/           # 14 个手写核内同步正负对照（L1 核心来源）
+    ├── <15 other groups>/     # 官方 pass 测试、教程特化、回归测试与 issue 输入
+    └── evidence/              # L4 原始归档：72 份 issue、39 个修复 MR patch、8 个 ZIP 证据包
 ```
-
-## 后续入库与差分规则
-
-每组保存来源 commit/函数、输入层、固定输入及期望输出、chip/实际 core 配置、唯一改动的 flag、实际执行过的 pass、共同捕获点、AIC/AIV 函数与参数映射。一个 kernel 的多个调参变体共用来源标识。对数值算子使用独立参考结果；对同步同时检查终态输出、阻塞、每个接收者是否完成消费。pass 运行、IR 改变、产生错误执行是三种独立的观察。初期只翻译具体的数据与同步片段，任何省略的运算、分支、初始值及内存别名都写进该例说明。
