@@ -282,6 +282,8 @@ opam exec --switch=unified-interpreter -- dune exec ./attention_test/flash_atten
 
 两份输入的 V 都只有 `V[1,0]=1`。基准分数全为零，O 的第 0 列是 `1/128`，`log_sum_exp=log(128)`。丢失 K 转置后，唯一分数为 1 的 key 对应 V 的第 1 行，O 的第 0 列变为 `e/(127+e)`，`log_sum_exp=log(127+e)`。V stride 变异将非零输出移到第 1 列。分母归约变异令分母为 1，O 的第 0 列变为 1，`log_sum_exp=0`。
 
+逐项实测结果和运行时检查的证据见[FlashAttention IR 变异测试报告](flash-attention-mutation-report.md)。
+
 ## 8. 阅读实现
 
 | 内容 | 文件 |
