@@ -28,7 +28,8 @@ Definition test_numeric : Numeric Z :=
        if f32 ty then match op with
          | VAdd => Ok (a+b) | VSub => Ok (a-b) | VMul => Ok (a*b)
          | VDiv => if Z.eqb b 0 then Error ScalarDivisionByZero
-                   else Ok (Z.quot a b) end
+                   else Ok (Z.quot a b)
+         | VAnd | VShr | VMin | VMax => Error ScalarDomainError end
        else Error ScalarDomainError;
      number_unary := fun op ty x => if f32 ty
        then Ok (x + match op with VExp => 1000 | VLn => 2000 end)

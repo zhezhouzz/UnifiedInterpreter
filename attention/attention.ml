@@ -33,7 +33,8 @@ let run ?stage ?(max_steps=1000000) ?(trace=fun _ -> ()) ~file input =
        allocation, reads and writes go through the Memory effect handler. *)
     match data with
     | Some xs ->
-        let allocation,memory = E.allocate_buffer E.ASGM ty (Array.to_list xs) (!state).memory in
+        let cells = Array.to_list xs |> List.map (fun x -> Numeric.Floating x) in
+        let allocation,memory = E.allocate_buffer E.ASGM ty cells (!state).memory in
         let descriptor = {E.descriptor_allocation=allocation; descriptor_offset=E.Z0;
           descriptor_sizes=[size]; descriptor_strides=[Numeric.z_of_int 1]} in
         let id,memory = E.insert_descriptor descriptor memory in
@@ -74,7 +75,7 @@ let run ?stage ?(max_steps=1000000) ?(trace=fun _ -> ()) ~file input =
             {E.access_restrict=false; access_writable=false}) in
         let value = R.with_handlers ctx (fun () ->
           Effect.perform (Handlers.Memory ("materialize_output",E.materialize view))) in
-        let _,_,xs = Handlers.packed value in Array.of_list xs
+        let _,_,xs = Handlers.packed value in Array.of_list (List.map Numeric.as_float xs)
     | _ -> assert false
   in
   let o = read o and lse = read lse in

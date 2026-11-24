@@ -71,3 +71,10 @@
   ../scripts/attention_frontend.py
   ../scripts/attention_dialects.py
   ../requirements-attention.txt))
+
+(test
+ (name carried_indirect_test)
+ (modules carried_indirect_test)
+ (libraries attention_runtime)
+ (deps fixtures/carried_indirect.mlir ../scripts/attention_frontend.py
+  ../scripts/attention_dialects.py ../requirements-attention.txt))

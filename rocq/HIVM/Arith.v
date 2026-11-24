@@ -15,7 +15,7 @@ Definition integer_width (ty : mlir_type) : option nat :=
   match ty with
   | IndexType => Some 64%nat
   | IntegerType width Signless =>
-      if Nat.eqb width 1 || Nat.eqb width 32 || Nat.eqb width 64
+      if Nat.eqb width 1 || Nat.eqb width 8 || Nat.eqb width 32 || Nat.eqb width 64
       then Some width else None
   | _ => None
   end.
@@ -47,6 +47,7 @@ Definition sem_integer_binary (op : arith_binary_operator) (ty : mlir_type)
       | ArithMaxSI => Ok (canonical_integer width (Z.max (signed a) (signed b)))
       | ArithMinSI => Ok (canonical_integer width (Z.min (signed a) (signed b)))
       | ArithMulI => Ok (canonical_integer width (a*b))
+      | ArithOrI => Ok (canonical_integer width (Z.lor a b))
       | ArithDivSI | ArithRemSI =>
           if Nat.eqb width 1 then Error UnsupportedInstruction
           else if Z.eqb b 0 ||
@@ -100,6 +101,7 @@ Definition sem_integer_compare (predicate : nat) (ty : mlir_type)
 
 Definition sem_float_constant {S} `{Numeric S} (ty : mlir_type)
     (literal : float_literal) : result runtime_error S :=
-  if mlir_element_type_eqb ty Float32Type
-  then scalar_failure (number_literal ty literal)
-  else Error UnsupportedInstruction.
+  match ty with
+  | Float16Type | BFloat16Type | Float32Type => scalar_failure (number_literal ty literal)
+  | _ => Error UnsupportedInstruction
+  end.

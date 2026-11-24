@@ -5,7 +5,7 @@ From UnifiedInterpreter.Type Require Import MLIR.
 Import ListNotations.
 
 Inductive arith_binary_operator :=
-| ArithAddI | ArithSubI | ArithMaxSI | ArithMinSI | ArithMulI | ArithDivSI | ArithRemSI
+| ArithAddI | ArithSubI | ArithMaxSI | ArithMinSI | ArithMulI | ArithDivSI | ArithRemSI | ArithOrI
 | ArithAddF | ArithMaxNumF.
 
 Inductive arith_cast_operator := ArithExtSI | ArithIndexCast.

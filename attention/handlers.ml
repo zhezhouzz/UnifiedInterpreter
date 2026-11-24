@@ -1,16 +1,24 @@
 module E = Extracted_semantics.Unified_semantics
 
-type tensor = float E.value
+type tensor = Numeric.cell E.value
 type hfusion =
-  | Fill of E.mlir_type * float * tensor
+  | Fill of E.mlir_type * Numeric.cell * tensor
   | Transpose of tensor * tensor * int list
   | Broadcast of tensor * tensor * int list
   | Unary of bool * tensor * tensor
   | Matmul of tensor * tensor * tensor
-  | Binary of E.linalg_binary_fn * float E.elementwise_operand *
-      float E.elementwise_operand * tensor
+  | Binary of E.linalg_binary_fn * Numeric.cell E.elementwise_operand *
+      Numeric.cell E.elementwise_operand * tensor
   | Cast of tensor * tensor
-  | Reduce of float E.reduction_combiner * int list * tensor * tensor
+  | Reduce of Numeric.cell E.reduction_combiner * int list * tensor * tensor
+
+type vector =
+  | Range of int64 * int64 list * tensor
+  | Compare of string * Numeric.cell E.operand * Numeric.cell E.operand * tensor
+  | Select of Numeric.cell E.operand * Numeric.cell E.operand * Numeric.cell E.operand * tensor
+  | Bitcast of tensor * tensor
+  | Vector_transpose of tensor * tensor * int list
+  | Vector_binary of E.binary_op * Numeric.cell E.operand * Numeric.cell E.operand * tensor
 
 type _ common =
   | Empty : int list * E.mlir_type -> tensor common
@@ -20,14 +28,19 @@ type _ common =
   | Integer_cast : E.arith_cast_operator * E.mlir_type * E.mlir_type * E.z -> E.z common
   | Integer_compare : int * E.mlir_type * E.z * E.z -> E.z common
   | Extract_slice : tensor * int list * int list * int list -> tensor common
+  | Insert_slice : tensor * tensor * int list * int list * int list -> tensor common
+  | Tensor_extract : tensor * int list -> Numeric.cell common
+  | Tensor_insert : Numeric.cell * tensor * int list -> tensor common
   | Float_constant : E.mlir_type * E.float_literal -> float common
   | Scalar_binary : E.scalar_operation * float * float -> float common
+  | Maximum_float : float * float -> float common
 
 type _ Effect.t +=
   | HFusion : hfusion -> tensor Effect.t
-  | HIVM : float E.request -> tensor Effect.t
+  | HIVM : Numeric.cell E.request -> tensor Effect.t
+  | Vector : Stage.t * vector -> tensor Effect.t
   | Common : 'a common -> 'a Effect.t
-  | Memory : string * (float, (E.runtime_error, 'a) E.result) E.memory_computation ->
+  | Memory : string * (Numeric.cell, (E.runtime_error, 'a) E.result) E.memory_computation ->
       'a Effect.t
 
 exception Semantic_error of E.runtime_error
@@ -46,7 +59,9 @@ let hfusion = function
       let sh = E.shape0 dst and ty = E.element_type dst in
       (match E.sem_linalg_elemwise_binary Numeric.scalar op E.LinalgCastSigned sh ty a b with
       | E.Error e -> E.Error e
-      | E.Ok xs -> E.Ok (E.DefinedTensor (E.PackTensor (sh,ty,xs))))
+      | E.Ok xs ->
+          let xs = if Numeric.is_float ty then xs else List.map (Numeric.normalize ty) xs in
+          E.Ok (E.DefinedTensor (E.PackTensor (sh,ty,xs))))
   | Cast (src,dst) ->
       let sh,ty,xs = packed src in
       if sh <> E.shape0 dst then E.Error E.InvalidShape else
@@ -71,11 +86,26 @@ let hfusion_entry = function
   | Matmul _ -> "sem_linalg_matmul" | Binary _ -> "sem_linalg_elemwise_binary"
   | Cast _ -> "sem_hfusion_cast" | Reduce _ -> "sem_linalg_reduce"
 
+let vector_entry = function
+  | Range _ -> "arange" | Compare _ -> "compare" | Select _ -> "select"
+  | Bitcast _ -> "bitcast" | Vector_transpose _ -> "transpose"
+  | Vector_binary _ -> "vector_binary"
+
+let vector = function
+  | Range (offset,strides,dst) -> Tensor_ops.arange offset strides dst
+  | Compare (mode,a,b,dst) -> Tensor_ops.compare mode a b dst
+  | Select (mask,a,b,dst) -> Tensor_ops.select mask a b dst
+  | Bitcast (src,dst) -> Tensor_ops.bitcast src dst
+  | Vector_transpose (src,dst,dims) -> E.sem_linalg_transpose src dst dims
+  | Vector_binary (op,a,b,dst) -> E.sem_binary Numeric.hivm op a b dst
+
 let common_entry : type a. a common -> string = function
   | Empty _ -> "sem_empty" | Reshape _ -> "sem_reshape"
   | Integer_constant _ -> "sem_integer_constant"
   | Integer_binary _ -> "sem_integer_binary" | Integer_cast _ -> "sem_integer_cast"
   | Integer_compare _ -> "sem_integer_compare" | Extract_slice _ -> "sem_extract_slice"
+  | Insert_slice _ -> "tensor_insert_slice" | Tensor_extract _ -> "tensor_extract"
+  | Tensor_insert _ -> "tensor_insert" | Maximum_float _ -> "maximum_float"
   | Float_constant _ -> "sem_float_constant" | Scalar_binary _ -> "eval_scalar_operation"
 
 let common : type a. a common -> (E.runtime_error,a) E.result = function
@@ -86,13 +116,20 @@ let common : type a. a common -> (E.runtime_error,a) E.result = function
   | Integer_cast (op,src,dst,n) -> E.sem_integer_cast op src dst n
   | Integer_compare (predicate,ty,a,b) -> E.sem_integer_compare predicate ty a b
   | Extract_slice (src,offsets,sizes,strides) -> E.sem_extract_slice src offsets sizes strides
-  | Float_constant (ty,x) -> E.sem_float_constant Numeric.hivm ty x
+  | Insert_slice (src,dst,offsets,sizes,strides) ->
+      Tensor_ops.insert_slice src dst offsets sizes strides
+  | Tensor_extract (src,indices) -> Tensor_ops.read src indices
+  | Tensor_insert (cell,dst,indices) -> Tensor_ops.insert cell dst indices
+  | Float_constant (ty,x) ->
+      (match E.sem_float_constant Numeric.hivm ty x with
+      | E.Ok cell -> E.Ok (Numeric.as_float cell) | E.Error e -> E.Error e)
   | Scalar_binary (op,a,b) ->
-      (match E.eval_scalar_operation Numeric.scalar op a b with
-      | E.Ok x -> E.Ok x | E.Error _ -> E.Error E.NumericFailure)
+      (match E.eval_scalar_operation Numeric.scalar op (Numeric.Floating a) (Numeric.Floating b) with
+      | E.Ok x -> E.Ok (Numeric.as_float x) | E.Error _ -> E.Error E.NumericFailure)
+  | Maximum_float (a,b) -> E.Ok (Numeric.propagating_max a b)
 
-type state = { memory : float E.memory_state; marker : int }
-let memory_lens : (float,state) E.hasMemory =
+type state = { memory : Numeric.cell E.memory_state; marker : int }
+let memory_lens : (Numeric.cell,state) E.hasMemory =
   { E.lens_get = (fun s -> s.memory);
     lens_put = (fun memory s -> {s with memory}) }
 
@@ -114,6 +151,9 @@ let run ?(enable_hfusion=true) ?(enable_hivm=true) ?(enable_common=true)
           on_call (hfusion_entry request); unwrap (hfusion request))
       | HIVM request when enable_hivm -> answer (fun () ->
           on_call "HIVM.evaluate"; unwrap (E.evaluate Numeric.hivm request))
+      | Vector (stage,request) when
+          stage = Stage.HFusion && enable_hfusion || stage = Stage.HIVM && enable_hivm ->
+          answer (fun () -> on_call (vector_entry request); unwrap (vector request))
       | Common request when enable_common -> answer (fun () ->
           on_call (common_entry request); unwrap (common request))
       | Memory (entry,program) when enable_memory -> answer (fun () ->

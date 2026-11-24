@@ -32,16 +32,7 @@ Definition sem_linalg_transpose {S} (src dst : value S) (permutation : list nat)
 
 Definition sem_linalg_broadcast {S} (src dst : value S) (dimensions : list nat)
     : result runtime_error (value S) :=
-  match shape src, shape dst with
-  | [m], [m';n] =>
-      if shape_eq dimensions [1] && Nat.eqb m m' &&
-         mlir_element_type_eqb (element_type src) (element_type dst) then
-        xs <-? elements src ;;
-        make_value (shape dst) (element_type dst)
-          (flat_map (fun x => repeat x n) xs)
-      else Error InvalidShape
-  | _,_ => Error UnsupportedInstruction
-  end.
+  broadcast_tensor true src dst dimensions.
 
 Definition sem_linalg_unary {S} `{ScalarOps S} (is_exp : bool)
     (src dst : value S) : result runtime_error (value S) :=
@@ -57,7 +48,8 @@ Definition sem_linalg_matmul {S} `{ScalarOps S} (a b dst : value S)
   match shape a,shape b,shape dst with
   | [m;k],[k';n],[m';n'] =>
       if Nat.eqb k k' && Nat.eqb m m' && Nat.eqb n n' &&
-         f16 (element_type a) && f16 (element_type b) &&
+         matrix_element_type (element_type a) &&
+         mlir_element_type_eqb (element_type a) (element_type b) &&
          f32 (element_type dst) then
         av <-? elements a ;;
         bv <-? elements b ;;

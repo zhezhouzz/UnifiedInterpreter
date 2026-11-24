@@ -3,7 +3,7 @@ From UnifiedInterpreter.HFusion Require Import Syntax Instr.
 
 (* Only the compute-stage attention vocabulary. Common MLIR payloads remain
    shared with HFusion; this is a separate stage, not an HFusion opcode. *)
-Inductive binary_op := VAdd | VSub | VMul | VDiv.
+Inductive binary_op := VAdd | VSub | VMul | VDiv | VAnd | VShr | VMin | VMax.
 Inductive unary_op := VExp | VLn.
 Inductive reduce_op := ReduceSum | ReduceMax.
 

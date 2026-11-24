@@ -40,9 +40,41 @@ Fixpoint shape_eq (a b : list nat) : bool :=
 
 Definition f32 (ty : mlir_type) : bool := mlir_element_type_eqb ty Float32Type.
 Definition f16 (ty : mlir_type) : bool := mlir_element_type_eqb ty Float16Type.
+Definition matrix_element_type (ty : mlir_type) : bool :=
+  f16 ty || mlir_element_type_eqb ty BFloat16Type.
 Definition supported_shape (sh : list nat) : bool :=
   match sh with [_] | [_;_] => forallb (fun n => negb (Nat.eqb n 0)) sh
   | _ => false end.
+
+(* Linalg inserts axes; HIVM broadcasts existing size-one axes. *)
+Definition broadcast_tensor {S} (insert_axes : bool)
+    (src dst : value S) (dims : list nat) : result runtime_error (value S) :=
+  let axis_is_broadcast i := existsb (Nat.eqb i) dims in
+  let project coordinate :=
+    let indexed := combine (seq 0 (length coordinate)) coordinate in
+    if insert_axes then map snd (filter (fun p => negb (axis_is_broadcast (fst p))) indexed)
+    else map (fun p => if axis_is_broadcast (fst p) then 0 else snd p) indexed in
+  let dst_shape := shape dst in
+  let expected :=
+    if insert_axes then project dst_shape
+    else map (fun p => if axis_is_broadcast (fst p) then 1 else snd p)
+      (combine (seq 0 (length dst_shape)) dst_shape) in
+  if forallb (fun i => Nat.ltb i (length dst_shape)) dims &&
+      shape_eq expected (shape src) &&
+      mlir_element_type_eqb (element_type src) (element_type dst) then
+    xs <-? elements src ;;
+    let fix gather coordinates :=
+      match coordinates with
+      | [] => Ok []
+      | coordinate :: rest =>
+          match nth_error xs (linear_coordinate (shape src) (project coordinate)) with
+          | None => Error InvalidShape
+          | Some x => tail <-? gather rest ;; Ok (x :: tail)
+          end
+      end in
+    result <-? gather (tensor_indices dst_shape) ;;
+    make_value dst_shape (element_type dst) result
+  else Error InvalidShape.
 
 Inductive operand (S : Type) :=
 | ScalarOperand (ty : mlir_type) (scalar : S)

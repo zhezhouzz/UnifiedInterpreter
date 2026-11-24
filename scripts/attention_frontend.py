@@ -3,15 +3,16 @@ import sys
 from importlib.metadata import version
 
 from xdsl.dialects.builtin import (
-    ArrayAttr, DenseArrayBase, FloatAttr, Float16Type, Float32Type,
+    ArrayAttr, BFloat16Type, DenseArrayBase, FloatAttr, Float16Type, Float32Type,
     IndexType, IntegerAttr, IntegerType, MemRefType, StringAttr,
     TensorType, UnitAttr, UnregisteredAttr, DYNAMIC_INDEX,
 )
 from xdsl.dialects.func import FuncOp
+from xdsl.dialects.utils import EnumAttribute
 from xdsl.parser import Parser
 from xdsl.utils.lexer import Span
 
-from attention_dialects import ReductionKindAttr, context
+from attention_dialects import context
 
 
 class LocatedParser(Parser):
@@ -38,9 +39,9 @@ class LocatedParser(Parser):
 
     def _register_ssa_definition(self, name, values, span):
         super()._register_ssa_definition(name, values, span)
-        if len(values) != 1:
-            raise ValueError("attention profile requires individual SSA result bindings")
-        self.names[values[0]] = "%" + name
+        for index, value in enumerate(values):
+            suffix = f"#{index}" if len(values) > 1 else ""
+            self.names[value] = f"%{name}{suffix}"
 
 
 def scalar_type(typ):
@@ -54,6 +55,8 @@ def scalar_type(typ):
         return "f16"
     if isinstance(typ, Float32Type):
         return "f32"
+    if isinstance(typ, BFloat16Type):
+        return "bf16"
     raise ValueError(f"unsupported element type: {typ}")
 
 
@@ -82,14 +85,12 @@ def export_attribute(attribute):
         return [export_attribute(value) for value in attribute.data]
     if isinstance(attribute, UnregisteredAttr):
         return {"enum": attribute.attr_name.data, "value": attribute.value.data}
-    if isinstance(attribute, ReductionKindAttr):
+    if isinstance(attribute, EnumAttribute):
         return attribute.data.value
     raise ValueError(f"unsupported attribute: {attribute}")
 
 
 def export_operation(operation, parser):
-    if len(operation.results) > 1:
-        raise ValueError("attention profile supports at most one result")
     attributes = dict(operation.attributes)
     properties = dict(operation.properties)
     properties.pop("operandSegmentSizes", None)
@@ -109,7 +110,9 @@ def export_operation(operation, parser):
     region_arguments = []
     else_region = []
     name = operation.name
-    if name.startswith(("linalg.", "hivm.", "hfusion.")) and name != "linalg.yield":
+    if name.startswith(("linalg.", "hivm.", "hfusion.")) and name not in {
+        "linalg.yield", "hfusion.print", "hivm.hir.debug", "hivm.hir.bitcast",
+    }:
         if name == "linalg.reduce":
             inputs = [operation.operands[0]]
             outputs = [operation.operands[1]]
@@ -148,7 +151,9 @@ def export_operation(operation, parser):
                         raise ValueError("unsupported implicit branch operation")
                     continue
                 target.append(export_operation(child, parser))
-    if name in {"memref.subview", "tensor.extract_slice"}:
+    if name in {
+        "memref.subview", "memref.reinterpret_cast", "tensor.extract_slice", "tensor.insert_slice",
+    }:
         for key in ("offsets", "sizes", "strides"):
             dynamic = iter(getattr(operation, key))
             entries = []
@@ -164,23 +169,14 @@ def export_operation(operation, parser):
                 raise ValueError("extra dynamic " + key)
             del values["static_" + key]
             values[key] = entries
-    if name == "memref.reinterpret_cast":
-        offsets = list(operation.offsets)
-        values["offsets"] = [
-            parser.names[offsets.pop(0)] if value == DYNAMIC_INDEX else str(value)
-            for value in operation.static_offsets.get_values()
-        ]
-        if offsets or operation.sizes or operation.strides:
-            raise ValueError("attention profile requires static view sizes and strides")
-        del values["static_offsets"]
-        values["sizes"] = values.pop("static_sizes")
-        values["strides"] = values.pop("static_strides")
     return {
         "opcode": name,
-        "result": parser.names[operation.results[0]] if operation.results else None,
+        "results": [
+            {"name": parser.names[result], "type": export_type(result.type)}
+            for result in operation.results
+        ],
         "operands": [parser.names[value] for value in operation.operands],
         "operand_types": [export_type(value.type) for value in operation.operands],
-        "result_type": export_type(operation.results[0].type) if operation.results else None,
         "inputs": [parser.names[value] for value in inputs],
         "outputs": [parser.names[value] for value in outputs],
         "attributes": values,
