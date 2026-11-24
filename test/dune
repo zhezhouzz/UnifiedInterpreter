@@ -1,3 +1,14 @@
 (test
  (name test_unified_interpreter)
+ (modules test_unified_interpreter)
  (libraries unified_interpreter))
+
+(test
+ (name test_bug_traces)
+ (modules test_bug_traces)
+ (libraries unified_interpreter zarith))
+
+(test
+ (name test_symbolic_races)
+ (modules test_symbolic_races)
+ (libraries unified_interpreter zarith))

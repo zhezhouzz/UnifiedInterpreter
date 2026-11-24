@@ -7,6 +7,8 @@ module Interpreter = Interpreter
 module Examples = Examples
 module Report = Report
 module Demo = Demo
+module Core_lang = Core_lang
+module Bug_traces = Bug_traces
 
 module Adapters = Examples
 module Runtime = Interpreter

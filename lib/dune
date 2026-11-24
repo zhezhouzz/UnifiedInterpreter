@@ -1,2 +1,3 @@
 (library
- (name unified_interpreter))
+ (name unified_interpreter)
+ (libraries zarith z3))

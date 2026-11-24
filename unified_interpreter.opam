@@ -8,6 +8,7 @@ depends: [
   "rocq-runtime"
   "rocq-stdpp"
   "zarith"
+  "z3"
   "yojson"
   "odoc" {with-doc}
 ]

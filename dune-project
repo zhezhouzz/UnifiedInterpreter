@@ -14,4 +14,5 @@
   rocq-runtime
   rocq-stdpp
   zarith
+  z3
   yojson))
