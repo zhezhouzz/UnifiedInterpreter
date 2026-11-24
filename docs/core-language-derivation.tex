@@ -1,0 +1,721 @@
+\documentclass[UTF8,a4paper,11pt,fontset=fandol]{ctexart}
+\usepackage[margin=24mm]{geometry}
+\usepackage{amsmath,amssymb,mathtools,stmaryrd}
+\usepackage{booktabs,tabularx,longtable,array,float}
+\usepackage{xcolor,listings,xurl,fancyhdr}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit,calc}
+\usepackage[unicode,colorlinks=true,linkcolor=blue!45!black,citecolor=blue!45!black,urlcolor=blue!45!black]{hyperref}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small Core Language：从 Trace Semantics 推导 Effect-Handler 解释器}
+\fancyhead[R]{\small 领域调研与设计方案}
+\fancyfoot[C]{\thepage}
+\setlength{\headheight}{14pt}
+\setlength{\parskip}{0.32em}
+\setlength{\emergencystretch}{3em}
+\renewcommand{\arraystretch}{1.16}
+\allowdisplaybreaks[2]
+
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\pathcode}[1]{\nolinkurl{#1}}
+\newcommand{\kw}[1]{\mathsf{#1}}
+\newcommand{\sem}[1]{\llbracket #1\rrbracket}
+\newcommand{\seq}[1]{\langle #1\rangle}
+\newcommand{\dom}{\operatorname{dom}}
+\newcommand{\Eid}{\mathsf{EventId}}
+\newcommand{\Val}{\mathsf{Val}}
+\newcommand{\Pipe}{\mathsf{Pipe}}
+\newcommand{\Unit}{\mathsf{Unit}}
+\newcommand{\Bool}{\mathsf{Bool}}
+\newcommand{\Mem}{\mathsf{Memory}}
+\newcommand{\Ops}{\mathsf{Op}}
+\newcommand{\Cand}{\mathsf{Cand}}
+\newcommand{\head}{\mathsf{head}}
+\newcommand{\pipe}{\mathsf{pipe}}
+\newcommand{\thread}{\mathsf{thread}}
+\newcommand{\kind}{\mathsf{kind}}
+\newcommand{\pay}{\mathsf{pay}}
+\newcommand{\owner}{\mathsf{owner}}
+\newcommand{\before}{\mathrel{\triangleleft_t}}
+\newcommand{\step}[1]{\xrightarrow{#1}}
+
+\lstset{
+  basicstyle=\small\ttfamily,
+  commentstyle=\color{black!55}\upshape,
+  columns=fullflexible,
+  keepspaces=true,
+  breaklines=true,
+  showstringspaces=false,
+  frame=single,
+  rulecolor=\color{black!20},
+  backgroundcolor=\color{black!2},
+  xleftmargin=4pt,
+  xrightmargin=4pt
+}
+
+\hypersetup{
+  pdftitle={从 Trace Semantics 直接推导 Effect-Handler 解释器：领域综述与设计方案},
+  pdfauthor={UnifiedInterpreter Project}
+}
+
+\title{从 Trace Semantics 直接推导 Effect-Handler 解释器\\[0.35em]
+\large Defunctionalization、Continuation 与自动机操作化调研及设计方案}
+\author{UnifiedInterpreter 项目设计文档（分支 \code{feat/derived-interpreter}）}
+\date{2026 年 11 月}
+
+\begin{document}
+\maketitle
+\vspace{-1.2em}
+\tableofcontents
+\vspace{0.8em}
+
+%======================================================================
+\section{背景与问题定位}
+%======================================================================
+
+本仓库（\code{UnifiedInterpreter}）围绕 Ascend NPU 多层中间表示（HFusion / HIVM / Core Language）已经分别沉淀出两套具有代表性的形式化基础设施：
+
+\begin{enumerate}
+\item \textbf{公理化 Trace 语义规范层}（\pathcode{rocq/CoreLanguage/Axiomatic/}，对应文档 \pathcode{docs/core-language-syntax.tex} 与 \pathcode{docs/core-language-trace-semantics.tex}）：
+  采用声明式谓词定义程序语义 $\sem{P}_{\rm sync}^\lambda$。该语义先对程序做有限循环展开（\code{expand\_loops}）与静态路径标注（\code{annotate\_program}），再枚举全部候选事件集合的排列前缀（$\Cand(P)$），最后以五条同步公理 $\mathrm{A1}$--$\mathrm{A5}$、异步结果完成取值约束 $\mathcal A_{\rm val}$、内存读-写历史约束 $\mathcal A_{\rm mem}$ 以及目标权限检查 \code{target\_allows} 筛选合法执行。
+  该层非常适合表述高阶性质（如 \code{Issue316Safety.v} 对任意迭代轮数的双缓冲轮转正确性证明）；但由于其完全非构造性，目前即便仅证明 \code{Issue316} 存在一条合法完整执行，也不得不在 \code{SerializedTrace.v} 与 \code{Issue316Execution.v} 中手工编写逾千行构造性证明。
+
+\item \textbf{基于代数效应与 Handler 的解释器层}：
+  在 Rocq 侧，\code{rocq/Base/Free.v} 定义了有限 Free Monad \code{computation E A}，\code{rocq/Memory/Handler.v} 与 \code{rocq/HIVM/Execution.v} 通过显式 Handler 与尾递归累加实现可抽取（\code{Extract.v}）的状态机执行；在 OCaml 侧，\code{lib/effects.ml} 与 \code{lib/interpreter.ml} 使用 OCaml~5 原生界定续体（\code{Effect.Deep}）构建了 H1--H5 分层混合解释器。此外，\code{docs/vellvm-lessons.md} 已明确提出“抽象非确定性规范与可执行解释器之间建立 refinement 边界”的架构原则。
+\end{enumerate}
+
+\paragraph{核心研究问题。}
+能否借助编程语言理论与自动机领域的经典变换方法——\textbf{CPS / Continuation、Defunctionalization / Refunctionalization、Refocusing、Algebraic Effect Handlers / Free Monad 以及在线前缀自动机（Online Prefix Automaton）}——从 \code{TraceSemantics.v} \textbf{系统性地推导出可执行的 Effect-Handler 解释器及其等价一阶抽象机}，从而：
+\begin{itemize}
+\item 彻底消除针对每个具体案例（如 Issue~\#316）手工构造 trace 与重复验证公理的成本；
+\item 在 Rocq 中一次证明通用的\textbf{健全性定理（Soundness）}（乃至双向等价的完备性），使任意合法调度策略跑出的执行自动成为 \code{shared\_program\_semantics} 的合法见证；
+\item 清晰揭示本仓库两套解释器表示（Rocq \code{Free.v} Handler / 一阶抽象机 vs OCaml~5 \code{Effect.Deep}）之间的数学同构关系。
+\end{itemize}
+
+本文第~\ref{sec:survey}~节系统综述该领域的四条关键理论主线；第~\ref{sec:automaton}~节逐条审查本仓库 \code{TraceSemantics.v} 的因果结构并给出等价在线自动机与循环续体去函数化；第~\ref{sec:derivation}~节给出完整的分层 Effect-Handler 与一阶抽象机双向推导设计，并以 GitCode Issue~\#316 双缓冲示例做端到端推演；第~\ref{sec:roadmap}~节给出 Rocq 模块路线图与验证阶梯。
+
+%======================================================================
+\section{领域综述：从语义推导抽象机与解释器的关键理论}
+\label{sec:survey}
+%======================================================================
+
+从形式语义推导抽象机与解释器的研究跨越半个世纪，可以概括为四个互为支撑的理论支柱：\textbf{函数式对应（Functional Correspondence）}、\textbf{语法对应与重聚焦（Syntactic Correspondence \& Refocusing）}、\textbf{界定续体与代数效应（Delimited Continuations, Effect Handlers \& Free/Choice Trees）}，以及面向声明式并发语义的\textbf{自动机操作化（Automaton Operationalization）}。
+
+\subsection{Definitional Interpreters、CPS 变换与 Defunctionalization}
+
+这一方向的源头是 John~C.~Reynolds 在 1972 年的奠基性论文~\cite{reynolds1972}（已归档于仓库 \code{references/papers/reynolds-definitional-interpreters.pdf}）。Reynolds 指出，用高阶元语言直接编写定义式解释器（definitional interpreter）存在两个隐患：其一，目标语言的求值顺序会隐式依赖元语言的求值策略；其二，函数值与续体依赖元语言的高阶闭包机制。为消除这两重依赖，Reynolds 提出了两项核心程序变换：
+
+\begin{enumerate}
+\item \textbf{CPS 变换（Continuation-Passing Style）}：
+  为求值函数增加显式续体参数 $k : \mathsf{Val} \to \mathsf{Ans}$，将所有中间计算结果通过调用 $k(v)$ 传递给“剩余计算”。CPS 变换后，求值顺序（如 call-by-value vs call-by-name）完全固定在程序文本中，且所有递归调用均化为尾调用（tail call）。
+
+\item \textbf{Defunctionalization（去函数化）}~\cite{reynolds1972,danvy2001defunc}：
+  这是一个全程序的一阶化变换：收集程序中某一函数类型（特别是续体类型 $\mathsf{Val} \to \mathsf{Ans}$）的全部 $\lambda$-抽象构造点；为每个构造点引入一个一阶代数数据类型构造子，其字段恰好保存该 $\lambda$-抽象的自由变量；最后引入全局分派函数 $\kw{apply\_cont}$，把每次高阶调用 $k(v)$ 替换为 $\kw{apply\_cont}(k, v)$。
+\end{enumerate}
+
+\paragraph{微型示例（算术表达式求值器 $\to$ 栈自动机）。}
+对于表达式 $e ::= n \mid e_1 + e_2$，直接风格求值器 $\kw{eval}(e_1+e_2) = \kw{eval}(e_1) + \kw{eval}(e_2)$ 经 CPS 变换后得到：
+\[
+\begin{aligned}
+\kw{eval\_cps}(n, k) &= k(n),\\
+\kw{eval\_cps}(e_1 + e_2, k) &= \kw{eval\_cps}(e_1,\ \lambda v_1.\ \kw{eval\_cps}(e_2,\ \lambda v_2.\ k(v_1 + v_2))).
+\end{aligned}
+\]
+观察续体 $k$ 的三个构造点（初始恒等续体 $\lambda v.\,v$、左子式完成后的 $\lambda v_1.\,\dots$、右子式完成后的 $\lambda v_2.\,\dots$），做 Defunctionalization 即机械生成一阶续体数据类型（栈帧）与分派器：
+\[
+\begin{gathered}
+\mathsf{Cont} ::= \kw{KDone} \mid \kw{KArgR}(e_2, \kappa) \mid \kw{KAdd}(v_1, \kappa),\\
+\begin{aligned}
+\kw{eval}(n, \kappa) &= \kw{apply}(\kappa, n), &
+\kw{apply}(\kw{KDone}, v) &= v,\\
+\kw{eval}(e_1+e_2, \kappa) &= \kw{eval}(e_1, \kw{KArgR}(e_2, \kappa)), &
+\kw{apply}(\kw{KArgR}(e_2, \kappa), v_1) &= \kw{eval}(e_2, \kw{KAdd}(v_1, \kappa)),\\
+& & \kw{apply}(\kw{KAdd}(v_1, \kappa), v_2) &= \kw{apply}(\kappa, v_1 + v_2).
+\end{aligned}
+\end{gathered}
+\]
+所得到的 $(\kw{eval}, \kw{apply})$ 恰好就是一个不依赖任何高阶函数与隐式调用栈的尾递归状态自动机（抽象机）。反之，若把一阶数据类型 $\mathsf{Cont}$ 及其分派器 $\kw{apply}$ 还原为高阶函数，即为 Olivier~Danvy 与 Kevin~Millikin 提出的逆变换 \textbf{Refunctionalization（再函数化）}~\cite{danvy2009refunc}。
+
+\subsection{Danvy 学派的双重对应：Functional 与 Syntactic Correspondence}
+
+Danvy 及其合作者（Ager、Biernacki、Midtgaard、Nielsen 等）在 2003--2009 年间将上述零散技巧发展成一套系统的方法论，证明绝大多数经典抽象机（SECD、CEK、Krivine、CLS、Lazy Krivine 等）都无需凭直觉发明，而可以从高层语义经保持等价性的机械变换直接算出~\cite{ager2003functional,danvy2004refocusing,biernacka2007concrete}：
+
+\begin{enumerate}
+\item \textbf{Functional Correspondence（函数式对应）}~\cite{ager2003functional}：
+  起点是\textbf{大步求值器或指称语义}，经由
+  \[
+  \text{高阶求值器}
+  \xrightarrow{\text{Closure Conversion}}
+  \xrightarrow{\text{CPS 变换}}
+  \xrightarrow{\text{Defunctionalization}}
+  \text{一阶抽象机}
+  \]
+  四步即可系统推导。例如，按值调用（CBV）求值器导出 Felleisen--Friedman 的 CEK 机；按名调用（CBN）求值器导出 Krivine 抽象机；按需调用（call-by-need）求值器自然导出带堆更新标记（update marker）的惰性抽象机。
+
+\item \textbf{Syntactic Correspondence（语法对应）与 Refocusing（重聚焦）}~\cite{danvy2004refocusing,biernacka2007concrete}：
+  起点是 Felleisen 风格的\textbf{小步归约语义（Reduction Semantics）}。小步归约每一步执行三个阶段：
+  $\kw{decompose}(t) = E[r]$（分解为求值上下文 $E$ 与可归约式 $r$）$\to$ $\kw{contract}(r) = c$（单步收缩）$\to$ $\kw{recompose}(E, c) = E[c]$（拼回整棵树）。
+  朴素执行每次拼回后又立即从根重新分解，会产生大量无用树遍历。\textbf{Refocusing} 通过把 $\kw{decompose}(\kw{recompose}(E, c))$ 融合（deforestation）为直接函数 $\kw{refocus}(c, E)$，直接从当前契约式 $c$ 与当前上下文 $E$ 定位下一个红式，再经轻量融合（lightweight fusion）与走廊跃迁压缩（corridor transition compression），得到与 Functional Correspondence \textbf{完全相同}的抽象机：
+  \[
+  \text{Reduction Semantics}
+  \xrightarrow{\text{Refocusing}}
+  \text{Pre-Abstract Machine}
+  \xrightarrow{\text{Compression}}
+  \text{Abstract Machine}.
+  \]
+  其最深刻的结构性结论在于：\textbf{小步归约语义中的求值上下文（inside-out evaluation context $E$）在数据类型上精确同构于 CPS 续体去函数化得到的栈帧列表 $\kappa$}。
+\end{enumerate}
+
+\begin{table}[htbp]
+\centering
+\caption{Functional Correspondence 与 Syntactic Correspondence 的核心对比}
+\label{tab:danvy-correspondence}
+\begin{tabularx}{\linewidth}{@{}lYY@{}}
+\toprule
+维度 & Functional Correspondence~\cite{ager2003functional} & Syntactic Correspondence~\cite{danvy2004refocusing} \\
+\midrule
+语义起点 & 大步求值器 / 指称语义（高阶递归函数） & 小步归约语义（Evaluation Context + 收缩规则） \\
+核心变换 & Closure Conversion + CPS + Defunctionalization & Refocusing + Lightweight Fusion + 跃迁压缩 \\
+续体/栈来源 & CPS 显式化的高阶续体 $k$ 去函数化为栈帧 $\kappa$ & inside-out 求值上下文 $E$ 直接成为栈帧 $\kappa$ \\
+逆向对应 & Refunctionalization 回到高阶求值器~\cite{danvy2009refunc} & 重组（recompose）回到小步归约关系 \\
+对本仓库的直接启发 & 将 Free Monad 续体去函数化为一阶抽象机，或再函数化为 OCaml~5 \code{Effect.Deep} & 将 \code{expand\_loops} 的 \code{LoopEnd} 续体做 Refocusing，避免预展开整棵循环 AST \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{界定续体、Algebraic Effect Handlers 与 Free/Choice Trees 的同构谱系}
+
+现代解释器设计普遍使用\textbf{代数效应与处理器（Algebraic Effects and Handlers）}~\cite{plotkin2009handlers} 来实现语义的模块化组合。与普通 CPS 捕获“直到程序结束的全局续体”不同，Effect Handler 捕获的是到最近外层匹配 Handler 为止的\textbf{界定续体（Delimited / Generalized Continuation）}。这一机制在形式语义与实现之间形成了清晰的三层同构谱系：
+
+\begin{enumerate}
+\item \textbf{双层 CPS 与 CEK 抽象机（Hillerström, Lindley, Atkey）}~\cite{hillerstrom2017cps,hillerstrom2020generalised}：
+  为带 Effect Handler 的演算做 CPS 变换时，需要两类续体：当前 handler 作用域内的\textbf{纯求值续体 $\kappa$}，以及外层的\textbf{元续体 / Handler 栈 $\gamma$}。对 $(\kappa, \gamma)$ 做 Defunctionalization，即直接导出带 Handler 的抽象机配置 $\langle e \mid \rho \mid \kappa \mid \gamma \rangle$：
+  \begin{itemize}
+  \item 进入 \code{handle e with H} 时，向 $\gamma$ 压入新的 handler 帧；
+  \item 执行 \code{perform op(v)} 时，截断当前 $\kappa$ 直至匹配 handler，将截断的栈段打包为一等续体值 $k$ 交给 handler 分支；
+  \item 调用 \code{continue k w} 时，把打包的栈段拼接回当前 $\kappa$ 并继续求值。
+  \end{itemize}
+  OCaml~5 的原生代数效应运行时（\code{Effect.Deep}）~\cite{sivaramakrishnan2021ocaml} 正是在运行时用轻量级纤程栈（segmented fiber stack）直接实现了这一界定续体抽象机。
+
+\item \textbf{Free / Freer Monad 作为“半去函数化”的中间表示}~\cite{kiselyov2015freer}：
+  观察本仓库 \code{rocq/Base/Free.v} 定义的 \code{computation E A}：
+  \[
+  \kw{computation}\ E\ A ::= \kw{Return}(a) \mid \kw{Trigger}_{X}(req : E\,X,\ k : X \to \kw{computation}\ E\ A).
+  \]
+  从 Defunctionalization 视角看，它恰好位于抽象机与高阶 CPS 的\textbf{正中位置}：
+  \begin{itemize}
+  \item \textbf{效应操作已去函数化}：所有环境交互被显式化为一阶 GADT 构造子 $req : E\,X$，使得各个 Handler 可以按效应子集分层解耦；
+  \item \textbf{后续控制仍保持高阶续体}：$k : X \to \kw{computation}\ E\ A$ 仍是宿主语言函数。若对 $k$ 再做一次 Defunctionalization，即退化为完全一阶的状态机/抽象机（无需高阶闭包，在 Rocq 中证明不变量与抽取极为干净）；若向上做 Refunctionalization，则直接对应 OCaml~5 的 \code{Effect.perform} + \code{continue k}。
+  \end{itemize}
+
+\item \textbf{Interaction Trees、Choice Trees 与并发调度（Resumption Monad）}~\cite{xia2020itrees,chappe2023ctrees,ahman2021async}：
+  当语言包含非终止循环、外部交互或并发非确定性时，有限 Free Monad 可推广为共归纳的 Interaction Trees（ITrees）~\cite{xia2020itrees} 或带内部非确定性分支的 Choice Trees（CTrees，现代 Vellvm 架构）~\cite{chappe2023ctrees}。
+  在协作式并发与异步语义~\cite{ahman2021async}中，每个并发分支是一棵产生同步/访存/让出效应的树（resumption）；顶层\textbf{调度器 Handler（Scheduler Handler）}捕获各分支挂起的续体并放入就绪/等待队列，从而仅通过更换调度器 Handler 即可派生出串行、轮转重叠、随机 Fuzz 等不同解释器，并把可执行解释器证明为抽象非确定性规范的一个 \textbf{refinement}（见 \code{docs/vellvm-lessons.md}）。
+\end{enumerate}
+
+\subsection{从公理化 Trace Semantics 到在线状态自动机（Automaton Operationalization）}
+
+\textbf{上述 Danvy 对应关系有一个容易被忽略的前提}：无论是 Functional Correspondence 还是 Syntactic Correspondence，其输入起点都已经是\emph{方向化的}语义（大步求值器或小步归约）。然而，本仓库的 \code{CoreLanguage/Axiomatic/TraceSemantics.v} 属于\textbf{声明式/公理化 Trace 语义}：它先生成整个程序的候选事件集合并取所有排列的前缀 $\Cand(P)$，再以全局全称量词公理（$\mathrm{A1}$--$\mathrm{A5}$、$\mathcal A_{\rm val}$、$\mathcal A_{\rm mem}$）事后过滤合法 trace。
+
+因此，要将 defunctionalization / continuation 方法运用于公理化 Trace 语义，必须先补齐\textbf{第零座桥梁——自动机操作化（Automaton Operationalization）}（在并发内存模型验证中亦称作公理模型到操作模型的等价构造，如 Promising Semantics~\cite{kang2017promising} 或 LTL/正则安全性质的在线监视自动机）：
+
+\begin{quote}
+\textbf{因果前缀性判据（Zero-Prophecy / Online Prefix Automaton Property）：}
+设合法 trace 集合 $\mathcal T \subseteq \Sigma^*$ 是前缀封闭的（prefix-closed）。若对任意合法前缀 $t \in \mathcal T$ 与候选下一步事件 $e \in \Sigma$，判定 $te \in \mathcal T$ 仅依赖于 $t$ 的某个有限摘要状态 $\sigma = \delta^*( \sigma_0, t )$ 与增量转移守卫 $G(\sigma, e)$，而无需预知 $e$ 之后未来尚未发生的事件（即无需 prophecy），则 $\mathcal T$ 存在一个精确等价（sound 且 complete）的增量状态自动机 $(\sigma_0, \delta, G)$。
+\end{quote}
+
+特别地，如果某条公理形如“trace 在投影字母表上的投影属于某正则语言的前缀闭包 $\mathsf{Pref}(L)$”（例如本仓库的 $\mathrm{A4}$：$\pi_h(t) \in \mathsf{Pref}(\{\seq{S, W}\}^*)$），自动机理论直接给出其最小确定性有限自动机（DFA），所有可达状态均为接受态，无需任何启发式猜测。一旦完成了从公理到在线自动机的操作化，就可以顺畅地接入 Refocusing、CPS / Free Monad 效应分解与 Defunctionalization，导出可验证的 Effect-Handler 解释器与一阶抽象机。
+
+%======================================================================
+\section{本仓库 \texorpdfstring{\code{CoreLanguage/Axiomatic}}{CoreLanguage/Axiomatic} 的自动机操作化分析}
+\label{sec:automaton}
+%======================================================================
+
+本节严格对照仓库最新提交（\code{15b22bd}）的 \code{Syntax.v}、\code{Events.v} 与 \code{TraceSemantics.v}，逐项检验其是否满足因果前缀性，并精确推导等价的在线自动机状态与转移规则。
+
+\subsection{因果前缀性审查与四处关键语义边界}
+
+经过对 \code{Events.v} 与 \code{TraceSemantics.v} 全部构造子的逐条审查，我们得到一个核心结论：\textbf{新版 \code{TraceSemantics.v} 的全部约束严格满足零预言因果前缀性}。具体原因与需要严防的四个边界细节如下：
+
+\begin{enumerate}
+\item \textbf{\code{Async o} 绑定天然保证 $\mathcal A_{\rm val}$ 零预言}：
+  在 \code{Events.v}（\code{EventsRead}、\code{EventsCompute}）中，异步读取与异步计算在绑定结果变量 $x$ 时写入环境的是 $\kw{Async}(o)$ 而非 $\kw{Known}(\nu)$。当后续命令 $u$ 在发起事件 $s_u$ 处使用 $x$ 时，根据 \code{completed\_result\_values}：
+  \begin{itemize}
+  \item 若 $d_o$ 已在 $s_u$ 之前完成（$d_o <_t s_u$），使用值必须等于 $d_o$ 携带的结果 $\nu$；
+  \item 若 $d_o$ 尚未完成，哪怕未来 $d_o$ 在 $s_u$ 之后出现，$\kw{earlier}\ t\ d_o\ s_u$ 亦为假，因此 $\mathcal A_{\rm val}$ 对此次提前使用（early use）不施加等值约束（仅要求类型标签满足命令载荷要求）。
+  \end{itemize}
+  因此，操作 $o$ 的结果 $\nu$ 在 $d_o$ 发生时再决定（\code{ReadEnd} 读内存、\code{ComputeEnd} 调用 $\mathsf{Comp}_h$）并写入完成结果表 $V[o \mapsto \nu]$，在逻辑上不存在任何“向过去传递结果”的预言需求。
+
+\item \textbf{陷阱一：\code{EventsStop} 禁止停在 \code{CAlias} 与 \code{Select} 上}：
+  观察 \code{Events.v} 的 \code{EventsStop} 规则，条件明确排除了 \code{CAlias} 与 \code{Select}（它们属于不产生事件的静音行政步骤）。因此，在线自动机必须将连续的 \code{CAlias}、\code{Select}、\code{For} 展开与 \code{LoopEnd} 弹栈作为\textbf{行政归约（\code{refocus}）}立即化简，确保每个分支在任何可观测状态都停在\textbf{头事件命令}（或已完成 \code{Return}）上。
+
+\item \textbf{陷阱二：$\mathrm{A4}$ 的严格交替语义禁止重复 \code{SetFlagEnd}}：
+  与早期操作语义（\pathcode{rocq/CoreLanguage/Semantics.v} 中重复 \code{setflag} 保持标志为 \code{true}）不同，公理化语义的 $\mathrm{A4}$ 要求每个同步键 $h=(p,q,\varepsilon)$ 的完成事件投影满足 $\pi_h(t) \in \mathsf{Pref}(\{\seq{S,W}\}^*)$。这意味着当自动机中 $F(h) = \kw{true}$（已有未消费通知）时，同一键上的下一次 \code{SetFlagEnd} \textbf{不可触发}，必须延迟至某次 \code{WaitFlagEnd} 将 $F(h)$ 重置为 \code{false} 之后。
+
+\item \textbf{陷阱三：两类合法非确定性需通过 Oracle/Policy 显式分离}：
+  \code{TraceSemantics.v} 合法地允许两处非确定性取值：（i）\code{Async r} 尚未完成时的提前使用（early use）；（ii）\code{LReadEnd} 读取的地址 $a$ 此前从未有过 \code{LWriteEnd}（包括外部 GM 输入地址，如 Issue~\#316 的 \code{input\_addresses}）。此外，线程交错顺序与在途操作完成时机本身也是非确定性的。将这些非确定性抽象为外部 \code{ChoicePolicy} 与 \code{SchedulePolicy}，就能在保持健全性的前提下，分别派生出“严格检错解释器”“确定性串行解释器”“流水重叠解释器”以及“Bug 复现调度器”。
+\end{enumerate}
+
+\subsection{\texorpdfstring{\code{For} / \code{LoopEnd}}{For / LoopEnd} 的 Refocusing 与循环续体去函数化}
+\label{sec:refocusing}
+
+在 \code{Syntax.v} 中，源程序含有限循环 \code{For x lo hi body next} 与循环体结尾标记 \code{LoopEnd}，标注前通过 \code{expand\_loops c at\_end} 展开为无循环命令，再用 \code{label\_paths} 以正整数二叉树路径编码每个操作的动态标识 $o = (j, \mathit{path}) \in \Ops$。
+
+从 Danvy 的 Refocusing 与 Defunctionalization 观点看，\code{expand\_loops} 的第二个参数 \code{at\_end} 恰好是循环体结束时待执行的续体。将其去函数化为显式帧栈（\code{loop\_frame}），即可得到无需预展开 AST 的一阶分支游标（\code{thread\_cursor}）：
+\[
+\begin{aligned}
+\mathsf{LoopFrame} &::= \kw{KLoop}(x : \mathsf{Var},\ i_{\rm next} : \mathbb N,\ h : \mathbb N,\ D : \mathsf{Cmd}_{\rm raw},\ C_{\rm after} : \mathsf{Cmd}_{\rm raw}),\\
+\mathsf{Cursor} &::= \langle j : \mathbb N_{>0},\ \mathit{path} : \mathbb N_{>0},\ \rho : \mathsf{Env},\ c : \mathsf{Cmd}_{\rm raw},\ \kappa : \mathsf{LoopFrame}^* \rangle.
+\end{aligned}
+\]
+定义重组函数 $\kw{unfold}(c, \kappa)$ 将游标还原为展开命令：
+\[
+\begin{aligned}
+\kw{unfold}(c, []) &= \kw{expand\_loops}(c, \kw{LoopEnd}),\\
+\kw{unfold}\bigl(c, \kw{KLoop}(x, i, h, D, C) :: \kappa\bigr)
+  &= \kw{expand\_loops}\bigl(c,\ \kw{unfold}(\kw{For}\,x\,i\,h\,D\,C, \kappa)\bigr).
+\end{aligned}
+\]
+对应的行政重聚焦函数 $\kw{refocus}(j, \mathit{path}, \rho, c, \kappa)$ 按如下尾递归规则推进，直至聚焦到一个可发射事件的头命令（或因 \code{Select} 缺少已知布尔条件而卡住）：
+\[
+\begin{aligned}
+&\kw{refocus}(j, \mathit{path}, \rho, \kw{CAlias}\,x\,v\,n, \kappa)
+  = \kw{refocus}(j, \kw{xO}(\mathit{path}), \rho[x \mapsto \rho(v)], n, \kappa),\\
+&\kw{refocus}(j, \mathit{path}, \rho, \kw{Select}\,x\,v_b\,v_1\,v_2\,n, \kappa)
+  = \kw{refocus}\bigl(j, \kw{xO}(\mathit{path}), \rho[x \mapsto \rho(v_b ? v_1 : v_2)], n, \kappa\bigr),\\
+&\kw{refocus}(j, \mathit{path}, \rho, \kw{For}\,x\,l\,h\,D\,C, \kappa)
+  = \kw{refocus}(j, \mathit{path}, \rho, C, \kappa) \qquad (h \le l),\\
+&\kw{refocus}(j, \mathit{path}, \rho, \kw{For}\,x\,l\,h\,D\,C, \kappa)
+  = \kw{refocus}\bigl(j, \kw{xO}(\mathit{path}), \rho[x \mapsto \kw{Known}(l)],\\
+  &\hspace{13.5em} D,\ \kw{KLoop}(x, l{+}1, h, D, C)::\kappa\bigr) \qquad (l < h),\\
+&\kw{refocus}\bigl(j, \mathit{path}, \rho, \kw{LoopEnd}, \kw{KLoop}(x, l, h, D, C)::\kappa\bigr)
+  = \kw{refocus}(j, \mathit{path}, \rho, \kw{For}\,x\,l\,h\,D\,C, \kappa).
+\end{aligned}
+\]
+其余头命令直接返回聚焦结果。
+
+\paragraph{路径一致性的关键观察。}
+检查 \code{Syntax.v} 中的 \code{label\_paths}：当 \code{expand\_loops} 把 $l < h$ 的 \code{For} 展开为 $\kw{CAlias}\ x\ l\ (\kw{expand\_loops}\ D\ \dots)$ 时，\code{label\_paths} 在该 \code{CAlias} 处将路径由 $\mathit{path}$ 推进至 $\kw{xO}(\mathit{path})$；而在 $h \le l$ 或 \code{LoopEnd} 拼接处不产生额外语法节点，路径保持不变。上述 $\kw{refocus}$ 规则与这一行为\textbf{逐位完全一致}，即满足核心不变式：
+\[
+\kw{label\_paths}\ (j, \cdot)\ \mathit{path}\ (\kw{unfold}(c, \kappa))
+\equiv \text{在聚焦头命令处分配精确相同的操作标识 } (j, \mathit{path}').
+\]
+这意味着即便循环次数 $N$ 很大（如数千轮），解释器也只需 $O(\text{嵌套循环深度})$ 的栈空间，同时仍与静态展开后的 \code{annotate\_program} 保持数学等价。
+
+\subsection{公理 \texorpdfstring{\code{A1}--\code{A5}、$\mathcal A_{\rm val}$ 与 $\mathcal A_{\rm mem}$}{A1-A5, A\_val 与 A\_mem} 的精确在线自动机}
+\label{sec:online-automaton}
+
+固定分配布局 $\lambda$、目标配置 $\Gamma$ 与计算模型 $\mathsf{Comp}$，定义自动机全局状态为八元组：
+\[
+\Sigma = \langle \Theta,\ \mathcal I,\ F,\ W,\ M,\ V,\ \tau,\ U \rangle,
+\]
+各分量与 \code{TraceSemantics.v} 公理的精确对应关系总结如表~\ref{tab:axiom-automaton} 所示。
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{\code{TraceSemantics.v} 各项声明式约束与在线状态自动机分量的精确对应}
+\label{tab:axiom-automaton}
+\begin{tabularx}{\linewidth}{@{}p{1.65cm}p{3.35cm}Yp{2.35cm}@{}}
+\toprule
+公理/约束 & 自动机分量 & 初始值与守卫/更新逻辑 & 对应关系 \\
+\midrule
+$\mathrm{A2}$ + 展开 & 线程表 $\Theta : \mathsf{Tid} \to \mathsf{ThreadState}$ & $\mathsf{Running}(\mathsf{Cursor}) \mid \mathsf{WaitFlag}(w, \mathsf{Cursor}) \mid \mathsf{Done}(\bar\nu)$；非阻塞命令发射后立刻推进，\code{WaitFlag} 挂起直至完成唤醒 & 精确等价 \\
+$\mathrm{A1}$ & 在途操作池 $\mathcal I : \Ops \rightharpoonup \mathsf{Pending}$ & 初始 $\varnothing$；两阶段命令 \code{Start} 入池，\code{End} 仅对 $o \in \dom(\mathcal I)$ 可触发并移出 & 精确等价 \\
+$\mathrm{A3}$ & 快照依赖（存于 $\mathcal I(f)$） & \code{SetFlagStart}$_f[p,q](\varepsilon)$ 记录 $\mathsf{deps}(f)=\{o\in\dom(\mathcal I)\mid\pipe(o)=p\}$；\code{SetFlagEnd}$_f$ 要求 $\mathsf{deps}(f)\cap\dom(\mathcal I)=\varnothing$ & 精确等价 \\
+$\mathrm{A4}$ & 标志 DFA $F : \Pipe^2\times\Eid \to \Bool$ & 初始全 \code{false}；\code{SetFlagEnd} 要求 $F(h)=\kw{false}$ 并置 \code{true}；\code{WaitFlagEnd} 要求 $F(h)=\kw{true}$ 并置 \code{false} & 2-状态 DFA，精确 iff \\
+$\mathrm{A5}$ & 目标门控 $W : \Pipe \to \mathsf{option}\,\Ops$ & 初始全 \code{None}；凡 $\pipe=\kw{Some}\,q$ 的 \code{Start} 均要求 $W(q)=\kw{None}$；\code{WaitFlagStart} 置 $\kw{Some}\,w$；\code{WaitFlagEnd} 复原 \code{None} & 1-槽门控，精确 iff \\
+$\mathcal A_{\rm val}$ & 完成结果表 $V : \Ops \rightharpoonup \Val$ & 初始 $\varnothing$；\code{ReadEnd}/\code{ComputeEnd} 写入 $V[o\mapsto\nu]$；读 $\kw{Async}(r)$ 时若 $r\in\dom(V)$ 强制取 $V(r)$，否则由策略选取 & 精确等价 \\
+$\mathcal A_{\rm mem}$ & 内存表 $M : \Mem \rightharpoonup \Val$ & 初始 $\varnothing$；\code{Alloc} 检查 $M(a)=\kw{None}$；\code{WriteEnd} 写 $M[a\mapsto\nu]$；\code{ReadEnd} 读 $M(a)$（若为 $\kw{None}$ 则由初始输入/策略选取） & 与 \code{memory\_\allowbreak history} 逐事件同构 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\paragraph{关键小步转移规则（节选）。}
+记 $\mathsf{can\_start}(\Sigma, \pi)$ 表示“若 $\pi = \kw{Some}\,q$ 则 $W(q) = \kw{None}$ 且 $q$ 已声明”（对直接使用资源的 $\pi = \bot$ 恒为真，忠实保留 \code{ResourceExamples.v} 中共享资源无发起顺序约束的语义）。自动机包含两类迁移：\textbf{发射步（Issue）}与\textbf{完成步（Finish）}：
+
+\[
+\frac{
+  \begin{gathered}
+    \Theta(j) = \mathsf{Running}(\mathsf{refocus} \Rightarrow \kw{Read}\ x\ (h@\pi)\ v\ n,\ \mathit{path},\ \rho,\ \kappa)\qquad o=(j,\mathit{path})\\
+    \mathsf{resolve\_exec}(V, \rho, o, \pi, [v]) = (\pi', [a], U_0)\qquad
+    \mathsf{can\_start}(\Sigma, \pi')\qquad \mathsf{canRead}(h, a)
+  \end{gathered}
+}{
+  \begin{gathered}
+    \Sigma \step{(o,\ \kw{read\_start},\ (h,\pi',a))} \Sigma', \quad\text{其中 }
+    \Sigma' = \Sigma\bigl[\Theta(j)\mapsto\mathsf{Running}(j, \kw{xO}(\mathit{path}), \rho[x\mapsto\kw{Async}(o)], n, \kappa),\\
+    \mathcal I[o\mapsto\kw{PRead}(h,\pi',a)],\ U \mathrel{+\!\!+} U_0\bigr]
+  \end{gathered}
+}
+\]
+
+\[
+\frac{
+  \mathcal I(o) = \kw{PRead}(h,\pi',a) \qquad
+  \bigl(M(a)=\kw{Some}\,\nu_0 \implies \nu=\nu_0\bigr)
+}{
+  \Sigma \step{(o,\ \kw{read\_end},\ \nu)}
+  \Sigma\bigl[\mathcal I \setminus \{o\},\ V[o \mapsto \nu]\bigr]
+}
+\]
+
+\[
+\frac{
+  \begin{gathered}
+    \Theta(j) = \mathsf{Running}(\mathsf{refocus} \Rightarrow \kw{SetFlag}\ u\ w\ v\ n,\ \mathit{path},\ \rho,\ \kappa)\qquad o=(j,\mathit{path})\\
+    \mathsf{resolve\_args}(V, \rho, o, [u,w,v]) = ([p,q,\varepsilon], U_0)\qquad
+    \mathsf{can\_start}(\Sigma, \kw{Some}\,p)\\
+    \mathit{deps} = \{r \in \dom(\mathcal I) \mid \pipe(\mathcal I(r)) = \kw{Some}\,p\}
+  \end{gathered}
+}{
+  \begin{gathered}
+    \Sigma \step{(o,\ \kw{set\_flag\_start},\ (p,q,\varepsilon))} \Sigma', \quad\text{其中 }
+    \Sigma' = \Sigma\bigl[\Theta(j)\mapsto\mathsf{Running}(j, \kw{xO}(\mathit{path}), \rho, n, \kappa),\\
+    \mathcal I[o\mapsto\kw{PSetFlag}(p,q,\varepsilon,\mathit{deps})],\ U \mathrel{+\!\!+} U_0\bigr]
+  \end{gathered}
+}
+\]
+
+\[
+\frac{
+  \mathcal I(f) = \kw{PSetFlag}(p,q,\varepsilon,\mathit{deps}) \qquad
+  \mathit{deps} \cap \dom(\mathcal I) = \varnothing \qquad
+  F(p,q,\varepsilon) = \kw{false}
+}{
+  \Sigma \step{(f,\ \kw{set\_flag\_end},\ ())}
+  \Sigma\bigl[\mathcal I \setminus \{f\},\ F[(p,q,\varepsilon)\mapsto\kw{true}]\bigr]
+}
+\]
+
+\[
+\frac{
+  \begin{gathered}
+    \Theta(j) = \mathsf{Running}(\mathsf{refocus} \Rightarrow \kw{WaitFlag}\ u\ w\ v\ n,\ \mathit{path},\ \rho,\ \kappa)\qquad o=(j,\mathit{path})\\
+    \mathsf{resolve\_args}(V, \rho, o, [u,w,v]) = ([p,q,\varepsilon], U_0)\qquad
+    \mathsf{can\_start}(\Sigma, \kw{Some}\,q)
+  \end{gathered}
+}{
+  \begin{gathered}
+    \Sigma \step{(o,\ \kw{wait\_flag\_start},\ (p,q,\varepsilon))} \Sigma', \quad\text{其中 }
+    \Sigma' = \Sigma\bigl[\Theta(j)\mapsto\mathsf{WaitFlag}(o, (j, \kw{xO}(\mathit{path}), \rho, n, \kappa)),\\
+    \mathcal I[o\mapsto\kw{PWaitFlag}(p,q,\varepsilon,j)],\ W[q\mapsto\kw{Some}\,o],\ U \mathrel{+\!\!+} U_0\bigr]
+  \end{gathered}
+}
+\]
+
+\[
+\frac{
+  \mathcal I(w) = \kw{PWaitFlag}(p,q,\varepsilon,j) \qquad
+  F(p,q,\varepsilon) = \kw{true} \qquad
+  \Theta(j) = \mathsf{WaitFlag}(w, \mathit{cur})
+}{
+  \Sigma \step{(w,\ \kw{wait\_flag\_end},\ ())}
+  \Sigma\bigl[\mathcal I \setminus \{w\},\ F[(p,q,\varepsilon)\mapsto\kw{false}],\
+              W[q\mapsto\kw{None}],\ \Theta(j)\mapsto\mathsf{Running}(\mathit{cur})\bigr]
+}
+\]
+
+\paragraph{不变量正确性直观说明（以 $\mathrm{A3}$ 与 $\mathrm{A5}$ 为例）。}
+\begin{itemize}
+\item \textbf{为何 $\mathrm{A5}$ 只需每条 pipeline 一个单槽 $W(q)$？}
+  假设在合法 trace 中存在两条归属 $q$ 的 \code{WaitFlag} $w_1, w_2$ 且 $s_{w_1} <_t s_{w_2}$。由 $\mathrm{A5}$ 立得 $d_{w_1} <_t s_{w_2}$，因此在任意时刻，同一目标 pipeline $q$ 上至多只有一个已发起但尚未完成的 \code{WaitFlag}！反之，若每次 $\pipe=\kw{Some}\,q$ 的发起均检查 $W(q)=\kw{None}$，且仅在 $d_w$ 发生时清除 $W(q)$，则凡满足 $w \prec_{q,t} u$ 的后续操作 $u$ 必有 $d_w <_t s_u$。双向等价成立。
+\item \textbf{为何 $\mathrm{A3}$ 只需在 $s_f$ 处抓取在途快照 $\mathit{deps}$？}
+  若 $o \prec_{p,t} f$，则 $s_o$ 发生在 $s_f$ 之前。在 $s_f$ 发生瞬间，只有两种可能：（1）$d_o$ 已经发生，则 $d_o <_t s_f <_t d_f$（由 $\mathrm{A1}$）自动成立；（2）$d_o$ 尚未发生，则 $o \in \dom(\mathcal I)$ 且 $\pipe(o)=\kw{Some}\,p$，故 $o \in \mathit{deps}(f)$，守卫 $\mathit{deps}(f) \cap \dom(\mathcal I) = \varnothing$ 强制 $d_o <_t d_f$。后于 $s_f$ 发起的新操作不进入 $\mathit{deps}(f)$，因此不被多余阻塞。双向等价同样成立。
+\end{itemize}
+
+%======================================================================
+\section{从自动机到 Effect-Handler 解释器与一阶抽象机的双向推导设计}
+\label{sec:derivation}
+%======================================================================
+
+完成第~\ref{sec:automaton}~节的自动机操作化之后，我们就可以正式运用第~\ref{sec:survey}~节的 \textbf{CPS / Free Monad 效应分解}与 \textbf{Defunctionalization / Refunctionalization} 方法，将整体架构组织为清晰可验证的四阶段推导管线。
+
+\subsection{四阶段整体架构}
+
+图~\ref{fig:derivation-pipeline} 给出了从声明式 \code{TraceSemantics.v} 经在线自动机与 Free-Monad 分层 Handler，分别通往 Rocq 一阶去函数化抽象机（Target~A）与 OCaml~5 原生效应运行时（Target~B）的四阶段完整推导路线。
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  box/.style={
+    rectangle, rounded corners=4pt, draw=blue!45!black, thick,
+    fill=blue!4, text width=13.8cm, align=center, inner sep=7pt, font=\small
+  },
+  smallbox/.style={
+    rectangle, rounded corners=4pt, draw=teal!55!black, thick,
+    fill=teal!5, text width=6.4cm, align=center, inner sep=7pt, font=\small
+  },
+  arr/.style={-{Stealth[length=6pt]}, thick, draw=black!75},
+  darr/.style={-{Stealth[length=6pt]}, thick, dashed, draw=blue!55!black},
+  lbl/.style={font=\footnotesize, fill=white, inner sep=2.5pt}
+]
+  \node[box] (s0) {\textbf{Stage 0：公理化 Trace 语义（\code{CoreLanguage/Axiomatic/TraceSemantics.v}）}\\[2pt]
+    声明式全称过滤：$\Cand(P) \cap (\mathrm{A1}\text{--}\mathrm{A5}) \cap \mathcal A_{\rm val} \cap \mathcal A_{\rm mem} \cap \kw{target\_allows}$};
+
+  \node[box, below=13mm of s0] (s1) {\textbf{Stage 1：在线前缀自动机（\code{Refocusing.v} + \code{Automaton.v}）}\\[2pt]
+    \code{For/LoopEnd} Refocusing（\code{KLoop} 栈）+ 同步/值/内存状态自动机 $\Sigma \step{e} \Sigma'$};
+
+  \node[box, below=13mm of s1] (s2) {\textbf{Stage 2：CPS / Free-Monad 效应指称与四层 Handlers（\code{CoreEffects.v}, \code{Handlers.v}）}\\[2pt]
+    单分支指称 \code{denote\_branch : computation core\_effect (list Val)}（复用 \code{Base/Free.v}）\\[1pt]
+    分层处理：\code{SyncHandler} + \code{MemoryHandler} + \code{ComputeAndValHandler} + \code{SchedulerHandler}};
+
+  \node[smallbox, below=19mm of s2, xshift=-3.7cm] (s3a) {\textbf{Target A：一阶去函数化抽象机}\\[2pt]
+    （Rocq \code{run\_derived\_interpreter}）\\
+    续体 $k \Rightarrow$ \code{thread\_cursor}\\
+    Soundness 证明 + \code{Extract.v} 抽取};
+
+  \node[smallbox, below=19mm of s2, xshift=3.7cm] (s3b) {\textbf{Target B：OCaml~5 原生效应运行时}\\[2pt]
+    （Refunctionalization 至 \code{lib/}）\\
+    \code{Trigger} $\Rightarrow$ \code{Effect.perform}\\
+    \code{Effect.Deep} 纤程栈协作调度};
+
+  \draw[arr] (s0) -- node[lbl, midway] {1. Automaton Operationalization（零预言前缀等价）} (s1);
+  \draw[arr] (s1) -- node[lbl, midway] {2. Effect Decomposition（分离单分支控制流与状态分量）} (s2);
+  \draw[arr] (s2.south -| s3a.north) -- node[lbl, midway, align=center] {3a. Defunctionalization\\（消除高阶续体闭包）} (s3a.north);
+  \draw[darr] (s2.south -| s3b.north) -- node[lbl, midway, align=center] {3b. Refunctionalization\\（映射原生界定续体）} (s3b.north);
+\end{tikzpicture}
+\caption{从 \code{TraceSemantics.v} 推导 Effect-Handler 解释器与一阶抽象机的四阶段管线}
+\label{fig:derivation-pipeline}
+\end{figure}
+
+\subsection{基于 \texorpdfstring{\code{Base/Free.v}}{Base/Free.v} 的语义效应签名与单分支指称}
+
+对齐 \code{docs/vellvm-lessons.md} 的设计原则，我们先区分\textbf{语义效应（semantic effects）}与\textbf{诊断观测（diagnostic observations）}。每个并发分支不再直接持有巨型全局状态 $\Sigma$，而是借助仓库既有的 \code{rocq/Base/Free.v}（\code{computation E A}）将自身翻译为发出语义请求的效应树：
+
+\begin{lstlisting}[language=ML]
+Inductive core_effect {Float EventId Pipe Unit : Type} : Type -> Type :=
+(* 1. 异步结果解析与非确定性选择 *)
+| EResolveAsync (consumer producer : op_id) (idx : nat) : core_effect Val
+(* 2. 内存与权限效应 *)
+| EAllocLocal   (o : op_id) : core_effect memory_resource
+| EAtomicEval   (o : op_id) (f : atomic_op) (args : list Val) : core_effect Val
+(* 3. 同步与异步发射效应（非阻塞立即返回 unit，挂起点显式标出） *)
+| EAssignPipe   (o : op_id) (x : var) (p : Pipe) : core_effect unit
+| EIssueRead    (o : op_id) (d : execution Unit Pipe) (a : memory_resource) : core_effect unit
+| EIssueWrite   (o : op_id) (d : execution Unit Pipe) (a : memory_resource) (v : Val) : core_effect unit
+| EIssueCompute (o : op_id) (d : execution Unit Pipe) (args : list Val) : core_effect unit
+| EIssueSetFlag (o : op_id) (p q : Pipe) (flag : EventId) : core_effect unit
+(* 4. 阻塞等待：Handler 捕获此处续体 k，直至 WaitFlagEnd 后恢复 *)
+| EAwaitFlag    (o : op_id) (p q : Pipe) (flag : EventId) : core_effect unit
+(* 5. 控制流与分支结束 *)
+| EBranch       (o : op_id) (choice : bool) : core_effect unit
+| EReturn       (o : op_id) (results : list Val) : core_effect unit.
+\end{lstlisting}
+
+\paragraph{为什么可以直接使用有限的 \code{Base/Free.v}？}
+因为 \code{CoreLanguage/Axiomatic/Syntax.v} 目前只包含有限自然数上界的 \code{For} 循环，单条分支的事件步数必有有限上界（严格由展开后的命令尺寸界定）。因此，单分支指称函数 \code{denote\_branch} 无需共归纳类型（coinduction），可以直接在 Rocq 中写成结构递归函数，返回 \code{computation core\_effect (list Val)}；若未来语言加入 \code{while} 循环，也只需将 \code{Free.v} 替换为步数索引或共归纳 ITree，而不必重写任何 Handler 逻辑。
+
+\subsection{四层可组合 Runtime Handlers 与可插拔调度策略}
+
+将全局状态 $\Sigma$ 按职责拆分为四个独立 Handler（每个 Handler 仅维护其私有状态）：
+
+\begin{enumerate}
+\item \textbf{\code{SyncHandler}}（私有状态：$\mathcal I, F, W$）：
+  负责检查 $\mathrm{A5}$ 门控（\code{active\_wait}）、向在途池 $\mathcal I$ 登记两阶段操作、为 \code{SetFlagStart} 抓取 $\mathrm{A3}$ 依赖快照，并在收到调度器发出的完成指令 \code{CompleteOp o} 时校验 $\mathrm{A3}$/$\mathrm{A4}$ 守卫、推进 2-状态标志 DFA $F$ 并唤醒阻塞在 \code{EAwaitFlag} 上的分支续体。
+
+\item \textbf{\code{MemoryHandler}}（私有状态：$\lambda, M, M_{\rm init}, \Gamma$）：
+  负责 \code{EAllocLocal} 的单射地址分配与 $M(a)=\kw{None}$ 检查、检查 \code{canRead}/\code{canWrite} 权限、在 \code{WriteEnd} 更新 $M[a \mapsto \nu]$、在 \code{ReadEnd} 优先读取 $M(a)$（若为 $\kw{None}$ 则查询外部输入表 $M_{\rm init}(a)$ 或委托给 \code{ChoicePolicy}）。
+
+\item \textbf{\code{ComputeAndValHandler}}（私有状态：$\mathsf{comp\_fn}, V, \mathsf{ChoicePolicy}$）：
+  在 \code{ComputeEnd} 通过可计算函数 $\mathsf{comp\_fn} : \Unit \to \Val^* \to \Val$ 计算结果并写入 $V[o \mapsto \nu]$；在 \code{EResolveAsync} 时查询 $V(\mathit{producer})$：若已完成则强制返回精确结果，若尚未完成则调用 \code{ChoicePolicy}：
+  \begin{itemize}
+  \item \textbf{严格检错策略（\code{StrictSyncPolicy}，默认推荐）}：立即返回 \code{EarlyAsyncUseError} 诊断错误（记录 \code{consumer} 与 \code{producer}），帮助编译器开发者第一时间定位同步缺失缺陷；
+  \item \textbf{宽松 Oracle 策略（\code{PermissiveOraclePolicy}）}：从外部 oracle 取合法类型的任意候选值继续执行，用于复现 Issue~\#920 类型的乱序错误或做完备性测试。
+  \end{itemize}
+
+\item \textbf{\code{SchedulerHandler}}（私有状态：挂起分支续体池 + 调度策略 \code{SchedulePolicy}）：
+  每个并发分支表现为一个 \code{computation core\_effect (list Val)}。调度器每步询问 \code{SchedulePolicy} 选择下一动作：\code{RunBranch j}（把分支 $j$ 推进到下一个 \code{Trigger}）或 \code{FinishInflight o}（令满足守卫的在途操作 $o$ 触发 \code{End} 事件），同时将发生的 \code{event\_record} 记入观测 trace。支持三类内置策略：
+  \begin{itemize}
+  \item \code{serialized\_policy}：每当发射两阶段操作后立即令其完成，将 \code{SerializedTrace.v} 从手写特例推广为任意程序的通用执行模式；
+  \item \code{overlapped\_round\_robin\_policy}：优先轮询各就绪分支发射新操作，在分支受 \code{WaitFlag} 阻塞或达到在途深度阈值时优先推进最旧可完成在途操作，从而自然产生双缓冲跨迭代流水重叠；
+  \item \code{scripted\_policy}：接受显式决策序列 \code{list schedule\_decision}，可用于复现特定交错或对接外部 fuzzer / model checker。
+  \end{itemize}
+\end{enumerate}
+
+\subsection{双向落地：Defunctionalization（一阶抽象机）与 Refunctionalization（OCaml~5）}
+
+\begin{itemize}
+\item \textbf{向下 Defunctionalization（Rocq 证明与 Extraction 主路径）}：
+  观察 \code{denote\_branch} 构造的 \code{Trigger req k}，其高阶续体 $k$ 的全部构造点无一例外只是“将返回值绑定到变量 $x$（或丢弃 \code{unit}），然后继续解释 \code{next} 与 \code{loop\_stack}”。因此，对 $k$ 做 Defunctionalization 后，挂起的分支续体退化为极其简洁的一阶类型：
+  \[
+  \mathsf{ThreadState} ::= \mathsf{Running}(\mathsf{Cursor}) \mid \mathsf{WaitingFlag}(w, \mathsf{Cursor}) \mid \mathsf{Done}(\bar\nu),
+  \]
+  直接与第~\ref{sec:online-automaton}~节的在线自动机 $\Sigma$ 重合！这带来了两大工程优势：（1）Rocq 的健全性证明只需对一阶有限状态做结构归纳，避开了对高阶函数闭包相等性的繁琐推理；（2）经 \code{rocq/Extraction/Extract.v} 抽取的 OCaml 代码无闭包分配开销，且与 Rocq 规范按构造一致（correct by construction）。
+\item \textbf{向上 Refunctionalization（对接 \code{lib/interpreter.ml}）}：
+  若未来希望把 Core Language 作为低层阶段接入 \code{lib/interpreter.ml} 的 H1--H5 混合执行栈，只需把 \code{core\_effect} 的构造子映射为 OCaml~5 的 \code{Effect.t} 扩展构造子，将 \code{Trigger req k} 再函数化为 \code{Effect.perform req}，并用 \code{Effect.Deep.match\_with} 实现与 \code{SyncHandler}/\code{SchedulerHandler} 同构的纤程调度器。
+\end{itemize}
+
+\subsection{核心形式化定理体系}
+
+整条推导链由三组递进定理严密衔接：
+
+\begin{enumerate}
+\item \textbf{重聚焦等价性（\code{refocus\_preserves\_annotation}）}：
+  对任意良构分支游标，\code{refocus} 动态追踪的 $(j, \mathit{path})$ 与先执行 \code{expand\_loops} 再执行 \code{label\_paths} 得到的静态操作标识完全一致，且不丢失任何候选事件。
+\item \textbf{函数式对应定理（\code{handler\_refines\_automaton}）}：
+  在相同调度与选择策略下，基于 \code{Base/Free.v} 的分层 Handler 执行器与去函数化的一阶抽象机 \code{run\_derived\_interpreter} 逐事件模拟，产生完全相同的 trace $(t, \kappa)$ 与分支返回值。
+\item \textbf{端到端健全性定理（\code{derived\_interpreter\_sound}）}：
+  对任意良构源程序 $P_0$、任意满足单射性的布局 $\lambda$、任意可执行计算函数 $\mathsf{comp\_fn}$、任意调度策略 $\pi$ 与步数燃料 $\mathit{fuel}$：
+  \[
+  \begin{aligned}
+  &\kw{well\_formed}\bigl(\Gamma, \kw{instantiate\_shared}(\lambda, 0, P_0)\bigr) \\
+  &\quad\land\ \kw{run\_derived\_interpreter}(\pi, \mathit{fuel}, \lambda, \Gamma, \mathsf{comp\_fn}, P_0) = \kw{Ok}(t, \kappa, \mathit{out}) \\
+  &\Longrightarrow\
+  \kw{shared\_program\_semantics}\bigl(\lambda, \Gamma, \kw{model\_of}(\mathsf{comp\_fn}), P_0, t, \kappa\bigr).
+  \end{aligned}
+  \]
+\item \textbf{二期完备性定理（\code{automaton\_complete}，可选二期目标）}：
+  对任意满足 \code{program\_semantics} 的合法 trace $(t, \kappa)$，存在显式脚本决策序列 $s$ 使得 \code{auto\_steps} 恰好输出 $(t, \kappa)$。
+\end{enumerate}
+
+\subsection{案例推演：GitCode Issue~\#316 双缓冲循环的自动执行与验证}
+
+将上述推导出的解释器应用于 \code{rocq/CoreLanguage/Axiomatic/Issue316.v}（取 $N=3$，外部输入 $M_{\rm init}(2)=T_0,\ M_{\rm init}(4)=T_1,\ M_{\rm init}(6)=T_2$，分配布局 $\lambda$ 给出 $\kw{bufA}=1,\ \kw{bufB}=5$）：
+
+\begin{itemize}
+\item \textbf{模式一：\code{serialized\_policy}}
+  调度器先令 Vector 分支执行完两轮初始释放循环，使 $F(V, M, \kw{freeA}) = F(V, M, \kw{freeB}) = \kw{true}$；随后每轮依次串行完成 MTE2 搬运（\code{WaitFlag(free)} $\to$ \code{Read(src)} $\to$ \code{fence} $\to$ \code{Write(buf)} $\to$ \code{SetFlag(ready)}）与 Vector 计算（\code{WaitFlag(ready)} $\to$ \code{Read(buf)} $\to$ \code{Compute} $\to$ \code{Write(out)} $\to$ \code{SetFlag(free)}）。无需手写 \code{Issue316Execution.v} 的千行构造脚本，直接由 \code{derived\_interpreter\_sound} 证得合法 trace 存在。
+
+\item \textbf{模式二：\code{overlapped\_round\_robin\_policy}（展示真正双缓冲流水重叠）}
+  在完成初始释放（$F(\kw{freeA})=F(\kw{freeB})=\kw{true}$）且第 $0$ 轮 MTE2 写入 $\kw{bufA}$ 并完成 \code{SetFlagEnd}$(M,V,\kw{readyA})$ 后：
+  \begin{enumerate}
+  \item 第 $0$ 轮 Vector 消费 $F(\kw{readyA})$，发起对 $\kw{bufA}$ 的 \code{Read} 与 \code{Compute}（进入 $\mathcal I$）；
+  \item 与此同时，第 $1$ 轮 MTE2 在 \code{choose\_slot} 算出 $\kw{slot}=1$（选中 $\kw{bufB}$ 与 $\kw{freeB}$），因 $F(V,M,\kw{freeB})=\kw{true}$，其 \code{WaitFlagEnd} 立即成功，随后 MTE2 \textbf{并发向 $\kw{bufB}$ 发起并完成第 $1$ 轮搬运}——此时 $\mathcal I$ 中同时存在第 $0$ 轮 Vector 计算与第 $1$ 轮 MTE2 搬运，精确复现 Issue~\#316 期望的流水重叠；
+  \item 当第 $2$ 轮 MTE2 再次选中 $\kw{bufA}$ 并发起 \code{WaitFlagStart}$(V,M,\kw{freeA})$ 时，自动机设置 $W(M) = \kw{Some}\,w_2$ 并挂起 MTE2 分支；由于 $F(V,M,\kw{freeA})=\kw{false}$，$\mathrm{A4}$ 自动机强制阻塞 $w_2$ 的完成，直至第 $0$ 轮 Vector 写回 \code{out} 并通过 $\mathrm{A3}$ 依赖快照检查后触发 \code{SetFlagEnd}$(V,M,\kw{freeA})$ 将其翻为 \code{true}，第 $2$ 轮 MTE2 才获准覆盖 $\kw{bufA}$。
+  \end{enumerate}
+  整个重叠 trace 自动通过 \code{derived\_interpreter\_sound} 满足 \code{issue316\_trace}。
+\end{itemize}
+
+%======================================================================
+\section{Rocq 实施路线图、工程边界与验证阶梯}
+\label{sec:roadmap}
+%======================================================================
+
+\subsection{零侵入工程边界与模块划分}
+
+为了保持现有公理化理论库（\code{rocq/CoreLanguage/Axiomatic/*.v}）的抽象纯洁性（其对抽象参数 \code{Pipe}、\code{EventId} 不要求可判定相等），所有推导模块均增量放置在新建目录 \code{rocq/CoreLanguage/Derived/} 下，不修改 \code{TraceSemantics.v} 原文，仅在推导模块层要求 \code{EqDecision Pipe} 与 \code{EqDecision EventId}（或等价布尔比较函数以支持 OCaml 抽取）。模块依赖规划如表~\ref{tab:rocq-modules} 所示。
+
+\begin{table}[htbp]
+\centering
+\caption{\code{rocq/CoreLanguage/Derived/} 拟议模块结构与依赖顺序}
+\label{tab:rocq-modules}
+\begin{tabularx}{\linewidth}{@{}llY@{}}
+\toprule
+序号 & 文件 & 核心职责与关键定理 \\
+\midrule
+1 & \code{Refocusing.v} & \code{loop\_frame}、\code{thread\_cursor}、\code{refocus}；证明 \code{refocus\_preserves\_annotation} 与事件等价 \\
+2 & \code{Automaton.v} & 同步/值/内存状态自动机 \code{sync\_state}、\code{mem\_state}、\code{auto\_step} 与多步迁移 \code{auto\_steps} \\
+3 & \code{CoreEffects.v} & 语义效应签名 \code{core\_effect} 与基于 \code{Base/Free.v} 的单分支指称 \code{denote\_branch} \\
+4 & \code{Handlers.v} & 四层可组合 Handler、\code{SchedulePolicy} / \code{ChoicePolicy} 与 Functional Correspondence 定理 \\
+5 & \code{Soundness.v} & 逐条证明 \code{Cand}、$\mathrm{A1}$--$\mathrm{A5}$、$\mathcal A_{\rm val}$、$\mathcal A_{\rm mem}$、\code{target\_allows} 与顶层 \code{derived\_interpreter\_sound} \\
+6 & \code{DerivedExamples.v} & 在 \code{Issue316}（串行/重叠两策略）与 \code{ResourceExamples} 上做 \code{vm\_compute} 自动验证 \\
+7 & \code{Completeness.v}（二期） & 证明任意满足 \code{program\_semantics} 的 trace 均可由自动机非确定性迁移生成 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{验证阶梯}
+
+\begin{enumerate}
+\item \textbf{证明内核核查}：编译 \code{CoreLanguage/Derived/*.vo} 并运行 \code{rocq check} 与 \code{Print Assumptions derived\_interpreter\_sound}，确保零 \code{Admitted}、无额外公理假设。
+\item \textbf{可执行反射与案例回归}：在 \code{DerivedExamples.v} 中通过 \code{vm\_compute} 跑通 \code{issue316 3} 的串行与双缓冲重叠两种 trace，核验重叠期间 $\mathcal I$ 的在途操作集合、最终输出内存值与 \code{Issue316Safety.v} 的轮转性质一致。
+\item \textbf{OCaml 抽取与集成测试}：在 \code{rocq/Extraction/\allowbreak Extract.v} 中导出解释器函数 \code{run\_derived\_interpreter} 与内置调度策略，通过 \code{make -C rocq all} 与 \code{dune runtest} 验证全仓库回归通过。
+\end{enumerate}
+
+%======================================================================
+{\small
+\begin{thebibliography}{16}
+\setlength{\itemsep}{2pt}
+\setlength{\parskip}{0pt}
+%======================================================================
+
+\bibitem{reynolds1972}
+J.~C.~Reynolds.
+\emph{Definitional Interpreters for Higher-Order Programming Languages}.
+In Proceedings of the ACM Annual Conference, pp.~717--740, 1972.
+（仓库归档：\code{references/papers/reynolds-definitional-interpreters.pdf}）
+
+\bibitem{danvy2001defunc}
+O.~Danvy and L.~R.~Nielsen.
+\emph{Defunctionalization at Work}.
+In Proceedings of the 3rd ACM SIGPLAN International Conference on Principles and Practice of Declarative Programming (PPDP), pp.~162--174, 2001.
+
+\bibitem{ager2003functional}
+M.~S.~Ager, D.~Biernacki, O.~Danvy, and J.~Midtgaard.
+\emph{A Functional Correspondence between Evaluators and Abstract Machines}.
+In Proceedings of the 5th ACM SIGPLAN International Conference on Principles and Practice of Declarative Programming (PPDP), pp.~8--19, 2003.
+
+\bibitem{danvy2004refocusing}
+O.~Danvy and L.~R.~Nielsen.
+\emph{Refocusing in Reduction Semantics}.
+BRICS Research Series RS-04-26, Department of Computer Science, University of Aarhus, 2004.
+
+\bibitem{biernacka2007concrete}
+M.~Biernacka and O.~Danvy.
+\emph{A Concrete Framework for Environment Machines}.
+ACM Transactions on Computational Logic (TOCL), 9(1):6:1--6:30, 2007.
+
+\bibitem{danvy2009refunc}
+O.~Danvy and K.~Millikin.
+\emph{Refunctionalization at Work}.
+Science of Computer Programming, 74(8):534--549, 2009.
+
+\bibitem{plotkin2009handlers}
+G.~Plotkin and M.~Pretnar.
+\emph{Handlers of Algebraic Effects}.
+In Programming Languages and Systems (ESOP), LNCS 5502, pp.~80--94, 2009.
+
+\bibitem{zhao2012vellvm}
+J.~Zhao, S.~Nagarakatte, M.~M.~K.~Martin, and S.~Zdancewic.
+\emph{Formalizing the LLVM Intermediate Representation for Verified Program Transformations}.
+In Proceedings of POPL, pp.~427--440, 2012.
+（仓库归档：\code{references/papers/vellvm-popl2012.pdf}；现代演进分析见 \code{docs/vellvm-lessons.md}）
+
+\bibitem{kiselyov2015freer}
+O.~Kiselyov and H.~Ishii.
+\emph{Freer Monads, More Extensible Effects}.
+In Proceedings of the ACM SIGPLAN Symposium on Haskell, pp.~94--105, 2015.
+
+\bibitem{kang2017promising}
+J.~Kang, C.-K.~Hur, O.~Lahav, V.~Vafeiadis, and D.~Dreyer.
+\emph{A Promising Semantics for Relaxed-Memory Concurrency}.
+In Proceedings of POPL, pp.~175--189, 2017.
+
+\bibitem{hillerstrom2017cps}
+D.~Hillerström, S.~Lindley, R.~Atkey, and K.~C.~Sivaramakrishnan.
+\emph{Continuation Passing Style for Effect Handlers}.
+In Proceedings of FSCD, LIPIcs 84, pp.~18:1--18:19, 2017.
+
+\bibitem{hillerstrom2020generalised}
+D.~Hillerström, S.~Lindley, and R.~Atkey.
+\emph{Effect Handlers via Generalised Continuations}.
+Journal of Functional Programming, 30:e5, 2020.
+
+\bibitem{xia2020itrees}
+L.-Y.~Xia, Y.~Zakowski, P.~He, C.-K.~Hur, G.~Malecha, B.~C.~Pierce, and S.~Zdancewic.
+\emph{Interaction Trees: Representing Recursive and Impure Programs in Coq}.
+Proceedings of the ACM on Programming Languages (POPL), 4(POPL):51:1--51:32, 2020.
+
+\bibitem{ahman2021async}
+D.~Ahman and M.~Pretnar.
+\emph{Asynchronous Effects}.
+Proceedings of the ACM on Programming Languages (POPL), 5(POPL):24:1--24:28, 2021.
+
+\bibitem{sivaramakrishnan2021ocaml}
+K.~C.~Sivaramakrishnan, S.~Dolan, L.~White, T.~Kelly, S.~Jaffer, and A.~Madhavapeddy.
+\emph{Retrofitting Effect Handlers onto OCaml}.
+In Proceedings of PLDI, pp.~206--221, 2021.
+
+\bibitem{chappe2023ctrees}
+N.~Chappe, P.~He, L.~Henrio, Y.~Zakowski, and S.~Zdancewic.
+\emph{Choice Trees: Representing Nondeterministic, Recursive, and Impure Programs in Coq}.
+Proceedings of the ACM on Programming Languages (POPL), 7(POPL):61:1--61:31, 2023.
+
+\end{thebibliography}
+}
+
+\end{document}
