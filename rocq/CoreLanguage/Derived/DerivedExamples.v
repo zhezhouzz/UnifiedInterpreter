@@ -1,7 +1,8 @@
 From Stdlib Require Import List ZArith Bool Lia.
 From UnifiedInterpreter.Base Require Import Free Result.
 From UnifiedInterpreter.CoreLanguage.Axiomatic Require Import TraceSemantics Issue316 ResourceExamples.
-From UnifiedInterpreter.CoreLanguage.Derived Require Import Refocusing Automaton CoreEffects Handlers Soundness.
+From UnifiedInterpreter.CoreLanguage.Derived Require Import
+  Refocusing Automaton CoreEffects Handlers Soundness Completeness.
 Import ListNotations.
 Set Implicit Arguments.
 Local Strategy 1000 [run_derived_interpreter run_free_interpreter].
@@ -643,6 +644,112 @@ Proof.
     (strict_choice_policy (fun _ => None)) nat_trace_indexer
     serialized_policy 20 16 loop_alloc_prog);
     [exact loop_alloc_wf | exact Hrun].
+Qed.
+
+(* 场景 D：早用异步结果（Issue #920 风格乱序：在 Read 完成前即消费其结果绑定）
+   - strict_choice_policy：在 Return (1, 2) 消费未完成的 Read (1, 1) 时显式报 ErrEarlyAsyncUse (1, 2) (1, 1)；
+   - permissive_choice_policy：用 oracle 值 VInt 777 完成乱序 Return，随后再完成 ReadEnd (VInt 7)，
+     完整轨迹仍严格满足公理化 shared_program_semantics！ *)
+Definition early_async_prog : @shared_program unit nat bool unit :=
+  Run [Read tt 0 (Dispatch tt None) (Literal (VMemory 10)) (Return tt [OVar 0])].
+
+Lemma early_async_wf :
+  well_formed open_bool_cfg (instantiate_shared odd_allocation_layout 0 early_async_prog).
+Proof.
+  cbn. split; [discriminate |].
+  repeat apply Forall_cons; try apply Forall_nil.
+  split; [cbv; repeat constructor; cbn; intuition discriminate |].
+  split; [cbn; repeat constructor |].
+  split; [cbn; tauto | exists (fun _ => TInt); cbn; repeat split; repeat constructor].
+Qed.
+
+Definition early_async_init_mem (a : memory_resource) : option (@value unit nat bool) :=
+  match a with
+  | 10 => Some (VInt 7%Z)
+  | _ => None
+  end.
+
+Definition run_early_async_strict :=
+  run_derived_interpreter odd_allocation_layout open_bool_exec_target open_emodel
+    (strict_choice_policy early_async_init_mem)
+    (scripted_policy [ActIssue 0; ActIssue 0]) 20 8 early_async_prog.
+
+Theorem early_async_strict_rejects :
+  run_early_async_strict = Error (ErrEarlyAsyncUse (1, 2)%positive (1, 1)%positive).
+Proof.
+  vm_cast_no_check
+    (eq_refl (Error (A := @run_result unit nat bool unit)
+                    (ErrEarlyAsyncUse (1, 2)%positive (1, 1)%positive))).
+Qed.
+
+Definition run_early_async_permissive :=
+  run_derived_interpreter odd_allocation_layout open_bool_exec_target open_emodel
+    (permissive_choice_policy early_async_init_mem (fun _ _ _ => VInt 777%Z) (VInt 0%Z))
+    (scripted_policy [ActIssue 0; ActIssue 0; ActFinish (1, 1)%positive])
+    20 8 early_async_prog.
+
+Theorem early_async_permissive_sound :
+  exists res,
+    run_early_async_permissive = Ok res /\
+    rr_inflight_count res = 0 /\
+    rr_outputs res = [Some [VInt 777%Z]] /\
+    rr_events res =
+      [EventRecord (1, 1)%positive (LReadStart (Dispatch tt None) 10);
+       EventRecord (1, 2)%positive (LReturn [VInt 777%Z]);
+       EventRecord (1, 1)%positive (LReadEnd (VInt 7%Z))] /\
+    shared_program_semantics odd_allocation_layout open_bool_cfg open_model early_async_prog
+      (trace_of_records nat_trace_indexer (rr_events res))
+      (kappa_of_records nat_trace_indexer (rr_events res)).
+Proof.
+  assert (Hinf : (match run_early_async_permissive with Ok r => rr_inflight_count r | Error _ => 1 end) = 0)
+    by (vm_cast_no_check (eq_refl 0)).
+  assert (Hout : (match run_early_async_permissive with Ok r => rr_outputs r | Error _ => [] end) =
+    ([Some [VInt 777%Z]] : list (option (list (@value unit nat bool)))))
+    by (vm_cast_no_check (eq_refl ([Some [VInt 777%Z]] : list (option (list (@value unit nat bool)))))).
+  assert (Hevs : (match run_early_async_permissive with Ok r => rr_events r | Error _ => [] end) =
+    ([EventRecord (1, 1)%positive (LReadStart (Dispatch tt None) 10);
+      EventRecord (1, 2)%positive (LReturn [VInt 777%Z]);
+      EventRecord (1, 1)%positive (LReadEnd (VInt 7%Z))] : list (@event_record unit nat bool unit)))
+    by (vm_cast_no_check (eq_refl
+      ([EventRecord (1, 1)%positive (LReadStart (Dispatch tt None) 10);
+        EventRecord (1, 2)%positive (LReturn [VInt 777%Z]);
+        EventRecord (1, 1)%positive (LReadEnd (VInt 7%Z))] : list (@event_record unit nat bool unit)))).
+  destruct run_early_async_permissive as [res|err] eqn:Hrun; [| discriminate Hinf].
+  exists res.
+  split; [reflexivity |].
+  split; [exact Hinf |].
+  split; [exact Hout |].
+  split; [exact Hevs |].
+  unfold run_early_async_permissive in Hrun.
+  eapply (derived_interpreter_sound odd_allocation_layout open_bool_exec_target open_emodel
+    (permissive_choice_policy early_async_init_mem (fun _ _ _ => VInt 777%Z) (VInt 0%Z))
+    nat_trace_indexer
+    (scripted_policy [ActIssue 0; ActIssue 0; ActFinish (1, 1)%positive]) 20 8 early_async_prog);
+    [exact early_async_wf | exact Hrun].
+Qed.
+
+(* 完备性实例化验证：open_bool_exec_target 与 open_emodel 满足 target_complete 与 model_complete *)
+Lemma open_bool_target_complete : target_complete open_bool_exec_target.
+Proof. constructor; intros; reflexivity. Qed.
+
+Lemma open_model_complete : model_complete open_emodel.
+Proof. intros r args res ->. reflexivity. Qed.
+
+Corollary open_bool_program_complete (prog : @shared_program unit nat bool unit)
+    (t : list nat) (kappa : @interpretation unit nat bool unit)
+    (init_mem : memory_resource -> option (@value unit nat bool)) :
+  well_formed open_bool_cfg (instantiate_shared odd_allocation_layout 0 prog) ->
+  program_semantics odd_allocation_layout open_bool_cfg open_model
+    (annotate_program (instantiate_shared odd_allocation_layout 0 prog)) t kappa ->
+  init_mem_consistent init_mem (map kappa t) ->
+  exists cpol script budget res,
+    (1 <= budget)%nat /\
+    run_derived_interpreter odd_allocation_layout open_bool_exec_target open_emodel
+      cpol (scripted_policy script) (S (length script)) budget prog = Ok res /\
+    rr_events res = map kappa t.
+Proof.
+  intros Hwf Hsem Hinit.
+  eapply (derived_interpreter_complete prog open_bool_target_complete open_model_complete Hwf Hsem Hinit).
 Qed.
 
 End MemoryAndChoiceValidation.

@@ -65,6 +65,8 @@ CoreLanguage/Derived/Automaton.v
 CoreLanguage/Derived/CoreEffects.v
 CoreLanguage/Derived/Handlers.v
 CoreLanguage/Derived/Soundness.v
+CoreLanguage/Derived/Completeness.v
 CoreLanguage/Derived/DerivedExamples.v
+CoreLanguage/Derived/ProofAudit.v
 CoreLanguage/Derived/ExtractDerived.v
 Extraction/Extract.v

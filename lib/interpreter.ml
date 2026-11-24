@@ -321,6 +321,18 @@ module H5 = struct
                     add_trace state
                       (Printf.sprintf "H5 barrier core%d %s" core scope);
                     continue k ())
+            | Core_async_events (tag, events) ->
+                Some
+                  (fun (k : (a, _) continuation) ->
+                    add_trace state
+                      (Printf.sprintf "H5 core.async.begin %s count=%d" tag
+                         (List.length events));
+                    List.iter
+                      (fun ev ->
+                        add_trace state (Printf.sprintf "H5 core.event %s" ev))
+                      events;
+                    add_trace state (Printf.sprintf "H5 core.async.end %s" tag);
+                    continue k ())
             | _ -> None);
       }
 end

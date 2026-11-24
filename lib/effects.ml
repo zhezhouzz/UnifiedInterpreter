@@ -41,6 +41,7 @@ type _ Effect.t += Async_copy_in : async_copy -> unit Effect.t
 type _ Effect.t += Async_copy_out : async_copy -> unit Effect.t
 type _ Effect.t += Wait : int * string -> unit Effect.t
 type _ Effect.t += Barrier : int * string -> unit Effect.t
+type _ Effect.t += Core_async_events : string * string list -> unit Effect.t
 type _ Effect.t += With_handlers : handler_stage list * (unit -> unit) -> unit Effect.t
 
 let trace msg = perform (Trace msg)
@@ -100,6 +101,8 @@ let async_copy_out copy = perform (Async_copy_out copy)
 let wait core token = perform (Wait (core, token))
 
 let barrier core scope = perform (Barrier (core, scope))
+
+let emit_core_async_events tag events = perform (Core_async_events (tag, events))
 
 let with_handlers stages thunk = perform (With_handlers (stages, thunk))
 

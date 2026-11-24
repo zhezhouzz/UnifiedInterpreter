@@ -19,3 +19,5 @@ done < "$source_dir/_CoqProject"
 )
 cp rocq-build/Extraction/unified_semantics.ml .
 cp rocq-build/Extraction/unified_semantics.mli .
+cp rocq-build/Extraction/derived_core_interpreter.ml .
+cp rocq-build/Extraction/derived_core_interpreter.mli .

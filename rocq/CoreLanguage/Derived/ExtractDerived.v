@@ -71,7 +71,17 @@ Definition demo_issue316_free_overlapped_summary :=
 Definition demo_shared_order_01 := run_order_01.
 Definition demo_shared_order_10 := run_order_10.
 Definition demo_overwrite := run_overwrite.
+Definition demo_uninit_strict_scripted :=
+  run_derived_interpreter odd_allocation_layout open_bool_exec_target open_emodel
+    (strict_choice_policy (fun _ => None))
+    (scripted_policy [ActIssue 0; ActFinish (1, 1)%positive]) 20 8 uninit_read_prog.
+Definition demo_uninit_strict_deadlock :=
+  run_derived_interpreter odd_allocation_layout open_bool_exec_target open_emodel
+    (strict_choice_policy (fun _ => None))
+    serialized_policy 20 8 uninit_read_prog.
 Definition demo_uninit_permissive := run_uninit_permissive.
+Definition demo_early_async_strict := run_early_async_strict.
+Definition demo_early_async_permissive := run_early_async_permissive.
 Definition demo_loop_alloc := run_loop_alloc.
 
 End DerivedExtractionDemo.
@@ -105,5 +115,9 @@ Extraction "derived_core_interpreter.ml"
   DerivedExtractionDemo.demo_shared_order_01
   DerivedExtractionDemo.demo_shared_order_10
   DerivedExtractionDemo.demo_overwrite
+  DerivedExtractionDemo.demo_uninit_strict_scripted
+  DerivedExtractionDemo.demo_uninit_strict_deadlock
   DerivedExtractionDemo.demo_uninit_permissive
+  DerivedExtractionDemo.demo_early_async_strict
+  DerivedExtractionDemo.demo_early_async_permissive
   DerivedExtractionDemo.demo_loop_alloc.

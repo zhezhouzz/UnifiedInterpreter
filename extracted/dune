@@ -1,5 +1,9 @@
 (rule
- (targets unified_semantics.ml unified_semantics.mli)
+ (targets
+  unified_semantics.ml
+  unified_semantics.mli
+  derived_core_interpreter.ml
+  derived_core_interpreter.mli)
  (deps
   ../scripts/build_extraction.sh
   ../rocq/_CoqProject
@@ -9,6 +13,6 @@
 
 (library
  (name extracted_semantics)
- (modules unified_semantics)
+ (modules unified_semantics derived_core_interpreter)
  (libraries rocq-runtime.kernel)
  (flags (:standard -w -a)))

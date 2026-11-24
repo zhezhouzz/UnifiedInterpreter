@@ -1,3 +1,7 @@
 (test
  (name test_unified_interpreter)
  (libraries unified_interpreter))
+
+(test
+ (name test_derived_interpreter)
+ (libraries unified_interpreter extracted_semantics))
