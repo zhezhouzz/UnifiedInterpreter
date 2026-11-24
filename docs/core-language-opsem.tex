@@ -11,6 +11,23 @@
 \newcommand{\kw}[1]{\ensuremath{\mathsf{#1}}}
 \newcommand{\infer}[2]{\displaystyle\frac{\displaystyle #1}{\displaystyle #2}}
 \usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,calc,positioning}
+\definecolor{gmFill}{HTML}{FFF8E6}
+\definecolor{gmBorder}{HTML}{B7791F}
+\definecolor{aicFill}{HTML}{EEF5FC}
+\definecolor{aicMem}{HTML}{DCEBFA}
+\definecolor{aicBorder}{HTML}{2B6CB0}
+\definecolor{aivFill}{HTML}{EDF9F4}
+\definecolor{aivMem}{HTML}{D4F0E2}
+\definecolor{aivBorder}{HTML}{2F855A}
+\definecolor{scalarFill}{HTML}{EDF2F7}
+\definecolor{scalarBorder}{HTML}{4A5568}
+\definecolor{syncLocal}{HTML}{1D4ED8}
+\definecolor{syncBar}{HTML}{C53030}
+\definecolor{syncCross}{HTML}{6B46C1}
+\definecolor{coreBg}{HTML}{F8FAFC}
+\definecolor{coreBorder}{HTML}{94A3B8}
 %%%%%%%%%%%%%% Notation macros %%%%%%%%%%%%%%
 \newcommand{\an}[3]{{\color{#2} \textsc{#1}:#3}}
 \newcommand{\litao}[1]{\an{litao}{red}{#1}}
@@ -38,8 +55,8 @@ $
 \mathsf{PIPE\_MTE2},\ \mathsf{PIPE\_V},\ \mathsf{PIPE\_MTE3},\ \ldots
 $
 
-This document describes a (slightly modified) core language than the initial
-version in the \texttt{docs/core-language.tex} file, and present an operational semantics.
+This document describes a core language slightly modified from the initial
+version in the \texttt{docs/core-language.tex} file, and presents an operational semantics.
 
 \section{参数说明}
 
@@ -52,7 +69,7 @@ version in the \texttt{docs/core-language.tex} file, and present an operational 
 
 $f$ 是发到数据管道上的运算，由该管道异步完成。$g$ 是标量算子，由程序直接执
 行，\kw{let} 立刻绑定结果。二者都可根据IR提供的实际运算配置。
-本文把同步源语（\kw{setflag}、\kw{waitflag}、\kw{pipebarrier}、\kw{syncblockset} 和
+本文把同步原语（\kw{setflag}、\kw{waitflag}、\kw{pipebarrier}、\kw{syncblockset} 和
 \kw{syncblockwait}）作为核心语言的原语。
 \begin{equation}
 \label{eq:hw}
@@ -93,6 +110,9 @@ $f$ 是发到数据管道上的运算，由该管道异步完成。$g$ 是标量
       \mathsf{Space}_{\mathsf{AIC}}
         &=\{\mathsf{GM},\mathsf{L1},\mathsf{L0A},\mathsf{L0B},\mathsf{L0C}\}
     \end{aligned}\\[0.6em]
+\text{跨流共享地址空间}
+  & \mathsf{SharedSpace}_{\mathcal H}
+  & \{\mathsf{GM}\}\\[0.3em]
 \text{数据管道}
   & \mathsf{Pipe}_d
   & \begin{aligned}
@@ -141,6 +161,7 @@ Ascend C 把这一层也叫做核间同步，对应 \texttt{CrossCore} 的模式
 \begin{itemize}
 \item 配置只含一个 AI Core。\texttt{get\_block\_idx} 是这个 AI Core 已经给定的整数，各条流读到同一个值。\texttt{get\_sub\_block\_idx} 是一条流自己的整数，用来区分 $\kappa$ 里的各条 AIV 流。
 \item 不处理复杂算子如 \texttt{mmadL1} 的内部事件槽、\texttt{nd2nz} 和 FFTS 基址。写到 $\mathsf{GM}$ 的 \texttt{fixpipe} 是 $\mathsf{Operator}_{\mathsf{AIC}}$ 中的一个名字，仍是一条 \kw{issue}。
+\item 标量不直接读写共享内存 $\mu$，因此核内以 $\mathsf{S}$ 为端点的 \texttt{set\_flag} 与 \texttt{wait\_flag}（由 \texttt{memref.load}、\texttt{memref.store} 触发）不纳入基础配置，可作为扩展加入。
 \end{itemize}
 
 \section{语法}
@@ -148,8 +169,9 @@ Ascend C 把这一层也叫做核间同步，对应 \texttt{CrossCore} 的模式
 沿用 \eqref{eq:hw}、\eqref{eq:pipe} 中定义的参数。
 \[f\in\mathsf{Operator}_d
 \quad g\in\mathsf{Scalar}
+\quad m\in\mathsf{Space}_d
 \quad p,q\in\mathsf{Pipe}
-\quad \text{where } d = \mathsf{kind}(s) (s \in \kappa)
+\quad \text{where } d = \mathsf{kind}(s)\ (s \in \kappa)
 \]
 \[
 \begin{aligned}
@@ -160,14 +182,15 @@ v ::={}
 C ::={}
   &\ \kw{return}(\bar v)
    \mid \kw{end}\\
-  &\mid \kw{let}\ x=\kw{scalar}[g](\bar v)\ \kw{in}\ C\\
+  &\mid \kw{let}\ x=\kw{scalar}[g](\bar v)\ \kw{in}\ C
+   \mid \kw{let}\ x=\kw{alloc}[m](\bar v)\ \kw{in}\ C\\
   &\mid \kw{issue}[p](f,\bar v);\ C\\
   &\mid \kw{setflag}[p,q](v);\ C
    \mid \kw{waitflag}[p,q](v);\ C\\
   &\mid \kw{pipebarrier}[p];\ C\\
   &\mid \kw{syncblockset}[p,q](v);\ C
    \mid \kw{syncblockwait}[p,q](v);\ C\\
-  &\mid \kw{if}\ v\ \kw{then}\ \{C_1\}\ \kw{else}\ \{C_2\}\\
+  &\mid \kw{if}\ v\ \kw{then}\ \{C_1\}\ \kw{else}\ \{C_2\};\ C_3\\
   &\mid \kw{for}\ x=v_1\ \kw{to}\ v_2\ \kw{step}\ v_3\ \kw{do}\ \{C_1\};\ C_2,\\[0.3em]
 P ::={}
   &\ \mathop{\Big\|}_{s\in\kappa} s\{C_s\}.
@@ -175,22 +198,29 @@ P ::={}
 \]
 
 \begin{itemize}
-  \item $P$ 并行执行若干条指令流，$\kappa$只有一个元素时，$P$ 就写作
+  \item $P$ 并行执行若干条指令流，$\kappa$ 只有一个元素时，$P$ 就写作
   $s\{C\}$。每条指令流内顺序执行。
-  \item $g$ 的例子包括：标量算术运
-  算、\texttt{get\_block\_idx}、\texttt{get\_sub\_block\_idx} 和视图构
-  造。$\kw{scalar}[g]$ 不进入数据管道。第 3 节的 $\Delta(g)$ 给出它的参数类别和
-  结果类别；$\kw{let}$ 立刻把 $\mathsf{eval}_g$ 的结果绑定到 $x$。
+  \item $g$ 的例子包括：标量算术运算、\texttt{get\_block\_idx}、\texttt{get\_sub\_block\_idx} 和视图构造。$\kw{scalar}[g]$ 与 $\kw{alloc}[m]$ 均不进入数据管道，由 $\kw{let}$ 立刻绑定结果；$\kw{alloc}[m](\bar v)$ 在空间 $m$ 中分配一块新鲜存储并绑定为 $\mathsf{view}$。
   \item $\kw{issue}[p](f,\bar v)$ 不绑定结果。$\bar v$ 里的地址是类别为
   $\mathsf{view}$ (可理解为 \texttt{memref} 等地址表示) 的操作数，读取和写入都在
-  其中，目的地也是一个操作数。后续使用 $\mathsf{foot}(f,\bar\nu)=(R,W)$ 计算视图
-  对应的存储单元集合 （表示为 $\mathsf{Loc}$ 的一个子集）：
+  其中，目的地也是一个操作数。后续使用 $\mathsf{foot}(s,p,f,\bar\nu)=(R,W)$ 计算视图
+  对应的存储单元集合（表示为 $\mathsf{Loc}$ 的有限子集）。令 $\mathsf{Space}=\bigcup_d\mathsf{Space}_d$，
+  按跨流共享空间与流私有空间区分具体地址：
   \[
-  \mathsf{Loc}=\mathsf{Space}\times\mathbb Z,\quad
-  \mathsf{Space}=\bigcup_d\mathsf{Space}_d,\quad
-  R,W\subseteq\mathsf{Loc}.
+  \begin{aligned}
+  \mathsf{Loc}_{s,m} &=
+    \begin{cases}
+      \{(m,z)\mid z\in\mathbb Z\}, & m\in\mathsf{Space}_{\mathsf{kind}(s)}\cap\mathsf{SharedSpace}_{\mathcal H},\\
+      \{(s,m,z)\mid z\in\mathbb Z\}, & m\in\mathsf{Space}_{\mathsf{kind}(s)}\setminus\mathsf{SharedSpace}_{\mathcal H},
+    \end{cases}\\
+  \mathsf{Loc}_s &= \bigcup_{m\in\mathsf{Space}_{\mathsf{kind}(s)}}\mathsf{Loc}_{s,m},
+  \qquad
+  \mathsf{Loc} = \bigcup_{s\in\mathsf{Stream}}\mathsf{Loc}_s,
+  \qquad
+  R,W\subseteq\mathsf{Loc}_s.
+  \end{aligned}
   \]
-  其中 $R$ 是读取的单元，$W$ 是写入的单元。$\mathsf{Loc}$ 只出现在操作语义里。
+  其中 $R$ 是读取的单元，$W$ 是写入的单元。$\mathsf{Loc}$ 只出现在操作语义里；同一 AI Core 中不同 AIV 流的私有 $\mathsf{UB}$ 由流标识 $s$ 隔离，而 $\mathsf{GM}$ 等共享空间由各流共享。
 \end{itemize}
 
 \litao{We may further abstract the event semantics, using a more general event
@@ -200,10 +230,9 @@ identifier, while for Ascend instantiate it to $(p,q,\varepsilon)$.}
 % \clearpage
 \section{良构与基本类型检查}
 \label{sec:wf}
-本节检查基本类别、变量作用域、计算单元与管道的归属，以及配置允许的操作和同步关系；不检查 memory space。
+本节检查基本类别、变量作用域、计算单元与管道归属、\kw{alloc} 的地址空间归属，以及配置允许的操作和同步关系；不检查 view 的具体布局或地址边界。
 固定合法配置 $\mathcal H$ 与有限活动流集合 $\kappa\subseteq\mathsf{Stream}$。
-判断 $\mathcal H;\Gamma\vdash_s C$ 检查指令流 $s$ 中命令 $C$ 的类别与作用域；
-程序规则另检查命令的结构限制。规则使用的配置参数及同步条件在下表中解释。
+判断 $\mathcal H;\Gamma\vdash_s C$ 检查指令流 $s$ 中命令 $C$ 的类别与作用域；规则使用的配置参数及同步条件在下表中解释。
 \begingroup\small
 \setlength{\abovedisplayskip}{5pt}\setlength{\belowdisplayskip}{5pt}
 \begin{equation*}
@@ -218,6 +247,10 @@ identifier, while for Ascend instantiate it to $(p,q,\varepsilon)$.}
  x\notin\mathrm{dom}(\Gamma)\quad\mathcal H;\Gamma,x:\tau\vdash_s C}
  {\mathcal H;\Gamma\vdash_s\kw{let}\ x=\kw{scalar}[g](\bar v)\ \kw{in}\ C}
  \;\hypertarget{wf-let}{\textsc{Let}}\\[1em]
+\infer{m\in\mathsf{Space}_{\mathsf{kind}(s)}\quad\mathcal H;\Gamma\vdash\bar v:\mathsf{int}^*\quad
+ x\notin\mathrm{dom}(\Gamma)\quad\mathcal H;\Gamma,x:\mathsf{view}\vdash_s C}
+ {\mathcal H;\Gamma\vdash_s\kw{let}\ x=\kw{alloc}[m](\bar v)\ \kw{in}\ C}
+ \;\hypertarget{wf-alloc}{\textsc{Alloc}}\\[1em]
 \infer{p\in\mathsf{Pipe}_{\mathsf{kind}(s)}\quad f\in\mathsf{Operator}_{\mathsf{kind}(s)}\quad
  \Sigma_{\mathcal H}(\mathsf{kind}(s),p,f)=\bar\tau\quad\mathcal H;\Gamma\vdash\bar v:\bar\tau\quad\mathcal H;\Gamma\vdash_s C}
  {\mathcal H;\Gamma\vdash_s\kw{issue}[p](f,\bar v);\ C}
@@ -227,8 +260,8 @@ identifier, while for Ascend instantiate it to $(p,q,\varepsilon)$.}
 \qquad
 \infer{(\mathsf{kind}(s),p)\in\mathsf{Barrier}_{\mathcal H}\quad\mathcal H;\Gamma\vdash_s C}
  {\mathcal H;\Gamma\vdash_s\kw{pipebarrier}[p];\ C}\;\hypertarget{wf-bar}{\textsc{Bar}}\\[1em]
-\infer{\mathcal H;\Gamma\vdash v:\mathsf{bool}\quad\mathcal H;\Gamma\vdash_s C_1\quad\mathcal H;\Gamma\vdash_s C_2}
- {\mathcal H;\Gamma\vdash_s\kw{if}\ v\ \kw{then}\ \{C_1\}\ \kw{else}\ \{C_2\}}
+\infer{\mathcal H;\Gamma\vdash v:\mathsf{bool}\quad\mathcal H;\Gamma\vdash_s C_1\quad\mathcal H;\Gamma\vdash_s C_2\quad\mathcal H;\Gamma\vdash_s C_3}
+ {\mathcal H;\Gamma\vdash_s\kw{if}\ v\ \kw{then}\ \{C_1\}\ \kw{else}\ \{C_2\};\ C_3}
  \;\hypertarget{wf-if}{\textsc{If}}\\[1em]
 \infer{\mathcal H;\Gamma\vdash v_1,v_2,v_3:\mathsf{int},\mathsf{int},\mathsf{int}\quad
  x\notin\mathrm{dom}(\Gamma)\quad\mathcal H;\Gamma,x:\mathsf{int}\vdash_s C_1\quad\mathcal H;\Gamma\vdash_s C_2}
@@ -238,7 +271,7 @@ identifier, while for Ascend instantiate it to $(p,q,\varepsilon)$.}
  \;\hypertarget{wf-return}{\textsc{Return}}
 \qquad
 \infer{}{\mathcal H;\Gamma\vdash_s\kw{end}}\;\hypertarget{wf-end}{\textsc{End}}\\[1em]
-\infer{\forall s\in\kappa.\ \mathcal H;\varnothing\vdash_s C_s\ \land\ \mathsf{Shape}_{\mathsf{top}}(C_s)}
+\infer{\forall s\in\kappa.\ \mathcal H;\varnothing\vdash_s C_s}
  {\mathcal H\vdash_\kappa\mathop{\Big\|}_{s\in\kappa}s\{C_s\}}
  \;\hypertarget{wf-program}{\textsc{Program}}
 \end{gathered}
@@ -247,7 +280,7 @@ identifier, while for Ascend instantiate it to $(p,q,\varepsilon)$.}
 
 \noindent 规则中的环境与配置参数如下。$\mathsf{Type}$ 是语法给出的五种类别
 $\{\mathsf{int},\mathsf{float},\mathsf{bool},\mathsf{event},\mathsf{view}\}$，
-$\bar\tau$ 是有限类别序列。
+$\bar\tau$ 是有限类别序列；$\bar v:\mathsf{int}^*$ 简记 $\bar v$ 中各操作数均为 $\mathsf{int}$。
 \begin{center}\small
 \begin{tabularx}{\linewidth}{@{}lY@{}}
 \toprule
@@ -289,95 +322,359 @@ $\kw{syncblockwait}[p,q](v)$
 \end{tabularx}
 \end{center}
 
-% \paragraph{命令结构检查。}
-% $\mathsf{Shape}_m(C)$ 是独立的递归检查，模式 $m\in\{\mathsf{top},\mathsf{body}\}$
-% 区分顶层与循环体。设 $A;C$ 表示 issue、四种同步命令或 pipebarrier 及其后续命令，则
-% \[
-% \begin{aligned}
-% \mathsf{Shape}_m(\kw{return}(\bar v))&=\mathsf{true},\\
-% \mathsf{Shape}_m(\kw{end})&=(m=\mathsf{body}),\\
-% \mathsf{Shape}_m(\kw{let}\ x=\kw{scalar}[g](\bar v)\ \kw{in}\ C)&=\mathsf{Shape}_m(C),\\
-% \mathsf{Shape}_m(A;C)&=\mathsf{Shape}_m(C),\\
-% \mathsf{Shape}_m(\kw{if}\ v\ \kw{then}\ \{C_1\}\ \kw{else}\ \{C_2\})
-%  &=\mathsf{Shape}_m(C_1)\land\mathsf{Shape}_m(C_2),\\
-% \mathsf{Shape}_m(\kw{for}\ x=v_1\ \kw{to}\ v_2\ \kw{step}\ v_3\ \kw{do}\ \{C_1\};C_2)
-%  &=\mathsf{Shape}_{\mathsf{body}}(C_1)\land\mathsf{Shape}_m(C_2).
-% \end{aligned}
-% \]
-% 因此顶层不允许 \kw{end}，循环体允许嵌套 \kw{for}；每条非 \kw{return} 路径以
-% 属于当前循环体的 \kw{end} 结束。嵌套循环后的继续程序仍处在外层循环体中。
-% \textsc{End} 只是类别规则，其使用位置由 \textsc{Program} 中的结构前提约束。
+\paragraph{配置归属。}
+合法配置 $\mathcal H$ 须满足：
+$\mathsf{SharedSpace}_{\mathcal H}\subseteq\mathsf{Space}$；
+$(d,p,q)\in L_{\mathcal H}\Rightarrow p,q\in\mathsf{Pipe}_d$；
+$(s,p,t,q)\in B_{\mathcal H}\Rightarrow s\ne t\land p\in\mathsf{Pipe}_{\mathsf{kind}(s)}\land q\in\mathsf{Pipe}_{\mathsf{kind}(t)}\cup\{\mathsf S\}$；
+$(d,p)\in\mathsf{Barrier}_{\mathcal H}\Rightarrow p\in\mathsf{Pipe}_d\cup\{\mathsf{ALL}\}$。
 
-% \paragraph{基本类别与检查边界。}
-% \hyperlink{wf-lit}{\textsc{Lit}} 的 $\mathsf{lit}_{\mathcal H}$ 由配置给出且单值：普通整数常量的类别是
-% $\mathsf{int}$，事件标识常量（如 $\varepsilon_0$）的类别是 $\mathsf{event}$，
-% 视图描述符常量的类别是 $\mathsf{view}$，不因底层编码为整数而混同。
-% $\mathsf{view}$ 表示可寻址区域的描述符，不是该区域里的数据值；具体布局与足迹仍由
-% 已有的 $\mathsf{foot}$ 解释。\hyperlink{wf-tuple}{\textsc{Tuple}} 同时检查参数个数与逐项类别。
-% 例如配置可以声明
-% $\Delta_{\mathcal H}(\mathsf{makeView})=(\mathsf{int}^3,\mathsf{view})$，
-% $\Sigma_{\mathcal H}(\mathsf{AIV},\mathsf{MTE2},\mathsf{Copy})=(\mathsf{view},\mathsf{view})$，
-% 其中 $\mathsf{int}^3$ 表示三个整数参数；实际算子签名以所选 IR 实例为准。
-% 因此在要求 view 的位置传整数、在同步位置传 view、或使用未绑定变量都会被拒绝。
+\paragraph{跨核通知的配置。}
+对本文的单轮广播配置，令
+$T=\mathsf{Targets}_{\mathcal H}(\mathsf{aic},p,q)$。
+$1{:}1$ 时 $T=\{\mathsf{aiv}_1\}$，$1{:}2$ 时
+$T=\{\mathsf{aiv}_1,\mathsf{aiv}_2\}$。固定活动流与边后，令
+\[
+ D_h=\{t\in T\mid\beta_t(p,q,\varepsilon)=1\},
+ \qquad h=(\mathsf{aic},p,q,\varepsilon).
+\]
+一次 \textsc{Block-Set} 完成使 $D_h=T$；每个接收者 $t$ 的等待完成仅移去 $t$。
+该轮配对完成当且仅当置位后所有接收者均已消费，即 $D_h=\varnothing$。
+第一个接收者可先继续执行；第二个接收者的消费决定该轮何时闭合。
+同键下一轮置位完成须等上一轮闭合。程序结束时残留接收位表示基准的配对检查失败；
+此检查独立于控制流能否返回。流内 flag 仍按 $(s,p,q,\varepsilon)$ 单独匹配。
 
-% \hyperlink{wf-let}{\textsc{Let}} 仅通过 $\Delta_{\mathcal H}$ 绑定标量结果；
-% \hyperlink{wf-issue}{\textsc{Issue}} 仅检查 $\Sigma_{\mathcal H}$ 与可用管道，不引入数据结果变量。
-% \hyperlink{wf-sync}{\textsc{Sync}} 检查 event 类别与配置许可；不再把某一代硬件的同步端点硬编码进规则。
-% 以下规则以配置合法为前提：签名表单值且只使用 $\mathsf{Type}$ 中的类别，
-% 签名与同步表的归属必须有效。具体而言，
-% $\Sigma_{\mathcal H}(d,p,f)$ 有定义要求 $d\in\mathsf{CoreKind}$、
-% $p\in\mathsf{Pipe}_d$、$f\in\mathsf{Operator}_d$。同步端点须满足：$(d,p,q)\in L_{\mathcal H}$ 要求 $p,q\in\mathsf{Pipe}_d$；
-% $(s,p,t,q)\in B_{\mathcal H}$ 要求 $s\ne t$、$p\in\mathsf{Pipe}_{\mathsf{kind}(s)}$、
-% $q\in\mathsf{Pipe}_{\mathsf{kind}(t)}\cup\{\mathsf S\}$；
-% $(d,p)\in\mathsf{Barrier}_{\mathcal H}$ 要求 $p\in\mathsf{Pipe}_d\cup\{\mathsf{ALL}\}$。
-% 这些条件不声称任意满足归属的 pair 都受硬件支持，实际成员须由配置提供。
-% $\Sigma_{\mathcal H}(d,p,f)$ 是部分签名表，其定义域指定允许发射的操作/管道组合。
-% 这里不把 $\mathsf{Space}_d$、view 的地址范围或存储布局加入静态类型。
-% \hyperlink{wf-for}{\textsc{For}} 的循环变量只在循环体内可见；
-% \hyperlink{wf-return}{\textsc{Return}} 不规定返回签名，但每个返回操作数必须可定型。
-% \hyperlink{wf-program}{\textsc{Program}} 中各条流的变量环境互不共享。
+此配置限制每个键至多有一轮在途。Atlas A2 的
+\href{https://www.hiascend.com/doc_center/source/zh/canncommercial/80RC2/apiref/opdevgapi/atlasascendc_api_07_0268.html}{CrossCoreSetFlag 接口}
+使用计数器，Cube 置位给两个 Vector 分别增加计数；反向汇聚需要两个 Vector 均置位。
+反向汇聚及多轮重叠需要各自的配置与规则，本文只实例化上述正向广播。
+\href{https://ascendnpu-ir.gitcode.com/en/developer_guide/features/auto_subtiling.html}{HIVM 自动子块划分}
+受 \texttt{--enable-auto-bind-sub-block} 控制，可能回退至 $1{:}1$ 的工作划分。
+构造基准时应分别记录编译目标、活动流以及该通知的实际参与者。
 
-% 当配置提供可判定的签名查询、常量分类及同步表成员检查，且活动流集合有限时，
-% 上述类别与结构检查可按语法递归执行。它不是同步正确性证明。
-% 它不要求 flag 已置位、存储已初始化或 view 互不重叠，也不证明地址边界、实际内存空间可访问性、
-% 循环步长非零、无竞争或无死锁；这些属于后续动态语义、配置约束或验证目标。
-% 缺少同步的程序仍可通过基本类型检查，从而让语义暴露其错误执行。
+\litao{另待考虑：是否把 set/wait 的源端、目标端和 event 合并抽象为一个同步 identifier，
+由配置解释其参与者与匹配关系，而非直接使用 $(p,q,\varepsilon)$。}
 
-% \paragraph{规则检查实例。}
-% 采用上述 Copy 签名，并假定相应管道与同步对已获配置许可，可逐项得到下列结论。
-% 这些是静态规则的推导检查，不是动态安全性结论。
-% \begin{center}\small
-% \begin{tabularx}{\linewidth}{@{}lY@{}}
-% \toprule
-% 检查情形 & 规则给出的结果 \\
-% \midrule
-% Copy 接收两个 view；或接收一个 view / 一个整数
-%  & 前者通过；少一个参数由 \textsc{Tuple} 拒绝，类别错误由操作数定型拒绝。\\
-% 在 AIV 上发射仅属于 AIC 的算子
-%  & \textsc{Issue} 的算子归属前提不成立。\\
-% 同步操作使用普通整数常量
-%  & 即使编码与事件编号相同，也不能推出其类别为 event。\\
-% 跨流同步仅有非活动端点
-%  & \textsc{Sync} 要求的 $t\in\kappa$ 不存在，拒绝。\\
-% 循环后使用循环变量或循环体内新绑定的变量
-%  & 循环后的环境仍为 $\Gamma$，未绑定的名字被拒绝。\\
-% 顶层 end（包括顶层循环之后的 end）
-%  & 类别规则可能通过，但 \textsc{Program} 的结构检查拒绝。\\
-% 循环体以 end 或 return 结束；顺序循环或嵌套循环
-%  & 满足结构检查；仍须分别通过类别检查。\\
-% 缺失同步、零步长、无匹配 set 的 wait
-%  & 基本类别与结构正确时仍可通过，留给动态语义分析。\\
-% \bottomrule
-% \end{tabularx}
-% \end{center}
+\begin{figure}[p]
+\centering
+\begin{tikzpicture}[
+  x=1cm, y=0.84cm,
+  font=\footnotesize,
+  queue/.style={draw=#1, fill=white, rounded corners=2pt, minimum height=0.72cm, inner sep=1pt, align=center, font=\scriptsize\sffamily},
+  scalarbox/.style={draw=scalarBorder, fill=scalarFill, rounded corners=2pt, align=center, font=\scriptsize},
+  membox/.style 2 args={draw=#1, fill=#2, rounded corners=2pt, align=center, font=\scriptsize},
+  dmaarr/.style={<->, >=Stealth, draw=gmBorder, thick},
+  issuearr/.style={->, >=Stealth, draw=scalarBorder, thin},
+  localarr/.style={->, >=Stealth, draw=syncLocal, densely dashed, semithick},
+  crossarr/.style={->, >=Stealth, draw=syncCross, very thick},
+  crossalt/.style={->, >=Stealth, draw=syncCross, densely dotted, thick}
+]
 
-\paragraph{TODO：跨核同步与同步标识符（待仔细考虑）。}
-双 AIV 到 AIC 的汇聚、AIC 到双 AIV 的通知，以及不同硬件代际的
-\texttt{CrossCore} 模式、参与者和令牌消费行为，仍需逐项核对 API 与实现；
-当前 $B_{\mathcal H}$、$\mathsf{Targets}_{\mathcal H}$ 和 $\beta_t$ 的规则保留为待核实的模型，
-不据此认定这些情形在各代硬件上具有相同行为。
-另待考虑：是否把 set/wait 的源端、目标端和 event 合并抽象为一个同步 identifier，
-由配置解释其参与者与匹配关系，而非直接使用 $(p,q,\varepsilon)$。
+% --- Top: Shared Global Memory ---
+\draw[draw=gmBorder, fill=gmFill, rounded corners=3pt, thick] (0, 10.45) rectangle (15.4, 11.25);
+\node[text=gmBorder!80!black] at (7.7, 10.85)
+  {\textbf{共享全局内存}\; $\mathsf{SharedSpace}_{\mathcal H}=\{\mathsf{GM}\}$\quad（具体地址 $(\mathsf{GM}, z)$，全部活动流共享读写）};
+
+% --- Outer AI Core container ---
+\draw[draw=coreBorder, fill=coreBg, dashed, rounded corners=4pt, thick] (0, 0) rectangle (15.4, 9.65);
+\node[fill=coreBg, inner sep=2.5pt, text=scalarBorder, font=\scriptsize\bfseries] at (3.43, 9.65)
+  {单 AI Core（Ascend 910B $1{:}2$）};
+\node[fill=coreBg, inner sep=2.5pt, text=scalarBorder, font=\scriptsize] at (11.82, 9.65)
+  {活动流 $\kappa_{1:2}=\{\mathsf{aic},\,\mathsf{aiv}_1,\,\mathsf{aiv}_2\}$};
+
+% --- Left Top: AIC Stream ---
+\draw[draw=aicBorder, fill=aicFill, rounded corners=3pt, thick] (0.28, 4.30) rectangle (6.58, 9.20);
+\node[anchor=west, text=aicBorder!90!black] at (0.45, 8.92)
+  {\textbf{流 $s=\mathsf{aic}$}\;（$\mathsf{kind}(\mathsf{aic})=\mathsf{AIC}$）};
+
+% AIC Scalar
+\draw[scalarbox] (0.48, 8.02) rectangle (6.38, 8.64);
+\node[font=\scriptsize] at (3.43, 8.33)
+  {\textbf{Scalar 发射者}\; $(C_{\mathsf{aic}},\,\rho_{\mathsf{aic}})$\quad\color{scalarBorder}\scriptsize 控制流与 \kw{alloc}};
+
+% AIC Queues Q_aic(p)
+\node[queue=aicBorder, minimum width=1.24cm] (aic_mte2) at (1.10, 6.80) {\textbf{MTE2}\\{\tiny $Q_{\mathsf{aic}}(\mathsf{MTE2})$}};
+\node[queue=aicBorder, minimum width=1.24cm] (aic_mte1) at (2.65, 6.80) {\textbf{MTE1}\\{\tiny $Q_{\mathsf{aic}}(\mathsf{MTE1})$}};
+\node[queue=aicBorder, minimum width=1.24cm] (aic_m)    at (4.20, 6.80) {\textbf{M}\\{\tiny $Q_{\mathsf{aic}}(\mathsf{M})$}};
+\node[queue=aicBorder, minimum width=1.24cm] (aic_fix)  at (5.75, 6.80) {\textbf{FIX}\\{\tiny $Q_{\mathsf{aic}}(\mathsf{FIX})$}};
+
+% Scalar -> AIC queues
+\foreach \q in {aic_mte2,aic_mte1,aic_m,aic_fix}{
+  \draw[issuearr] (\q.north |- 0,8.02) -- (\q.north);
+}
+
+% Intra-AIC L_H arrows (separated anchors)
+\draw[localarr] ([xshift=3pt]aic_mte2.south) -- ++(0,-0.25) -| ([xshift=-4pt]aic_mte1.south);
+\draw[localarr] ([xshift=4pt]aic_mte1.south) -- ++(0,-0.25) -| ([xshift=-4pt]aic_m.south);
+\draw[localarr] ([xshift=4pt]aic_m.south)    -- ++(0,-0.25) -| ([xshift=-3pt]aic_fix.south);
+\node[fill=aicFill, inner sep=1pt, text=syncLocal, font=\scriptsize] at (3.43, 5.75)
+  {$L_{\mathcal H}$：流内 \kw{setflag}/\kw{waitflag}（令牌 $\varphi_{\mathsf{aic}}$）};
+
+% AIC Private On-Chip Memory
+\draw[membox={aicBorder}{aicMem}] (0.48, 4.48) rectangle (6.38, 5.36);
+\node[align=center, font=\scriptsize, text=aicBorder!85!black] at (3.43, 4.92)
+  {\textbf{AIC 私有空间}：$\{\mathsf{L1},\,\mathsf{L0A},\,\mathsf{L0B},\,\mathsf{L0C}\}$\\
+   地址 $(\mathsf{aic}, m, z)$};
+
+% --- Right Top: AIV_1 Stream ---
+\draw[draw=aivBorder, fill=aivFill, rounded corners=3pt, thick] (8.68, 4.95) rectangle (14.96, 9.20);
+\node[anchor=west, text=aivBorder!90!black] at (8.85, 8.92)
+  {\textbf{流 $s=\mathsf{aiv}_1$}\;（$\mathsf{kind}(\mathsf{aiv}_1)=\mathsf{AIV}$）};
+
+% AIV_1 Scalar(S)
+\draw[scalarbox] (8.88, 8.02) rectangle (14.76, 8.64);
+\node[font=\scriptsize] at (11.82, 8.33)
+  {\textbf{Scalar ($\mathsf{S}$) 发射者}\; $(C_{\mathsf{aiv}_1},\,\rho_{\mathsf{aiv}_1})$};
+
+% AIV_1 Queues
+\node[queue=aivBorder, minimum width=1.62cm] (aiv1_mte2) at (9.69, 6.80)  {\textbf{MTE2}\\{\tiny $Q_{\mathsf{aiv}_1}(\mathsf{MTE2})$}};
+\node[queue=aivBorder, minimum width=1.62cm] (aiv1_v)    at (11.82, 6.80) {\textbf{V}\\{\tiny $Q_{\mathsf{aiv}_1}(\mathsf{V})$}};
+\node[queue=aivBorder, minimum width=1.62cm] (aiv1_mte3) at (13.95, 6.80) {\textbf{MTE3}\\{\tiny $Q_{\mathsf{aiv}_1}(\mathsf{MTE3})$}};
+
+\foreach \q in {aiv1_mte2,aiv1_v,aiv1_mte3}{
+  \draw[issuearr] (\q.north |- 0,8.02) -- (\q.north);
+}
+
+% Barrier_H marker on AIV_1 (V queue + ALL line)
+\draw[draw=syncBar, very thick] (12.34, 6.47) -- (12.34, 7.13);
+\draw[draw=syncBar, very thick] (12.44, 6.47) -- (12.44, 7.13);
+\draw[draw=syncBar, densely dotted, thick] (8.88, 6.26) -- (14.76, 6.26);
+\node[fill=aivFill, inner sep=1pt, text=syncBar, font=\tiny] at (12.88, 6.26) {\kw{bar}[$\mathsf{ALL}$]};
+
+% Intra-AIV_1 L_H arrows (separated anchors)
+\draw[localarr] ([xshift=4pt]aiv1_mte2.south) -- ++(0,-0.32) -| ([xshift=-5pt]aiv1_v.south);
+\draw[localarr] ([xshift=5pt]aiv1_v.south)    -- ++(0,-0.32) -| ([xshift=-4pt]aiv1_mte3.south);
+\node[fill=aivFill, inner sep=1pt, text=syncLocal, font=\scriptsize] at (11.82, 5.86)
+  {$L_{\mathcal H}\ (\varphi_{\mathsf{aiv}_1})$\; /\; \color{syncBar}$\mathsf{Barrier}_{\mathcal H}$};
+
+% AIV_1 Private UB
+\draw[membox={aivBorder}{aivMem}] (8.88, 5.10) rectangle (14.76, 5.64);
+\node[font=\scriptsize, text=aivBorder!85!black] at (11.82, 5.37)
+  {\textbf{$\mathsf{aiv}_1$ 私有 $\mathsf{UB}$}：地址 $(\mathsf{aiv}_1, \mathsf{UB}, z)$};
+
+% --- Right Bottom: AIV_2 Stream ---
+\draw[draw=aivBorder, fill=aivFill, rounded corners=3pt, thick] (8.68, 0.28) rectangle (14.96, 4.53);
+\node[anchor=west, text=aivBorder!90!black] at (8.85, 4.25)
+  {\textbf{流 $s=\mathsf{aiv}_2$}\;（$\mathsf{kind}(\mathsf{aiv}_2)=\mathsf{AIV}$）};
+
+% AIV_2 Scalar(S)
+\draw[scalarbox] (8.88, 3.35) rectangle (14.76, 3.97);
+\node[font=\scriptsize] at (11.82, 3.66)
+  {\textbf{Scalar ($\mathsf{S}$) 发射者}\; $(C_{\mathsf{aiv}_2},\,\rho_{\mathsf{aiv}_2})$};
+
+% AIV_2 Queues
+\node[queue=aivBorder, minimum width=1.62cm] (aiv2_mte2) at (9.69, 2.21)  {\textbf{MTE2}\\{\tiny $Q_{\mathsf{aiv}_2}(\mathsf{MTE2})$}};
+\node[queue=aivBorder, minimum width=1.62cm] (aiv2_v)    at (11.82, 2.21) {\textbf{V}\\{\tiny $Q_{\mathsf{aiv}_2}(\mathsf{V})$}};
+\node[queue=aivBorder, minimum width=1.62cm] (aiv2_mte3) at (13.95, 2.21) {\textbf{MTE3}\\{\tiny $Q_{\mathsf{aiv}_2}(\mathsf{MTE3})$}};
+
+\foreach \q in {aiv2_mte2,aiv2_v,aiv2_mte3}{
+  \draw[issuearr] (\q.north |- 0,3.35) -- (\q.north);
+}
+
+\draw[draw=syncBar, very thick] (12.34, 1.88) -- (12.34, 2.54);
+\draw[draw=syncBar, very thick] (12.44, 1.88) -- (12.44, 2.54);
+\draw[localarr] ([xshift=4pt]aiv2_mte2.south) -- ++(0,-0.28) -| ([xshift=-5pt]aiv2_v.south);
+\draw[localarr] ([xshift=5pt]aiv2_v.south)    -- ++(0,-0.28) -| ([xshift=-4pt]aiv2_mte3.south);
+\node[fill=aivFill, inner sep=1pt, text=syncLocal, font=\scriptsize] at (11.82, 1.28)
+  {$L_{\mathcal H}\ (\varphi_{\mathsf{aiv}_2})$\; /\; \color{syncBar}$\mathsf{Barrier}_{\mathcal H}$};
+
+% AIV_2 Private UB
+\draw[membox={aivBorder}{aivMem}] (8.88, 0.45) rectangle (14.76, 0.99);
+\node[font=\scriptsize, text=aivBorder!85!black] at (11.82, 0.72)
+  {\textbf{$\mathsf{aiv}_2$ 私有 $\mathsf{UB}$}：$(\mathsf{aiv}_2, \mathsf{UB}, z)$（与 $\mathsf{aiv}_1$ 隔离）};
+
+% --- GM <-> Streams DMA links ---
+\draw[->, >=Stealth, draw=gmBorder, thick] (1.10, 10.45) -- (1.10, 9.20);
+\node[right, font=\tiny, text=gmBorder!85!black] at (1.12, 10.08) {MTE2};
+\draw[->, >=Stealth, draw=gmBorder, thick] (5.75, 9.20) -- (5.75, 10.45);
+\node[left, font=\tiny, text=gmBorder!85!black] at (5.73, 10.08) {FIX};
+\draw[->, >=Stealth, draw=gmBorder, thick] (9.69, 10.45) -- (9.69, 9.20);
+\node[right, font=\tiny, text=gmBorder!85!black] at (9.71, 10.08) {MTE2};
+\draw[->, >=Stealth, draw=gmBorder, thick] (13.95, 9.20) -- (13.95, 10.45);
+\node[right, font=\tiny, text=gmBorder!85!black] at (13.97, 10.08) {MTE3};
+% Right-margin bus to AIV_2
+\draw[dmaarr] (15.18, 10.45) |- (14.96, 2.21);
+\node[rotate=90, font=\tiny, text=gmBorder!85!black, fill=coreBg, inner sep=1pt] at (15.18, 4.74) {GM 访存};
+
+% --- Cross-Core 1:2 Broadcast B_H ---
+\coordinate (bcast) at (7.63, 6.80);
+\draw[draw=syncCross, very thick] (aic_fix.east) -- (bcast);
+\fill[syncCross] (bcast) circle (2.2pt);
+\draw[crossarr] (bcast) |- (8.88, 8.33);
+\draw[crossarr] (bcast) |- (8.88, 3.66);
+\draw[crossalt] (bcast) -- (aiv1_mte2.west);
+
+\node[fill=coreBg, draw=syncCross!50, rounded corners=2pt, inner sep=2.5pt, align=center, font=\scriptsize, text=syncCross] at (7.63, 5.20)
+  {\textbf{$B_{\mathcal H}$ 跨核 1:2}\\$\beta_{\mathsf{aiv}_1},\,\beta_{\mathsf{aiv}_2}$};
+\node[fill=coreBg, inner sep=1pt, font=\tiny, text=syncCross] at (8.20, 8.53) {$q=\mathsf{S}$};
+\node[fill=coreBg, inner sep=1pt, font=\tiny, text=syncCross] at (8.20, 3.86) {$q=\mathsf{S}$};
+\node[fill=coreBg, inner sep=1pt, font=\tiny, text=syncCross] at (8.25, 7.02) {$q\ne\mathsf{S}$};
+
+% --- Bottom Left: Legend / Parameter Mapping ---
+\draw[draw=coreBorder, fill=white, rounded corners=3pt] (0.28, 0.28) rectangle (6.58, 3.95);
+\node[anchor=west, font=\scriptsize\bfseries, text=scalarBorder] at (0.45, 3.66)
+  {图例：硬件参数类型与形式化抽象对应};
+\draw[draw=coreBorder!60] (0.42, 3.44) -- (6.44, 3.44);
+
+% Legend rows
+\filldraw[fill=gmFill, draw=gmBorder] (0.48, 3.04) rectangle (0.90, 3.26);
+\node[anchor=west, font=\scriptsize] at (1.00, 3.15) {共享空间 $\mathsf{SharedSpace}_{\mathcal H}$：$\mathsf{GM}$，$(m,z)$};
+
+\filldraw[fill=aicFill, draw=aicBorder] (0.48, 2.60) rectangle (0.67, 2.82);
+\filldraw[fill=aivFill, draw=aivBorder] (0.71, 2.60) rectangle (0.90, 2.82);
+\node[anchor=west, font=\scriptsize] at (1.00, 2.71) {核类 $\mathsf{CoreKind}$ / 流 $s\in\kappa$：私有 $(s,m,z)$};
+
+\filldraw[fill=scalarFill, draw=scalarBorder] (0.48, 2.16) rectangle (0.90, 2.38);
+\node[anchor=west, font=\scriptsize] at (1.00, 2.27) {标量发射者 $(C_s,\rho_s)$：控制流与 \kw{alloc} ($\mathsf{S}$)};
+
+\filldraw[fill=white, draw=scalarBorder] (0.48, 1.72) rectangle (0.90, 1.94);
+\node[anchor=west, font=\scriptsize] at (1.00, 1.83) {管道队列 $Q_s(p)$：$p\in\mathsf{Pipe}_d$，异步乱序完成};
+
+\draw[localarr] (0.46, 1.39) -- (0.92, 1.39);
+\node[anchor=west, font=\scriptsize] at (1.00, 1.39) {流内同步 $L_{\mathcal H}$：\kw{setflag}/\kw{waitflag}（令牌 $\varphi_s$）};
+
+\draw[draw=syncBar, very thick] (0.64, 0.84) -- (0.64, 1.08);
+\draw[draw=syncBar, very thick] (0.74, 0.84) -- (0.74, 1.08);
+\node[anchor=west, font=\scriptsize] at (1.00, 0.96) {流内屏障 $\mathsf{Barrier}_{\mathcal H}$：\kw{pipebarrier}$[p]$ 或 $\mathsf{ALL}$};
+
+\draw[crossarr] (0.46, 0.54) -- (0.92, 0.54);
+\node[anchor=west, font=\scriptsize] at (1.00, 0.54) {跨核同步 $B_{\mathcal H}$：\kw{syncblock} 1:2 广播（$\beta_t$）};
+
+\end{tikzpicture}
+\caption{静态硬件配置与形式化抽象的对应（以 Ascend 910B $1{:}2$ 配置为例）：共享内存 $\mathsf{SharedSpace}_{\mathcal H}$、核类与私有地址空间 $\mathsf{Loc}_{s,m}$、数据管道 $\mathsf{Pipe}_d$ 及三类同步关系 $L_{\mathcal H},B_{\mathcal H},\mathsf{Barrier}_{\mathcal H}$。}
+\label{fig:arch-mapping}
+
+\vspace{0.45cm}
+
+\begin{tikzpicture}[
+  x=1cm, y=0.88cm,
+  font=\footnotesize,
+  panel/.style 2 args={draw=#1, fill=#2, rounded corners=3pt, thick},
+  openitem/.style={draw=aivBorder, fill=aivFill, rounded corners=2pt, minimum height=0.64cm, inner sep=2pt, align=center, font=\scriptsize},
+  blockeditem/.style={draw=coreBorder, fill=scalarFill, rounded corners=2pt, minimum height=0.64cm, inner sep=2pt, align=center, font=\scriptsize, text=scalarBorder},
+  syncitem/.style={draw=syncLocal, fill=aicFill, rounded corners=2pt, minimum height=0.64cm, inner sep=2pt, align=center, font=\scriptsize, text=syncLocal},
+  baritem/.style={draw=syncBar, fill=red!6, rounded corners=2pt, minimum height=0.64cm, inner sep=2pt, align=center, font=\scriptsize, text=syncBar},
+  crossitem/.style={draw=syncCross, fill=syncCross!10, rounded corners=2pt, minimum height=0.64cm, inner sep=2pt, align=center, font=\scriptsize, text=syncCross},
+  steparr/.style={->, >=Stealth, semithick}
+]
+
+% --- Left Column: Instruction Stream C_s ---
+\draw[panel={scalarBorder}{coreBg}] (0, 0) rectangle (4.35, 8.75);
+\node[anchor=west, font=\scriptsize\bfseries, text=scalarBorder] at (0.18, 8.42)
+  {单条指令流 $s$：控制端 $(C_s,\rho_s)$};
+\draw[draw=coreBorder!70] (0.15, 8.14) -- (4.20, 8.14);
+
+\node[draw=scalarBorder, fill=white, rounded corners=2pt, text width=3.75cm, align=left, font=\scriptsize, inner sep=3.5pt] (cmd1) at (2.175, 7.12)
+  {\textbf{1. 标量 / 分配 / 控制}\\
+   \kw{let}\ $x=\kw{scalar}[g](\bar v)$\\
+   \kw{let}\ $x=\kw{alloc}[m](\bar v)$\\
+   \kw{if} / \kw{for}（立即更新 $\rho_s,\mu$）};
+
+\node[draw=aicBorder, fill=aicFill!70, rounded corners=2pt, text width=3.75cm, align=left, font=\scriptsize, inner sep=3.5pt] (cmd2) at (2.175, 4.72)
+  {\textbf{2. 异步发射（非阻塞）}\\
+   \kw{issue}$[p](f,\bar v)$\\
+   \kw{setflag} / \kw{waitflag} / \kw{pipebarrier}\\
+   \kw{syncblockset} / \kw{bwait}($q\!\ne\!\mathsf S$)\\
+   \color{aicBorder!90!black}$\Rightarrow$ 追加至队尾，控制立即继续};
+
+\node[draw=syncCross, fill=syncCross!8, rounded corners=2pt, text width=3.75cm, align=left, font=\scriptsize, inner sep=3.5pt] (cmd3) at (2.175, 2.28)
+  {\textbf{3. 标量阻塞等待}\\
+   \kw{syncblockwait}$[p,\mathsf S](v)$\\
+   \color{syncCross}$\Rightarrow$ \textsc{Scalar-Wait}：\\
+   阻塞本流控制直至 $\beta_s=1$};
+
+\draw[steparr, draw=scalarBorder] (cmd1.south) -- (cmd2.north);
+\draw[steparr, draw=scalarBorder] (cmd2.south) -- (cmd3.north);
+
+\node[text width=3.95cm, align=center, font=\tiny, text=scalarBorder] at (2.175, 0.65)
+  {全局小步关系 $\longrightarrow_{\mathcal H}$ 交错推进各流 $s\in\kappa$ 的控制步与队列完成步};
+
+% --- Top-Right Panel: Async Pipe Queues Q_s(p) ---
+\draw[panel={aicBorder!75}{white}] (4.80, 2.85) rectangle (15.40, 8.75);
+\node[anchor=west, font=\scriptsize\bfseries, text=aicBorder!90!black] at (4.98, 8.42)
+  {异步管道队列 $Q_s(p)$（队首在左 $\leftarrow$ 移出完成；队尾在右 $\leftarrow$ 发射入队）};
+\draw[draw=aicBorder!35] (4.95, 8.14) -- (15.25, 8.14);
+
+% Queue 1: MTE2
+\node[anchor=west, font=\scriptsize\sffamily\bfseries, text=aivBorder!90!black] at (4.98, 7.82) {$Q_s(\mathsf{MTE2})$};
+\draw[draw=coreBorder!60, fill=coreBg, rounded corners=2pt] (4.98, 6.80) rectangle (14.65, 7.62);
+
+\node[openitem, minimum width=2.45cm] (q1_op1) at (6.32, 7.21) {\kw{op}$_1(R_1,W_1)$\\[-2pt]{\tiny 已打开 $\mathsf{open}$}};
+\node[openitem, minimum width=2.45cm] (q1_op2) at (8.98, 7.21) {\kw{op}$_2(R_2,W_2)$\\[-2pt]{\tiny 已打开（可乱序）}};
+\node[syncitem, minimum width=2.75cm] (q1_set) at (11.78, 7.21) {\kw{set}$(\mathsf V,\varepsilon)$\\[-2pt]{\tiny 须到队首且 $\varphi_s{=}0$}};
+\node[font=\tiny, text=aicBorder!90!black] at (13.95, 7.21) {$\leftarrow$ 入队};
+
+% Queue 2: V
+\node[anchor=west, font=\scriptsize\sffamily\bfseries, text=aivBorder!90!black] at (4.98, 6.26) {$Q_s(\mathsf{V})$};
+\draw[draw=coreBorder!60, fill=coreBg, rounded corners=2pt] (4.98, 5.24) rectangle (14.65, 6.06);
+
+\node[openitem, minimum width=1.60cm]    (q2_opa)  at (5.90, 5.65) {\kw{op}$_a$\\[-2pt]{\tiny 已打开}};
+\node[syncitem, minimum width=2.15cm]    (q2_wait) at (7.92, 5.65) {\kw{wait}$(\mathsf{MTE2},\varepsilon)$\\[-2pt]{\tiny $\mathsf{open}(U)\land\varphi_s{=}1$}};
+\node[blockeditem, minimum width=1.65cm] (q2_opb)  at (9.96, 5.65) {\kw{op}$_b$\\[-2pt]{\tiny 被 \kw{wait} 遮挡}};
+\node[baritem, minimum width=1.22cm]     (q2_bar)  at (11.54, 5.65) {\kw{bar}\\[-2pt]{\tiny 须到队首}};
+\node[blockeditem, minimum width=1.55cm] (q2_opc)  at (13.06, 5.65) {\kw{op}$_c$\\[-2pt]{\tiny 被 \kw{bar} 遮挡}};
+\node[font=\tiny, text=aicBorder!90!black] at (14.24, 5.65) {$\leftarrow$};
+
+% Queue 3: FIX
+\node[anchor=west, font=\scriptsize\sffamily\bfseries, text=aicBorder!90!black] at (4.98, 4.70) {$Q_{\mathsf{aic}}(\mathsf{FIX})$};
+\draw[draw=coreBorder!60, fill=coreBg, rounded corners=2pt] (4.98, 3.68) rectangle (14.65, 4.50);
+
+\node[openitem, minimum width=2.45cm]  (q3_op)   at (6.32, 4.09) {\kw{op}$(\kw{Fixpipe})$\\[-2pt]{\tiny 已打开 $\mathsf{open}$}};
+\node[crossitem, minimum width=3.85cm] (q3_bset) at (9.75, 4.09) {\kw{bset}$(\mathsf S,\varepsilon')$\\[-2pt]{\tiny 到队首且 $\forall t\in T.\,\beta_t{=}0$}};
+\node[font=\tiny, text=aicBorder!90!black] at (13.95, 4.09) {$\leftarrow$ 入队};
+
+% Rule highlight bar inside Queue panel (compact left block, leaves right clear for bset arrow)
+\node[anchor=west, text width=7.55cm, align=left, font=\tiny, text=scalarBorder] at (4.98, 3.22)
+  {\textcolor{aivBorder}{\textbf{绿底（已打开）}}：前缀不含 \kw{wait}/\kw{bwait}/\kw{bar}，可乱序 \textsc{Op-Done}；\\
+   \textcolor{scalarBorder}{\textbf{灰底（未打开）}}：被前方 \kw{wait}/\kw{bar} 遮挡，不可提前完成。};
+
+% --- Clean Enqueue Bus: cmd2 -> right (tail) of queues along top-right spine ---
+\draw[draw=aicBorder, semithick] (cmd2.east) -- (4.58, 4.72) |- (4.58, 8.95) -- (15.02, 8.95) -- (15.02, 4.09);
+\draw[steparr, draw=aicBorder] (15.02, 7.21) -- (14.65, 7.21);
+\draw[steparr, draw=aicBorder] (15.02, 5.65) -- (14.65, 5.65);
+\draw[steparr, draw=aicBorder] (15.02, 4.09) -- (14.65, 4.09);
+\node[fill=white, inner sep=1.5pt, font=\tiny, text=aicBorder!90!black] at (9.90, 8.95)
+  {\textsc{Issue} / \textsc{Sync-Issue} / \textsc{Barrier-Issue}（非阻塞追加至目标队列队尾）};
+
+% --- Bottom Right: Shared State (Memory + Tokens) ---
+% Shared Memory Box
+\draw[panel={gmBorder}{gmFill}] (4.80, 0) rectangle (10.10, 2.15);
+\node[anchor=west, font=\scriptsize\bfseries, text=gmBorder!85!black] at (4.96, 1.86)
+  {共享内存 $\mu:\mathsf{Loc}\rightharpoonup\mathsf{Val}\uplus\{\mathsf{Uninit}\}$};
+\draw[draw=gmBorder!35] (4.94, 1.64) -- (9.96, 1.64);
+\node[anchor=north west, text width=4.95cm, align=left, font=\tiny, text=gmBorder!65!black] at (4.96, 1.56)
+  {\textbullet\;\textsc{Alloc}：新鲜集 $A\cap\mathrm{dom}(\mu)=\varnothing$，置 $\mathsf{Uninit}$\\[2pt]
+   \textbullet\;\textsc{Op-Done}：检查 $R\cup W\subseteq\mathrm{dom}(\mu)\cap\mathsf{Loc}_s$，更新 $\mu\oplus\delta$\\[2pt]
+   \textbullet\;\textcolor{syncBar}{\textbf{Data Race}}：两已打开 \kw{op} 的 $(R,W)$ 足迹冲突};
+
+% Token Pool Box
+\draw[panel={syncCross!80}{syncCross!5}] (10.42, 0) rectangle (15.40, 2.15);
+\node[anchor=west, font=\scriptsize\bfseries, text=syncCross] at (10.58, 1.86)
+  {同步令牌状态（初始全 $0$）};
+\draw[draw=syncCross!30] (10.56, 1.64) -- (15.26, 1.64);
+\node[anchor=north west, text width=4.65cm, align=left, font=\tiny, text=scalarBorder] at (10.58, 1.56)
+  {\textbullet\;\textcolor{syncLocal}{\textbf{流内 $\varphi_s$}}：\textsc{Set-Done} 置 $1$，\textsc{Wait-Done} 清 $0$\\[3pt]
+   \textbullet\;\textcolor{syncCross}{\textbf{跨核 $\beta_t$}}：\textsc{Block-Set} 置全 $t\in T$ 为 $1$；\\
+   \quad 各流 \textsc{Scalar}/\textsc{Block-Wait} 独立清 $0$};
+
+% --- Semantic flow links (clean corridor at y = 2.50, zero box/text crossing) ---
+% Op-Done -> Memory
+\draw[steparr, draw=gmBorder, densely dashed] (5.55, 2.85) -- (5.55, 2.15);
+\node[right, font=\tiny, text=gmBorder!85!black] at (5.58, 2.33) {\textsc{Op-Done}};
+% Intra-stream set -> wait (inside Queue panel, routed between Q1 and Q2)
+\draw[steparr, draw=syncLocal, densely dashed] (q1_set.south) -- ++(0,-0.32) -| (q2_wait.north);
+\node[fill=white, inner sep=1pt, font=\tiny, text=syncLocal] at (10.45, 6.46) {$\varphi_s=1$};
+% Cross-core bset -> Token Pool (routed cleanly down right-side open space)
+\draw[steparr, draw=syncCross, thick] (q3_bset.east) -- (12.90, 4.09) -- (12.90, 2.15);
+\node[fill=white, inner sep=1pt, font=\tiny, text=syncCross] at (13.95, 2.52) {\textsc{Block-Set} ($\beta_t\gets 1$)};
+% Token Pool -> Scalar-Wait (routed along clean upper corridor y = 2.60 to cmd3.east!)
+\draw[steparr, draw=syncCross, thick] (10.42, 1.92) -- (10.26, 1.92) |- (4.35, 2.60);
+\node[fill=white, inner sep=1pt, font=\tiny, text=syncCross] at (8.35, 2.60) {$\beta_s=1$ 唤醒};
+
+\end{tikzpicture}
+\caption{小步操作语义的动态执行模型（与具体芯片拓扑解耦）：标量控制端将异步操作与同步原语非阻塞地追加到各管道队列 $Q_s(p)$ 队尾（仅 \textsc{Scalar-Wait} 阻塞控制端）；队列中满足 $\mathsf{open}(U)$ 的普通操作可乱序完成并原子读写 $\mu$，\kw{set}/\kw{bset}/\kw{bar} 须位于队首方可完成并更新令牌 $\varphi_s,\beta_t$。}
+\label{fig:opsem-exec}
+\end{figure}
 
 \section{状态与参数}
 
@@ -404,6 +701,8 @@ $\beta_t(p,q,\varepsilon)\in\{0,1\}$
 \midrule
 $\mathsf{eval}_{\mathcal H}(s,g,\bar\nu)=\nu$
  & 标量与视图构造的部分求值函数；成功结果符合签名 $\Delta_{\mathcal H}$。\\
+$\mathsf{alloc}_{\mathcal H}(s,m,\bar\nu,A,\nu)$
+ & 在空间 $m$ 中按维度参数 $\bar\nu$ 分配有限具体地址集 $A\subseteq\mathsf{Loc}_{s,m}$ 并给出对应视图 $\nu$ 的关系；参数非法或超容量时为空。\\
 $\mathsf{foot}_{\mathcal H}(s,p,f,\bar\nu)=(R,W)$
  & 将实际 view 解释为有限读区 $R$ 与写区 $W$，包含寻址、布局及别名信息。\\
 $F_{\mathcal H}(s,p,f,\bar\nu,\mu|_R,\delta)$
@@ -430,8 +729,23 @@ $\mathsf{Targets}_{\mathcal H}(s,p,q)$
   & =\{t\in\kappa\mid(s,p,t,q)\in B_{\mathcal H}\}.
 \end{aligned}
 \]
+\begin{center}\small
+\begin{tabularx}{\linewidth}{@{}l l Y c@{}}
+\toprule
+队列项 $\iota$ & 来源与所在队列 & 完成条件与效果 & 遮挡后续 \\
+\midrule
+$\kw{op}(f,\bar\nu,R,W)$ & $\kw{issue}[p]\to Q_s(p)$ & $\mathsf{open}(U)$，原子读 $\mu|_R$ 并写 $\mu\oplus\delta$ & 否 \\
+$\kw{set}(q,\varepsilon)$ & $\kw{setflag}[p,q]\to Q_s(p)$ & 队首且 $\varphi_s(p,q,\varepsilon)=0$，置为 $1$ & 否 \\
+$\kw{wait}(p,\varepsilon)$ & $\kw{waitflag}[p,q]\to Q_s(q)$ & $\mathsf{open}(U)$ 且 $\varphi_s(p,q,\varepsilon)=1$，清为 $0$ & 是 \\
+$\kw{bar}$ & $\kw{pipebarrier}[p]\to Q_s(p)$（$\mathsf{ALL}$ 入全队列） & 队首直接移出（排空前序操作） & 是 \\
+$\kw{bset}(q,\varepsilon)$ & $\kw{syncblockset}[p,q]\to Q_s(p)$ & 队首且 $\forall t\in T.\,\beta_t=0$，全置为 $1$ & 否 \\
+$\kw{bwait}(p,\varepsilon)$ & $\kw{syncblockwait}[p,q]$（$q\ne\mathsf S$）$\to Q_s(q)$ & $\mathsf{open}(U)$ 且本流 $\beta_s=1$，清为 $0$ & 是 \\
+\bottomrule
+\end{tabularx}
+\end{center}
+$\kw{syncblockwait}[p,\mathsf S]$ 不入队，直接由 \textsc{Scalar-Wait} 阻塞控制端。
 队列保留实际操作数 $\bar\nu$，以保留足迹集合无法表达的复制对应、步幅和标量参数。
-块同步令牌初值为 $0$；置位通知各接收流，等待只消费本流的令牌。
+初始状态 $\sigma_0$ 中，各条流的队列 $Q_s$ 均为空，所有流内令牌 $\varphi_s$ 与块同步令牌 $\beta_t$ 初值均为 $0$，初始内存 $\mu_0$ 包含核启动前由外部传入的已分配输入输出存储区；块置位通知各接收流，等待只消费本流的令牌。
 
 执行配置与小步关系为
 \[
@@ -470,13 +784,17 @@ $\sigma[X\mapsto a]$ 仅更新分量 $X$，未列出的分量保持不变。
  {\langle\kw{let}\ x=\kw{scalar}[g](\bar v)\ \kw{in}\ C,\sigma\rangle
  \xrightarrow{s}_{\mathcal H}\langle C,\sigma[\rho_s\mapsto\rho[x\mapsto\nu]]\rangle}
  \;\textsc{Scalar}\\[1em]
+\infer{\rho(\bar v)=\bar\nu\quad\mathsf{alloc}_{\mathcal H}(s,m,\bar\nu,A,\nu)\quad A\cap\mathrm{dom}(\mu)=\varnothing}
+ {\langle\kw{let}\ x=\kw{alloc}[m](\bar v)\ \kw{in}\ C,\sigma\rangle
+ \xrightarrow{s}_{\mathcal H}\langle C,\sigma[\mu\mapsto\mu\uplus(A\mapsto\mathsf{Uninit}),\ \rho_s\mapsto\rho[x\mapsto\nu]]\rangle}
+ \;\textsc{Alloc}\\[1em]
 \infer{\rho(v)=b\quad b\in\{\kw{true},\kw{false}\}}
- {\langle\kw{if}\ v\ \kw{then}\ \{C_{\kw{true}}\}\ \kw{else}\ \{C_{\kw{false}}\},\sigma\rangle
- \xrightarrow{s}_{\mathcal H}\langle C_b,\sigma\rangle}
+ {\langle\kw{if}\ v\ \kw{then}\ \{C_{\kw{true}}\}\ \kw{else}\ \{C_{\kw{false}}\};\ C_3,\sigma\rangle
+ \xrightarrow{s}_{\mathcal H}\langle C'_b\triangleright C_3,\sigma\rangle}
  \;\textsc{Branch}\\[1em]
 \infer{\rho(v_i)=k_i\ (i=1,2,3)\quad\mathsf{more}(k_1,k_2,k_3)}
  {\langle\mathsf{Loop}(x,\bar v,B,C),\sigma\rangle
- \xrightarrow{s}_{\mathcal H}\langle B[k_1/x]\triangleright
+ \xrightarrow{s}_{\mathcal H}\langle B'[k_1/x]\triangleright
  \mathsf{Loop}(x,(k_1+k_3,k_2,k_3),B,C),\sigma\rangle}
  \;\textsc{For-Step}\\[1em]
 \infer{\rho(v_i)=k_i\ (i=1,2,3)\quad k_3\ne0\quad\neg\mathsf{more}(k_1,k_2,k_3)}
@@ -485,14 +803,15 @@ $\sigma[X\mapsto a]$ 仅更新分量 $X$，未列出的分量保持不变。
  \;\textsc{For-Done}
 \end{gathered}
 \]
-\caption{标量控制与循环}
+\caption{标量控制、内存分配与循环}
 \begin{itemize}
+\item $\mu\uplus(A\mapsto\mathsf{Uninit})$ 将新鲜地址集 $A$ 中各单元初始化为 $\mathsf{Uninit}$ 并并入 $\mu$；$A\cap\mathrm{dom}(\mu)=\varnothing$ 保证每次 \kw{alloc} 互不别名。
 \item $\mathsf{Loop}(x,\bar v,B,C)$ 缩写
 $\kw{for}\ x=v_1\ \kw{to}\ v_2\ \kw{step}\ v_3\ \kw{do}\ \{B\};C$；
 $\mathsf{more}(a,b,h)\iff(h>0\land a<b)\lor(h<0\land a>b)$。
-\item \textsc{For-Step} 在进入循环时取定边界和步长，以无捕获代换绑定本轮变量。
-$B\triangleright D$ 将本层的 \kw{end} 替换为 $D$；保留 \kw{return}，递归处理条件分支及后续命令，遇到嵌套循环只处理其后续命令，不进入其循环体。代换与拼接均避免变量捕获。
-\item \kw{return} 没有控制步骤，但已入队操作仍可完成。零步长或未定义的标量求值没有对应控制步骤。
+\item \textsc{Branch} 与 \textsc{For-Step} 拼接续延前均对内层体中局部绑定变量作新鲜 $\alpha$-重命名（记作 $C'_b,B'$），\textsc{For-Step} 另以无捕获代换绑定本轮循环变量 $k_1$。
+$B\triangleright D$ 将本层的 \kw{end} 替换为 $D$；保留 \kw{return}，递归处理后续命令，遇到嵌套 \kw{if} 或 \kw{for} 只替换其续延，不进入其内层分支或循环体。
+\item \kw{return} 与 \kw{end} 没有控制步骤，但已入队操作仍可完成。零步长、未定义标量求值或分配失败没有对应控制步骤。
 \end{itemize}
 \end{figure}
 
@@ -544,6 +863,7 @@ $\kw{syncblockwait}[p,q](v)$，$q\ne\mathsf S$ & $q$ & $\kw{bwait}(p,\varepsilon
 \[
 \begin{gathered}
 \infer{Q_s(p)=U\cdot\kw{op}(f,\bar\nu,R,W)\cdot V\quad\mathsf{open}(U)
+ \quad R\cup W\subseteq\mathrm{dom}(\mu)\cap\mathsf{Loc}_s
  \quad F_{\mathcal H}(s,p,f,\bar\nu,\mu|_R,\delta)}
  {\langle C,\sigma\rangle\xrightarrow{s}_{\mathcal H}
  \langle C,\sigma[\mu\mapsto\mu\oplus\delta,\ Q_s(p)\mapsto U\cdot V]\rangle}
@@ -577,12 +897,24 @@ $\kw{syncblockwait}[p,q](v)$，$q\ne\mathsf S$ & $q$ & $\kw{bwait}(p,\varepsilon
 \begin{itemize}
 \item $U,V$ 为队列序列；$\mathsf{open}(U)$ 表示 $U$ 中不含 \kw{wait}、\kw{bwait} 或 \kw{bar}。
 队列分解指定本次移除的一个位置，即使存在相同队列项也不会一并删除。
-\item \textsc{Op-Done} 原子读取当前读区并提交更新，不检查其他在途操作；普通操作不必位于队首。
+\item \textsc{Op-Done} 要求足迹落在当前流可访问的已分配存储内（$R\cup W\subseteq\mathrm{dom}(\mu)\cap\mathsf{Loc}_s$），原子读取读区并提交更新；普通操作允许队内乱序完成（不必位于队首），以便在缺少 \kw{pipebarrier} 时暴露同管道依赖冲突。
 \item \textsc{Set-Done}、\textsc{Block-Set} 与 \textsc{Barrier-Done} 必须在队首。
 块通知要求所有接收位均已清零；各接收流独立消费自己的位。
 \item 条件不满足时相应规则不启用；这些规则本身不将等待或数据竞争变成错误步骤。
 \end{itemize}
 \end{figure}
+
+\subsection{终止、死锁与数据竞争}
+
+给定可执行配置 $\langle P,\sigma\rangle$（其中 $P=\parallel_{s\in\kappa}s\{C_s\}$），定义三类核心检验性质：
+\begin{itemize}
+\item \textbf{正常终止（Terminated）}：对所有 $s\in\kappa$，$C_s\in\{\kw{return}(\bar v_s),\kw{end}\}$ 且对所有 $p\in\mathsf{Pipe}_{\mathsf{kind}(s)}$ 有 $Q_s(p)=\varepsilon$（基准配对检查另要求无残留未消费的同步令牌 $\varphi=0,\beta=0$）。
+\item \textbf{死锁或卡住（Stuck / Deadlocked）}：$\langle P,\sigma\rangle$ 无法再执行任何一步 $\longrightarrow_{\mathcal H}$，且不满足正常终止条件。
+\item \textbf{数据竞争（Data Race）}：存在位于队列中不同位置且均已打开（各自前缀满足 $\mathsf{open}(U)$）的两条在途操作项 $\kw{op}(f_1,\bar\nu_1,R_1,W_1)$ 与 $\kw{op}(f_2,\bar\nu_2,R_2,W_2)$（可在同一队列、同流不同队列或不同流中），满足
+\[
+(R_1\cap W_2)\cup(W_1\cap R_2)\cup(W_1\cap W_2)\ne\varnothing.
+\]
+\end{itemize}
 \clearpage
 
 \section{与 HIVM 的对应}
@@ -597,6 +929,9 @@ HIVM & 核心形式 & 实例 \\
 \texttt{arith}、视图构造、\texttt{get\_block\_idx}
   & $\kw{scalar}[g]$
   & $\Delta$ 与 $\mathsf{eval}$ \\
+\texttt{memref.alloc}、\texttt{memref.alloca}
+  & $\kw{let}\ x=\kw{alloc}[m](\bar v)$
+  & $\mathsf{alloc}_{\mathcal H}$，分配新鲜地址集并置 $\mathsf{Uninit}$ \\
 \texttt{load}
   & $\kw{issue}[\mathsf{MTE2}](\kw{Copy},\ldots)$
   & $F_{\mathrm{copy}}$，GM 到 UB \\

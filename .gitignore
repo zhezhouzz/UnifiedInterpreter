@@ -34,3 +34,6 @@ rocq/Extraction/unified_semantics.cmo
 *.synctex(busy)
 *.synctex.gz(busy)
 *.xdv
+
+# Generated pretty-printed Core AST files
+*.pretty.core
