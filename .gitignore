@@ -16,6 +16,10 @@ rocq/Extraction/unified_semantics.ml
 rocq/Extraction/unified_semantics.mli
 rocq/Extraction/unified_semantics.cmi
 rocq/Extraction/unified_semantics.cmo
+rocq/Extraction/derived_core_interpreter.ml
+rocq/Extraction/derived_core_interpreter.mli
+rocq/Extraction/derived_core_interpreter.cmi
+rocq/Extraction/derived_core_interpreter.cmo
 
 # lia tactic cache
 .lia.cache

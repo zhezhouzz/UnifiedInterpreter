@@ -60,4 +60,11 @@ CoreLanguage/Axiomatic/Issue316.v
 CoreLanguage/Axiomatic/Issue316Safety.v
 CoreLanguage/Axiomatic/SerializedTrace.v
 CoreLanguage/Axiomatic/Issue316Execution.v
+CoreLanguage/Derived/Refocusing.v
+CoreLanguage/Derived/Automaton.v
+CoreLanguage/Derived/CoreEffects.v
+CoreLanguage/Derived/Handlers.v
+CoreLanguage/Derived/Soundness.v
+CoreLanguage/Derived/DerivedExamples.v
+CoreLanguage/Derived/ExtractDerived.v
 Extraction/Extract.v
