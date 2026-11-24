@@ -269,6 +269,19 @@ sh scripts/check_compiled_kernels.sh
 
 批量脚本更新 `artifacts/kernels/` 和 `examples/kernels/`，检查 24 次执行，结果写入 `reports/compiled-kernels/`。
 
+### FlashAttention IR 变异测试集
+
+测试集按编译降级规则构造了四种变异，分别覆盖 K 转置丢失、V stride 错误、分母归约算子错误和 O tile 地址复用。每种变异都有 HFusion 和 HIVM 版本，配对使用相同的稀疏输入。样本采用 `N=D=128`、非因果和 `host-float64` 配置。
+
+```sh
+python3 scripts/generate_flash_attention_mutations.py --output _build/flash-attention-mutations
+opam exec --switch=unified-interpreter -- dune exec ./attention_test/flash_attention_mutation_test.exe -- _build/flash-attention-mutations
+```
+
+导出的 `manifest.json` 记录基准 IR 的哈希、样本来源、输入路径和补丁路径。`source_expected` 指向正确程序的独立参考。`ir_expected` 指向变体应产生的完整 `O` 和 `log_sum_exp`，或者读回 O 时的 `ReadUninitialized`。回归测试检查基准、变体结果和错误发生的位置，也检查数值变体确实偏离源程序预期。[用例定义](../attention_test/fixtures/flash_attention_mutations.json)
+
+两份输入的 V 都只有 `V[1,0]=1`。基准分数全为零，O 的第 0 列是 `1/128`，`log_sum_exp=log(128)`。丢失 K 转置后，唯一分数为 1 的 key 对应 V 的第 1 行，O 的第 0 列变为 `e/(127+e)`，`log_sum_exp=log(127+e)`。V stride 变异将非零输出移到第 1 列。分母归约变异令分母为 1，O 的第 0 列变为 1，`log_sum_exp=0`。
+
 ## 8. 阅读实现
 
 | 内容 | 文件 |

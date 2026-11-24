@@ -78,3 +78,18 @@
  (libraries attention_runtime)
  (deps fixtures/carried_indirect.mlir ../scripts/attention_frontend.py
   ../scripts/attention_dialects.py ../requirements-attention.txt))
+
+(test
+ (name flash_attention_mutation_test)
+ (modules flash_attention_mutation_test)
+ (libraries attention_runtime extracted_semantics yojson)
+ (deps
+  flash_attention_mutation_test.exe
+  fixtures/flash_attention_mutations.json
+  ../artifacts/flash_attention/ir/hfusion_level.mlir
+  ../artifacts/flash_attention/ir/attention_hivm_compute.mlir
+  ../scripts/attention_frontend.py
+  ../scripts/attention_dialects.py
+  ../requirements-attention.txt)
+ (action
+  (run python3 %{dep:../scripts/generate_flash_attention_mutations.py} --repo-root .. --test %{test})))
