@@ -1,0 +1,524 @@
+{
+  "vector": {
+    "params": [],
+    "body": [
+      {
+        "cmd": "syncblockset",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>",
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<VECTOR>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockset",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>",
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<VECTOR>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockset",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>",
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<VECTOR>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockset",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>",
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<VECTOR>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockset",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>",
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<VECTOR>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockset",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>",
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<VECTOR>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockset",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>",
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<VECTOR>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockset",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>",
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<VECTOR>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockset",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>",
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<VECTOR>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockset",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>",
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<VECTOR>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockset",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>",
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<VECTOR>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockset",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>",
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<VECTOR>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockset",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>",
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<VECTOR>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockset",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>",
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<VECTOR>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockset",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>",
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<VECTOR>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockset",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>",
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<VECTOR>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "return",
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {}
+      }
+    ],
+    "core_kind": "#hivm.func_core_type<AIV>"
+  },
+  "cube": {
+    "params": [],
+    "body": [
+      {
+        "cmd": "syncblockwait",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<CUBE>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockwait",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<CUBE>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockwait",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<CUBE>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockwait",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<CUBE>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockwait",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<CUBE>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockwait",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<CUBE>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockwait",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<CUBE>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockwait",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<CUBE>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockwait",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<CUBE>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockwait",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<CUBE>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockwait",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<CUBE>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockwait",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<CUBE>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockwait",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<CUBE>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockwait",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<CUBE>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockwait",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<CUBE>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "syncblockwait",
+        "p": "V",
+        "q": "S",
+        "event": 6,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "6 : i64",
+          "tcore_type": "#hivm.tcore_type<CUBE>",
+          "tpipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "return",
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {}
+      }
+    ],
+    "core_kind": "#hivm.func_core_type<AIC>"
+  }
+}

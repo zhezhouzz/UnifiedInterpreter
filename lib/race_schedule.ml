@@ -18,6 +18,7 @@ type node = { id : occurrence; phase : phase }
 type pair = { a : int; b : int; addresses : address list }
 type allocation_check = Allocated_after of int list | Unallocated
 type t = {
+  capacity : int;
   nodes : node array;
   allocations : allocation_check array;
   pairs : pair list;
@@ -39,7 +40,7 @@ let allocation_checks nodes =
         | Some (n, size) when offset >= 0 && offset < size -> Option.map (Indices.add n) required
         | _ -> None in
   Array.map (fun node -> match node.phase with
-    | Finish { item = Operation (_, fp); _ } ->
+    | Emit { action = Immediate (Operation (_, fp)); _ } | Finish { item = Operation (_, fp); _ } ->
         let needs = List.fold_left access (Some Indices.empty) fp.reads in
         (match List.fold_left access needs fp.writes with
          | Some needs -> Allocated_after (Indices.elements needs)
@@ -49,7 +50,7 @@ let allocation_checks nodes =
 let conflict_pairs nodes =
   let prior = ref [] and pairs = ref [] in
   Array.iteri (fun b node -> match node.phase with
-    | Finish { item = Operation (_, fp); _ } ->
+    | Emit { action = Immediate (Operation (_, fp)); _ } | Finish { item = Operation (_, fp); _ } ->
         let reads = Addresses.of_list fp.reads and writes = Addresses.of_list fp.writes in
         let touched = Addresses.union reads writes in
         List.iter (fun (a, earlier_reads, earlier_writes) ->
@@ -63,7 +64,8 @@ let conflict_pairs nodes =
     | _ -> ()) nodes;
   List.rev !pairs
 
-let compile ?loop_bound program =
+let compile ?loop_bound ?(capacity=1) program =
+  if capacity < 1 then invalid_arg "flag capacity must be positive";
   if Option.fold ~none:false ~some:(fun bound -> bound < 0) loop_bound then
     invalid_arg "Bug_traces: negative loop bound";
   let unique values = List.length values = List.length (List.sort_uniq compare values) in
@@ -95,10 +97,10 @@ let compile ?loop_bound program =
     if plan.cutoff then cutoffs := !previous :: !cutoffs
   ) program.streams;
   let nodes = Array.of_list (List.rev !nodes) in
-  { nodes; allocations = allocation_checks nodes; pairs = conflict_pairs nodes; cutoffs = !cutoffs }
+  { capacity; nodes; allocations = allocation_checks nodes; pairs = conflict_pairs nodes; cutoffs = !cutoffs }
 
-module Keys = Set.Make (struct type t = key let compare = compare end)
-type state = { seen : Z.t; tokens : Keys.t }
+module Keys = Map.Make (struct type t = key let compare = compare end)
+type state = { seen : Z.t; tokens : int Keys.t }
 let initial = { seen = Z.zero; tokens = Keys.empty }
 let occurred state = Z.testbit state.seen
 let reached state = Option.fold ~none:true ~some:(occurred state)
@@ -119,28 +121,31 @@ let step schedule state n =
   let { id; phase } = schedule.nodes.(n) in
   let advance event tokens =
     Some (event, { seen = Z.logor state.seen (Z.shift_left Z.one n); tokens }) in
-  if occurred state n then None else
+  let count k = Option.value ~default:0 (Keys.find_opt k state.tokens) in
+  let perform event = function
+    | Set keys ->
+        if List.exists (fun k -> count k >= schedule.capacity) keys then None
+        else advance event (List.fold_left (fun m k -> Keys.add k (1 + count k) m) state.tokens keys)
+    | Wait k -> (match count k with
+        | 0 -> None | 1 -> advance event (Keys.remove k state.tokens)
+        | i -> advance event (Keys.add k (i-1) state.tokens))
+    | Bar | Operation _ -> advance event state.tokens in
+  let ready = match schedule.allocations.(n) with
+    | Unallocated -> false | Allocated_after reserves -> List.for_all (occurred state) reserves in
+  if occurred state n || not ready then None else
   match phase with
   | Emit { previous; _ } when not (reached state previous) -> None
   | Emit { action = Scalar_wait k as action; _ } ->
-      if Keys.mem k state.tokens then advance (Issued (id, action)) (Keys.remove k state.tokens)
-      else None
+      perform (Issued (id, action)) (Wait k)
+  | Emit { action = Immediate item as action; _ } -> perform (Issued (id,action)) item
   | Emit { action; _ } -> advance (Issued (id, action)) state.tokens
   | Finish { submit; _ } when not (occurred state submit) -> None
   | Finish { pipe; item; earlier; _ } ->
-      let ready = match schedule.allocations.(n) with
-        | Unallocated -> false | Allocated_after reserves -> List.for_all (occurred state) reserves in
-      if not ready then None else match pending_position schedule state item 0 earlier with
+      match pending_position schedule state item 0 earlier with
       | None -> None
       | Some position ->
           let event = Done { id; pipe; position; item } in
-          match item with
-          | Set keys ->
-              if List.exists (fun k -> Keys.mem k state.tokens) keys then None
-              else advance event (List.fold_left (fun bits k -> Keys.add k bits) state.tokens keys)
-          | Wait k ->
-              if Keys.mem k state.tokens then advance event (Keys.remove k state.tokens) else None
-          | Bar | Operation _ -> advance event state.tokens
+          perform event item
 
 let replay_indices schedule indices =
   List.fold_left_map (fun state n -> match step schedule state n with

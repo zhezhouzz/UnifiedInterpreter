@@ -35,15 +35,17 @@ let encode ?timeout_ms schedule =
   let flag_event k set n =
     let sends, waits = Option.value ~default:([], []) (Hashtbl.find_opt flags k) in
     Hashtbl.replace flags k (if set then n :: sends, waits else sends, n :: waits) in
-  Array.iteri (fun n node -> match node.phase with
+  Array.iteri (fun n node ->
+    (match schedule.allocations.(n) with
+     | Unallocated -> Solver.add solver [Boolean.mk_not ctx present.(n)]
+     | Allocated_after reserves -> List.iter (requires n) reserves);
+    match node.phase with
     | Emit { action; previous } ->
         Option.iter (requires n) previous;
-        (match action with Scalar_wait k -> flag_event k false n | _ -> ())
+        (match action with Scalar_wait k -> flag_event k false n
+         | Immediate (Set keys) -> List.iter (fun k -> flag_event k true n) keys | _ -> ())
     | Finish { item; submit; earlier; _ } ->
         requires n submit;
-        (match schedule.allocations.(n) with
-         | Unallocated -> Solver.add solver [Boolean.mk_not ctx present.(n)]
-         | Allocated_after reserves -> List.iter (requires n) reserves);
         List.iter (fun a -> match item, item_at schedule a with
           | (Set _ | Bar), _ | _, (Wait _ | Bar) -> requires n a
           | _ -> ()) earlier;
@@ -57,7 +59,7 @@ let encode ?timeout_ms schedule =
       if i < Array.length events then requires n events.(i)
       else Solver.add solver [Boolean.mk_not ctx present.(n)] in
     Array.iteri (fun i n -> predecessor n sends i) waits;
-    Array.iteri (fun i n -> if i > 0 then predecessor n waits (i - 1)) sends in
+    Array.iteri (fun i n -> if i >= schedule.capacity then predecessor n waits (i - schedule.capacity)) sends in
   let shared_key sends waits =
     (* 多条流可向同一接收者置位。每个触及该 key 的事件之前，
        已发生的置位次数减去消费次数必须等于该事件所需的令牌值。 *)
@@ -70,7 +72,8 @@ let encode ?timeout_ms schedule =
         if m = n then None else Some (indicator (Boolean.mk_and ctx [present.(m); before m n]))
       ) events) in
       let balance = Arithmetic.mk_sub ctx [count_before sends; count_before waits] in
-      assert_if present.(n) (Boolean.mk_eq ctx balance (int (if List.mem n waits then 1 else 0)))
+      assert_if present.(n) (if List.mem n waits then Arithmetic.mk_gt ctx balance (int 0)
+        else Arithmetic.mk_lt ctx balance (int schedule.capacity))
     ) touches in
   Hashtbl.iter (fun _ (sends, waits) ->
     match List.sort_uniq compare (List.map (fun n -> schedule.nodes.(n).id.stream) sends) with

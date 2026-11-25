@@ -1,0 +1,441 @@
+{
+  "kernel": {
+    "params": [
+      {
+        "id": 0,
+        "type": "memref<32xf32, #hivm.address_space<gm>>"
+      },
+      {
+        "id": 1,
+        "type": "memref<32xf32, #hivm.address_space<gm>>"
+      },
+      {
+        "id": 2,
+        "type": "index"
+      }
+    ],
+    "body": [
+      {
+        "cmd": "scalar",
+        "fn": "arith.constant",
+        "args": [],
+        "results": [
+          3
+        ],
+        "types": [
+          "index"
+        ],
+        "attrs": {
+          "value": "0 : index"
+        }
+      },
+      {
+        "cmd": "scalar",
+        "fn": "arith.constant",
+        "args": [],
+        "results": [
+          4
+        ],
+        "types": [
+          "index"
+        ],
+        "attrs": {
+          "value": "1 : index"
+        }
+      },
+      {
+        "cmd": "scalar",
+        "fn": "arith.constant",
+        "args": [],
+        "results": [
+          5
+        ],
+        "types": [
+          "index"
+        ],
+        "attrs": {
+          "value": "2 : index"
+        }
+      },
+      {
+        "cmd": "scalar",
+        "fn": "arith.constant",
+        "args": [],
+        "results": [
+          6
+        ],
+        "types": [
+          "i64"
+        ],
+        "attrs": {
+          "value": "0 : i64"
+        }
+      },
+      {
+        "cmd": "scalar",
+        "fn": "arith.constant",
+        "args": [],
+        "results": [
+          7
+        ],
+        "types": [
+          "i64"
+        ],
+        "attrs": {
+          "value": "256 : i64"
+        }
+      },
+      {
+        "cmd": "scalar",
+        "fn": "arith.constant",
+        "args": [],
+        "results": [
+          8
+        ],
+        "types": [
+          "i64"
+        ],
+        "attrs": {
+          "value": "512 : i64"
+        }
+      },
+      {
+        "cmd": "scalar",
+        "fn": "hivm.hir.pointer_cast",
+        "args": [
+          6
+        ],
+        "results": [
+          9
+        ],
+        "types": [
+          "memref<32xf32, #hivm.address_space<ub>>"
+        ],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 1, 0>"
+        }
+      },
+      {
+        "cmd": "scalar",
+        "fn": "hivm.hir.pointer_cast",
+        "args": [
+          7
+        ],
+        "results": [
+          10
+        ],
+        "types": [
+          "memref<32xf32, #hivm.address_space<ub>>"
+        ],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 1, 0>"
+        }
+      },
+      {
+        "cmd": "scalar",
+        "fn": "hivm.hir.pointer_cast",
+        "args": [
+          8
+        ],
+        "results": [
+          11
+        ],
+        "types": [
+          "memref<32xf32, #hivm.address_space<ub>>"
+        ],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 1, 0>"
+        }
+      },
+      {
+        "cmd": "for",
+        "args": [
+          3,
+          2,
+          4
+        ],
+        "results": [],
+        "types": [],
+        "attrs": {},
+        "bodies": [
+          [
+            {
+              "cmd": "scalar",
+              "fn": "arith.cmpi",
+              "args": [
+                12,
+                4
+              ],
+              "results": [
+                13
+              ],
+              "types": [
+                "i1"
+              ],
+              "attrs": {
+                "predicate": "0 : i64"
+              }
+            },
+            {
+              "cmd": "scalar",
+              "fn": "arith.cmpi",
+              "args": [
+                12,
+                3
+              ],
+              "results": [
+                14
+              ],
+              "types": [
+                "i1"
+              ],
+              "attrs": {
+                "predicate": "0 : i64"
+              }
+            },
+            {
+              "cmd": "scalar",
+              "fn": "arith.cmpi",
+              "args": [
+                12,
+                5
+              ],
+              "results": [
+                15
+              ],
+              "types": [
+                "i1"
+              ],
+              "attrs": {
+                "predicate": "0 : i64"
+              }
+            },
+            {
+              "cmd": "scalar",
+              "fn": "arith.select",
+              "args": [
+                13,
+                10,
+                9
+              ],
+              "results": [
+                16
+              ],
+              "types": [
+                "memref<32xf32, #hivm.address_space<ub>>"
+              ],
+              "attrs": {}
+            },
+            {
+              "cmd": "scalar",
+              "fn": "arith.select",
+              "args": [
+                15,
+                1,
+                0
+              ],
+              "results": [
+                17
+              ],
+              "types": [
+                "memref<32xf32, #hivm.address_space<gm>>"
+              ],
+              "attrs": {}
+            },
+            {
+              "cmd": "if",
+              "args": [
+                15
+              ],
+              "results": [],
+              "types": [],
+              "attrs": {},
+              "bodies": [
+                [
+                  {
+                    "cmd": "waitflag",
+                    "p": "V",
+                    "q": "MTE2",
+                    "event": 1,
+                    "args": [],
+                    "results": [],
+                    "types": [],
+                    "attrs": {
+                      "set_pipe": "#hivm.pipe<PIPE_V>",
+                      "static_event_id": "#hivm.event<EVENT_ID1>",
+                      "wait_pipe": "#hivm.pipe<PIPE_MTE2>"
+                    }
+                  },
+                  {
+                    "cmd": "end",
+                    "args": [],
+                    "results": [],
+                    "types": [],
+                    "attrs": {}
+                  }
+                ],
+                [
+                  {
+                    "cmd": "end",
+                    "args": [],
+                    "results": [],
+                    "types": []
+                  }
+                ]
+              ],
+              "bindings": [
+                [
+                  []
+                ],
+                [
+                  []
+                ]
+              ]
+            },
+            {
+              "cmd": "issue",
+              "p": "MTE2",
+              "fn": "load",
+              "write_operand": 1,
+              "read_operands": [
+                0
+              ],
+              "args": [
+                17,
+                16
+              ],
+              "results": [],
+              "types": [],
+              "attrs": {
+                "operandSegmentSizes": "array<i32: 1, 1, 0, 0, 0, 0>"
+              }
+            },
+            {
+              "cmd": "setflag",
+              "p": "MTE2",
+              "q": "V",
+              "event": 0,
+              "args": [],
+              "results": [],
+              "types": [],
+              "attrs": {
+                "set_pipe": "#hivm.pipe<PIPE_MTE2>",
+                "static_event_id": "#hivm.event<EVENT_ID0>",
+                "wait_pipe": "#hivm.pipe<PIPE_V>"
+              }
+            },
+            {
+              "cmd": "waitflag",
+              "p": "MTE2",
+              "q": "V",
+              "event": 0,
+              "args": [],
+              "results": [],
+              "types": [],
+              "attrs": {
+                "set_pipe": "#hivm.pipe<PIPE_MTE2>",
+                "static_event_id": "#hivm.event<EVENT_ID0>",
+                "wait_pipe": "#hivm.pipe<PIPE_V>"
+              }
+            },
+            {
+              "cmd": "issue",
+              "p": "V",
+              "fn": "vabs",
+              "write_operand": 1,
+              "read_operands": [
+                0
+              ],
+              "args": [
+                16,
+                11
+              ],
+              "results": [],
+              "types": [],
+              "attrs": {
+                "broadcast": "array<i64>",
+                "operandSegmentSizes": "array<i32: 1, 1, 0>",
+                "transpose": "array<i64>"
+              }
+            },
+            {
+              "cmd": "if",
+              "args": [
+                14
+              ],
+              "results": [],
+              "types": [],
+              "attrs": {},
+              "bodies": [
+                [
+                  {
+                    "cmd": "setflag",
+                    "p": "V",
+                    "q": "MTE2",
+                    "event": 1,
+                    "args": [],
+                    "results": [],
+                    "types": [],
+                    "attrs": {
+                      "set_pipe": "#hivm.pipe<PIPE_V>",
+                      "static_event_id": "#hivm.event<EVENT_ID1>",
+                      "wait_pipe": "#hivm.pipe<PIPE_MTE2>"
+                    }
+                  },
+                  {
+                    "cmd": "end",
+                    "args": [],
+                    "results": [],
+                    "types": [],
+                    "attrs": {}
+                  }
+                ],
+                [
+                  {
+                    "cmd": "end",
+                    "args": [],
+                    "results": [],
+                    "types": []
+                  }
+                ]
+              ],
+              "bindings": [
+                [
+                  []
+                ],
+                [
+                  []
+                ]
+              ]
+            },
+            {
+              "cmd": "end",
+              "args": [],
+              "results": [],
+              "types": [],
+              "attrs": {}
+            }
+          ]
+        ],
+        "bindings": [
+          [
+            [
+              {
+                "id": 12,
+                "type": "index"
+              }
+            ]
+          ]
+        ]
+      },
+      {
+        "cmd": "return",
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {}
+      }
+    ],
+    "core_kind": null
+  }
+}

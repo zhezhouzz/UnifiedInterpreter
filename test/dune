@@ -12,3 +12,46 @@
  (name test_symbolic_races)
  (modules test_symbolic_races)
  (libraries unified_interpreter zarith))
+
+(test
+ (name test_vectorlayout)
+ (modules test_vectorlayout)
+ (libraries unified_interpreter yojson))
+
+(test
+ (name test_race_devices)
+ (modules test_race_devices)
+ (libraries unified_interpreter yojson))
+
+(test
+ (name test_vectorlayout_hivm)
+ (modules test_vectorlayout_hivm)
+ (deps (source_tree ../benchmarks/hivm) (source_tree ../benchmarks/litao))
+ (libraries hivm_trace unified_interpreter))
+
+(test
+ (name test_catalog_hivm)
+ (modules test_catalog_hivm)
+ (deps (source_tree ../benchmarks/hivm) (source_tree ../benchmarks/litao))
+ (libraries hivm_trace unified_interpreter))
+
+(test
+ (name test_hivm_trace)
+ (modules test_hivm_trace)
+ (deps (source_tree ../benchmarks/hivm) (source_tree ../benchmarks/litao)
+       fixtures/hivm_prefix_boundary.ast.json fixtures/hivm_mmad_parts.ast.json
+       fixtures/hivm_nested_load.ast.json)
+ (libraries hivm_trace unified_interpreter))
+
+(test
+ (name test_litao_races)
+ (modules test_litao_races)
+ (deps (source_tree ../benchmarks/litao))
+ (libraries unified_interpreter yojson))
+
+(rule
+ (alias runtest)
+ (deps (source_tree ../benchmarks/litao))
+ (action
+  (run python3 %{dep:../scripts/check_race_benchmarks.py}
+   --exe %{exe:../bin/main.exe} --root ../benchmarks/litao --output race-reports --symbolic)))

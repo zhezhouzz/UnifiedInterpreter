@@ -50,6 +50,11 @@ opam exec --switch=unified-interpreter -- dune exec kernel-example -- --kernel r
 See the [kernel walkthrough](docs/user-guide.md#9-运行两个小型-kernel) for inputs,
 expected results, trace output and the OCaml interface.
 
+Run the archived vectorlayout kernel as a concrete Core Lang device AST with
+`dune exec unified-interpreter -- vectorlayout --variant fail`. The
+[vectorlayout guide](docs/vectorlayout.md) describes the two kernel versions,
+physical store coverage, input tensors and trace replay.
+
 The key design point is that there is **one shallow-embedded program language**.
 Lowering levels are not represented by separate ASTs. Instead, the same program
 is run under a nested stack of non-overlapping algebraic-effect handlers:
@@ -177,6 +182,12 @@ not by `H4`.
   composable state capabilities; see `rocq/README.md`.
 
 ## Run
+
+The race runner accepts `race list`, `race run NAME` and `race replay FILE`.
+See [Core Language race benchmarks](docs/race-benchmarks.md) for the benchmark
+catalog, the concrete BFS and SMT backends, and symbolic loop counts.
+For execution on the original HIVM OCaml AST, see the
+[trace interface and two-load example](docs/trace-interpreter.md).
 
 Use an OCaml 5 switch:
 

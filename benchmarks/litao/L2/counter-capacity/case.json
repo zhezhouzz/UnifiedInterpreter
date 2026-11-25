@@ -1,0 +1,39 @@
+{
+  "id": "counter-capacity",
+  "tier": "L2",
+  "category": "protocol-model",
+  "source_ref": "#852 bounded counter minimal model",
+  "chip_profile": "Ascend910_9382 (reported)",
+  "core_ratio": "1:1",
+  "compile_argv": [
+    "bishengir-opt",
+    "-canonicalize"
+  ],
+  "entry_functions": [
+    "vector",
+    "cube"
+  ],
+  "expected_verdict": {
+    "buggy": "protocol_violation",
+    "fixed": "safe"
+  },
+  "oracle_note": "Hypothesis from reporter: capacity 15. Monitor attempted 16th unconsumed notification. Fixed split 15+1. One sender abstracts the reported fan-in.",
+  "execution": {
+    "streams": [
+      "vector",
+      "cube"
+    ],
+    "initial": {},
+    "kinds": [
+      "AIV",
+      "AIC"
+    ],
+    "targets": {
+      "0": [
+        1
+      ]
+    },
+    "capacity": 15
+  },
+  "semantics_profile": "bounded-counter"
+}

@@ -1,4 +1,5 @@
 (executable
  (public_name unified-interpreter)
  (name main)
- (libraries unified_interpreter))
+ (flags (:standard -open Stdlib))
+ (libraries unified_interpreter hivm_trace))

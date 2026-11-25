@@ -1,0 +1,138 @@
+{
+  "producer": {
+    "params": [],
+    "body": [
+      {
+        "cmd": "syncblockset",
+        "p": "FIX",
+        "q": "S",
+        "event": 0,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>",
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "0 : i64",
+          "tcore_type": "#hivm.tcore_type<CUBE>",
+          "tpipe": "#hivm.pipe<PIPE_FIX>"
+        }
+      },
+      {
+        "cmd": "return",
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {}
+      }
+    ],
+    "core_kind": "#hivm.func_core_type<AIC>"
+  },
+  "consumer": {
+    "params": [],
+    "body": [
+      {
+        "cmd": "scalar",
+        "fn": "arith.constant",
+        "args": [],
+        "results": [
+          0
+        ],
+        "types": [
+          "i64"
+        ],
+        "attrs": {
+          "value": "2 : i64"
+        }
+      },
+      {
+        "cmd": "scalar",
+        "fn": "hivm.hir.get_sub_block_idx",
+        "args": [],
+        "results": [
+          1
+        ],
+        "types": [
+          "i64"
+        ],
+        "attrs": {}
+      },
+      {
+        "cmd": "scalar",
+        "fn": "arith.cmpi",
+        "args": [
+          1,
+          0
+        ],
+        "results": [
+          2
+        ],
+        "types": [
+          "i1"
+        ],
+        "attrs": {
+          "predicate": "2 : i64"
+        }
+      },
+      {
+        "cmd": "if",
+        "args": [
+          2
+        ],
+        "results": [],
+        "types": [],
+        "attrs": {},
+        "bodies": [
+          [
+            {
+              "cmd": "syncblockwait",
+              "p": "FIX",
+              "q": "S",
+              "event": 0,
+              "args": [],
+              "results": [],
+              "types": [],
+              "attrs": {
+                "pipe": "#hivm.pipe<PIPE_S>",
+                "static_flag_id": "0 : i64",
+                "tcore_type": "#hivm.tcore_type<VECTOR>",
+                "tpipe": "#hivm.pipe<PIPE_FIX>"
+              }
+            },
+            {
+              "cmd": "end",
+              "args": [],
+              "results": [],
+              "types": [],
+              "attrs": {}
+            }
+          ],
+          [
+            {
+              "cmd": "end",
+              "args": [],
+              "results": [],
+              "types": []
+            }
+          ]
+        ],
+        "bindings": [
+          [
+            []
+          ],
+          [
+            []
+          ]
+        ]
+      },
+      {
+        "cmd": "return",
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {}
+      }
+    ],
+    "core_kind": "#hivm.func_core_type<AIV>"
+  }
+}

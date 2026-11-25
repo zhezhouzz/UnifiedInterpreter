@@ -1,3 +1,9 @@
+module Device = struct
+  include Device_ast
+  module Value = Device_value
+  module Execution = Device_run
+end
+
 type occurrence = { stream : int; site : int list; iterations : int list }
 type storage = Input of int | Allocated of occurrence
 type address = storage * int
@@ -38,6 +44,7 @@ type action =
   | Submit of int * item
   | Fence of int list
   | Scalar_wait of key
+  | Immediate of item
 
 type event =
   | Issued of occurrence * action
@@ -47,6 +54,9 @@ let integer = function VInt n -> n | _ -> invalid_arg "Core_lang: expected integ
 let lookup env = function Literal v -> v | Var x -> List.assoc x env
 
 type stream_plan = { actions : (occurrence * action) list; cutoff : bool }
+
+let scalar_pipe = -1
+let scalar_endpoint stream pipe = pipe=scalar_pipe && not (List.mem pipe stream.pipes)
 
 (** 每条流的控制序列只取决于入口值和标量计算。End 恢复词法作用域，
     Return 结束整条流。site 的子节点按构造器中的命令顺序编号。 *)
@@ -78,22 +88,24 @@ let stream_plan ?loop_bound program stream =
         next ((x, VView view) :: env) rest
     | Issue (pipe, op, vs, rest) ->
         let access = program.footprint stream.id pipe op (args vs) in
-        issue (Submit (pipe, Operation (op, access)));
+        let item = Operation (op, access) in
+        issue (if scalar_endpoint stream pipe then Immediate item else Submit (pipe, item));
         next env rest
     | Sync (mode, source, target, e, rest) ->
         let flag = match value e with VEvent k -> k | _ -> invalid_arg "Core_lang: expected flag" in
         let key receiver = { block = (mode = BlockSet || mode = BlockWait);
                              receiver; source; target; flag } in
         let action = match mode, target with
-          | LocalSet, Data _ -> Submit (source, Set [key stream.id])
+          | LocalSet, _ ->
+              let item = Set [key stream.id] in
+              if scalar_endpoint stream source then Immediate item else Submit (source, item)
           | BlockSet, _ ->
               let receivers = List.filter_map (fun s ->
                 if program.block_edge stream.id source s.id target then Some (key s.id) else None
               ) program.streams in
               Submit (source, Set receivers)
           | (LocalWait | BlockWait), Data pipe -> Submit (pipe, Wait (key stream.id))
-          | BlockWait, ScalarEnd -> Scalar_wait (key stream.id)
-          | (LocalSet | LocalWait), ScalarEnd -> invalid_arg "Core_lang: local scalar flag" in
+          | (LocalWait | BlockWait), ScalarEnd -> Scalar_wait (key stream.id) in
         issue action;
         next env rest
     | Barrier (b, rest) ->

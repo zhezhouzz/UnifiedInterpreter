@@ -8,6 +8,8 @@ type expr =
   | Mod of expr * int | Eq of expr * expr | Lt of expr * expr
   | Select of expr * expr * expr | Event of expr
   | Input_slice of int * expr * expr
+  | Subview of expr * expr * expr
+  | Remainder of expr * expr
 
 type family = {
   streams : stream list;
@@ -80,6 +82,7 @@ let eval ctx args =
     | Mod (a,m) ->
         if m <= 0 then invalid_arg "symbolic modulo requires a positive divisor";
         Integer (Arithmetic.Integer.mk_mod ctx (number a) (int ctx m))
+    | Remainder (a,b) -> Integer (Arithmetic.Integer.mk_rem ctx (number a) (number b))
     | Lt (a,b) -> Boolean (lt ctx (number a) (number b))
     | Eq (a,b) ->
         (match eval a, eval b with
@@ -87,6 +90,18 @@ let eval ctx args =
          | _ -> raise (Unsupported "equality requires integers, flags or booleans"))
     | Event e -> Flag (number e)
     | Input_slice (s,offset,length) -> View [slice ctx (External s) (number offset) (number length)]
+    | Subview (base,offset,length) ->
+        let start=number offset and length=number length and zero=int ctx 0 in
+        let limit=add ctx start length in
+        let min a b=Boolean.mk_ite ctx (lt ctx a b) a b and max a b=Boolean.mk_ite ctx (lt ctx a b) b a in
+        let sub a b=Arithmetic.mk_sub ctx [a;b] in
+        let _,parts=List.fold_left_map (fun cursor s ->
+          let stop=add ctx cursor s.length in
+          let lo=max cursor start and hi=min stop limit in
+          Boolean.mk_ite ctx s.guard stop cursor,
+          {s with offset=add ctx s.offset (sub lo cursor);length=max zero (sub hi lo)})
+          zero (view (eval base)) in
+        View parts
     | Select (cond,a,b) ->
         let g = boolean (eval cond) in
         let ite = Boolean.mk_ite ctx g in
@@ -132,7 +147,6 @@ let bind family stream value =
     if s = stream.id then (x,value) :: List.remove_assoc x env else env) stream.params family.parameter
 
 let validate family =
-  if family.parameter = [] then invalid_arg "symbolic N needs an entry parameter";
   let ids = List.map (fun s -> s.id) family.streams in
   let unique xs = List.length xs = List.length (List.sort_uniq compare xs) in
   if not (unique ids) then invalid_arg "duplicate stream";

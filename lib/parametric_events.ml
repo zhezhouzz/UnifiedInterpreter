@@ -19,6 +19,7 @@ type site = {
 }
 
 let compile ctx family n =
+  if family.parameter=[] then invalid_arg "symbolic N needs an entry parameter";
   validate family;
   let yes = bool ctx true and zero = int ctx 0 in
   let restrict condition = List.map (fun site ->
@@ -52,7 +53,7 @@ let compile ctx family n =
           restrict ok sites, and_ ctx [ok; falls]
       | Issue (pipe,op,vs,next) ->
           let reads,writes = eval_access ctx family stream.id pipe op (args vs) in
-          then_do [event (Some pipe) (Access (reads,writes))] env next
+          then_do [event (if scalar_endpoint stream pipe then None else Some pipe) (Access (reads,writes))] env next
       | Barrier (b,next) ->
           let pipes = match b with Pipe p -> [p] | All -> stream.pipes in
           then_do (List.map (fun p -> event (Some p) Barrier) pipes) env next
@@ -60,15 +61,14 @@ let compile ctx family n =
           let flag = flag (operand e) in
           let channel receiver = {block = (mode = BlockSet || mode = BlockWait); receiver; source; target; flag} in
           let op = match mode,target with
-            | LocalSet,Data _ -> event (Some source) (Send [channel stream.id])
+            | LocalSet,_ -> event (if scalar_endpoint stream source then None else Some source) (Send [channel stream.id])
             | BlockSet,_ ->
                 let keys = List.filter_map (fun s ->
                   if family.block_edge stream.id source s.id target then Some (channel s.id) else None
                 ) family.streams in
                 event (Some source) (Send keys)
             | (LocalWait | BlockWait),Data p -> event (Some p) (Consume (channel stream.id))
-            | BlockWait,ScalarEnd -> event None (Consume (channel stream.id))
-            | _ -> invalid_arg "local scalar flag" in
+            | (LocalWait | BlockWait),ScalarEnd -> event None (Consume (channel stream.id)) in
           then_do [op] env next
       | Branch (test,a,b,next) ->
           let guard = boolean (operand test) in

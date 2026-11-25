@@ -39,7 +39,7 @@ let exhaustive ~loop_bound p =
     List.iteri (fun i (s, plan) -> match plan.actions with
       | [] -> if plan.cutoff then truncated := true
       | (id, action) :: rest ->
-          let advance ?(allocated = allocated) queues tokens =
+          let advance ?(allocated = allocated) ?(completed = completed) queues tokens =
             let streams = List.mapi (fun j v -> if j = i then s, { plan with actions = rest } else v) streams in
             visit (length + 1) completed streams queues tokens allocated in
           let enqueue queues pipe item =
@@ -50,6 +50,18 @@ let exhaustive ~loop_bound p =
            | Submit (pipe, item) -> advance (enqueue queues pipe item) tokens
            | Fence pipes -> advance (List.fold_left (fun qs pipe -> enqueue qs pipe Bar) queues pipes) tokens
            | Scalar_wait k -> if List.mem k tokens then advance queues (List.filter ((<>) k) tokens)
+           | Immediate (Set ks) -> if List.for_all (fun k -> not (List.mem k tokens)) ks then
+                 advance queues (ks @ tokens)
+           | Immediate (Operation (_,fp)) ->
+               if List.for_all (function Input _,_ -> true | a -> List.mem a allocated) (fp.reads @ fp.writes) then (
+                 List.iter (fun (a,old) ->
+                   let hits = List.sort_uniq compare (List.filter (fun v -> List.mem v (fp.reads @ fp.writes)) old.writes
+                     @ List.filter (fun v -> List.mem v fp.writes) old.reads) in
+                   if hits <> [] then
+                     let size = Option.fold ~none:(length+1) ~some:(fun (_,n) -> min n (length+1))
+                       (Hashtbl.find_opt directions (a,id)) in Hashtbl.replace directions (a,id) (hits,size)) completed;
+                 advance ~completed:((id,fp)::completed) queues tokens)
+           | Immediate (Wait _ | Bar) -> invalid_arg "unexpected scalar operation"
            | Reserve (_, view) -> advance ~allocated:(view @ allocated) queues tokens
            | Control -> advance queues tokens)
     ) streams;
@@ -91,7 +103,8 @@ let validate ?loop_bound p result =
   let directions = Hashtbl.create 16 in
   let check a b addresses trace =
     replay ?loop_bound p trace;
-    let completed = List.filter_map (function Done { id; item = Operation _; _ } -> Some id | _ -> None) trace in
+    let completed = List.filter_map (function Done { id; item = Operation _; _ }
+      | Issued (id,Immediate (Operation _)) -> Some id | _ -> None) trace in
     assert (List.filter (fun id -> id = a || id = b) completed = [a; b]);
     assert (not (Hashtbl.mem directions (a, b)));
     Hashtbl.add directions (a, b) (addresses, List.length trace) in
@@ -110,12 +123,20 @@ let check ?(bound = 3) ?(truncated = false) count p =
     Hashtbl.iter (fun pair info -> assert (Hashtbl.find actual pair = info)) expected
   in
   List.iter (verify ~loop_bound:bound) [Search; Solve];
-  if not cut then verify Solve
+  if not cut then List.iter verify [Search;Solve]
 
 let () =
   let copies rest = copy 0 (view [0]) one (rest (copy 0 one (view [2]) End)) in
   let p = local (copies Fun.id) in
   check 1 p;
+  check 1 (local (write 0 one (write scalar_pipe one End)));
+  let set next = Sync (LocalSet,0,Data 1,flag 0,next) in
+  let counted = local (set (set (Barrier (All,copies Fun.id)))) in
+  List.iter (fun backend ->
+    assert ((generate_bug_traces ~backend counted).races=[]);
+    match (generate_bug_traces ~backend ~capacity:2 counted).races with
+    | [w] -> List.iter (replay ~capacity:2 counted) [w.first_then_second;w.second_then_first]
+    | _ -> assert false) [Search;Solve];
   (match (generate_bug_traces ~loop_bound:0 p).races with
    | [r] ->
        assert (r.conflicts = addresses [1]);
@@ -177,26 +198,7 @@ let () =
 (* #316 每轮从 GM 加载一块 tile，在 Vector 管线上读取所选 UB，
    所有迭代共享输出地址。 *)
 let issue316 ~wait_ready n =
-  let tile i = addresses (List.init 1024 (fun j -> 1024 * i + j)) in
-  let put p q e next = Sync (LocalSet, p, Data q, e, next) in
-  let take p q e next = Sync (LocalWait, p, Data q, e, next) in
-  let calc = Issue (1, 1, [Var 7; Var 3], put 1 0 (Var 6) (Barrier (Pipe 1, End))) in
-  let calc = if wait_ready then take 0 1 (Var 6) calc else calc in
-  let body = Scalar (5, 0, [Var 4],
-    Scalar (6, 1, [Var 5],
-    Scalar (7, 2, [Var 5; Var 1; Var 2],
-    Scalar (8, 3, [Var 4],
-    take 1 0 (Var 6) (copy 0 (Var 8) (Var 7) (put 0 1 (Var 6) calc)))))) in
-  let drain = take 1 0 (flag 0) (take 1 0 (flag 1) (Barrier (All, Return []))) in
-  let cmd = Alloc (1, 0, [int 1024], Alloc (2, 0, [int 1024],
-    put 1 0 (flag 0) (put 1 0 (flag 1) (For (4, int 0, Var 0, int 1, body, drain))))) in
-  let p = program [{ (stream 0 cmd) with params = [0, VInt (Z.of_int n); 3, VView (tile 0)] }] in
-  { p with footprint = (fun _ _ _ -> function
-      | [VView src; VView dst] -> { reads = src; writes = dst }
-      | _ -> invalid_arg "tile operands");
-    scalar_eval = (fun s op args -> match op, args with
-    | 3, [VInt i] -> VView (tile (1 + Z.to_int i))
-    | _ -> p.scalar_eval s op args) }
+  Symbolic.instantiate (Race_benchmarks.issue316 ~wait_ready) (Z.of_int n)
 
 let check_pipeline n =
   let p = issue316 ~wait_ready:true n in
@@ -267,18 +269,7 @@ let () =
     | _ -> assert false
   ) [Search; Solve]
 
-let symbolic_pipeline ~wait_ready =
-  let p = issue316 ~wait_ready 1 in
-  let open Symbolic in
-  let k i = Const (VInt (Z.of_int i)) in
-  { streams = p.streams; parameter = [0,0]; block_edge = p.block_edge;
-    scalar = (fun _ -> function
-      | 0 -> Mod (Arg 0,2)
-      | 1 -> Event (Arg 0)
-      | 2 -> Select (Eq (Arg 0,k 0),Arg 1,Arg 2)
-      | 3 -> Input_slice (0,Mul (k 1024,Add (Arg 0,k 1)),k 1024)
-      | _ -> invalid_arg "tile scalar");
-    access = (fun _ _ _ -> [Arg 0],[Arg 1]) }
+let symbolic_pipeline = Race_benchmarks.issue316
 
 let () =
   let f = symbolic_pipeline ~wait_ready:false in

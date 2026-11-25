@@ -8,8 +8,8 @@ type symbolic_result = Parametric_race.outcome =
 
 let find_symbolic_race = Parametric_race.find
 
-let replay ?loop_bound program trace =
-  let schedule = Race_schedule.compile ?loop_bound program in
+let replay ?loop_bound ?capacity program trace =
+  let schedule = Race_schedule.compile ?loop_bound ?capacity program in
   let index = Hashtbl.create (Array.length schedule.nodes) in
   Array.iteri (fun n (node : Race_schedule.node) ->
     let pipe = match node.phase with Emit _ -> None | Finish { pipe; _ } -> Some pipe in
@@ -26,10 +26,9 @@ let replay ?loop_bound program trace =
     | None -> invalid_arg "Bug_traces.replay: unknown event"
   ) Race_schedule.initial trace |> ignore
 
-let generate_bug_traces ?(backend = Search) ?loop_bound program =
-  match backend, loop_bound with
-  | Search, None -> invalid_arg "Bug_traces.Search: loop_bound is required"
-  | Search, Some bound -> Race_search.generate (Race_schedule.compile ~loop_bound:bound program)
-  | Solve, _ ->
-      (try Race_solve.generate (Race_schedule.compile ?loop_bound program) with
+let generate_bug_traces ?(backend = Search) ?loop_bound ?capacity program =
+  match backend with
+  | Search -> Race_search.generate (Race_schedule.compile ?loop_bound ?capacity program)
+  | Solve ->
+      (try Race_solve.generate (Race_schedule.compile ?loop_bound ?capacity program) with
        | Race_solve.Inconclusive reason -> failwith ("Bug_traces.Solve: " ^ reason))
