@@ -1,0 +1,13 @@
+{
+  "issue": 1020,
+  "mr": "5334",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/5334",
+  "commit": "86e92a22df4715351c1c12ee7a252695477cc90e",
+  "parent": "02fc509a89a4865e6407c5ab9ef917713180cb5d",
+  "title": "[HIVM][Preload] fix: preserve affine extents and rotate A6 preload slots",
+  "tests": [
+    "bishengir/test/Dialect/HIVM/cv-pipelining-preload/create-preload-affine-view-size.mlir",
+    "bishengir/test/Dialect/HIVM/hivm-v2-pipeline-a6-order.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

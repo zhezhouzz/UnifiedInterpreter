@@ -1,0 +1,613 @@
+diff --git a/bishengir/lib/Conversion/HIVMAVEToAVEIntrin/HIVMAVEToAVEIntrin.cpp b/bishengir/lib/Conversion/HIVMAVEToAVEIntrin/HIVMAVEToAVEIntrin.cpp
+index 06c695c15..8f9ce7672 100644
+--- a/bishengir/lib/Conversion/HIVMAVEToAVEIntrin/HIVMAVEToAVEIntrin.cpp
++++ b/bishengir/lib/Conversion/HIVMAVEToAVEIntrin/HIVMAVEToAVEIntrin.cpp
+@@ -1092,6 +1092,49 @@ static Operation *createPstuOp(Value data, Value dataPtr,
+   return asResult;
+ }
+ 
++// A predicate store writes a full 8- or 16-byte packet even when only
++// a few lanes are active. A short, byte-sized prefix fits in a scalar word.
++static std::optional<unsigned> getShortPredicateBytes(VFMaskedStoreOp store) {
++  if (!store.getVectorType().getElementType().isInteger(1) ||
++      store.getPattern() != StoreDist::NORM_B8)
++    return std::nullopt;
++  int width = getBitWidthFromAttr(store);
++  if (width != 16 && width != 32)
++    return std::nullopt;
++  int64_t lanes;
++  if (auto pge = store.getMask().getDefiningOp<VFPgeOp>()) {
++    if (pge.getPattern() == PgePattern::H && getBitWidthFromAttr(pge) == -1)
++      return std::nullopt;
++    lanes = getNumfromPgePattern(pge);
++  } else if (auto plt = store.getMask().getDefiningOp<VFPltOp>()) {
++    lanes = getConstantIntValue(plt.getTrueShape()).value_or(0);
++  } else {
++    return std::nullopt;
++  }
++  if (lanes <= 0 || lanes > 32 || lanes % util::BITS_PER_BYTE != 0)
++    return std::nullopt;
++  return lanes / util::BITS_PER_BYTE;
++}
++
++// Sum 1 << i for each true lane i. VSHL yields zero for i >= 32.
++// The low bytes of the sum are the dense predicate prefix in memory order.
++static Value packPredicateWord(Value data, int width,
++                               ConversionPatternRewriter &rewriter) {
++  Location loc = data.getLoc();
++  auto wordType = createVLVectorType(rewriter.getI32Type());
++  auto zero = rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI32Type(), 0);
++  auto one = rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI32Type(), 1);
++  if (width == 16)
++    data = buildPunpackOp(loc, zero, data, rewriter)->getResult(0);
++  Value all = buildPgeOp(loc, zero, 32, rewriter)->getResult(0);
++  Value lanes = rewriter.create<VciInstrOp>(loc, wordType, zero, zero);
++  Value ones = rewriter.create<VbrInstrOp>(loc, wordType, one);
++  Value bits = rewriter.create<VshlUXInstrOp>(loc, wordType, ones, lanes, all);
++  Value groups =
++      rewriter.create<VcgaddV2V64U32XInstrOp>(loc, wordType, bits, data);
++  return rewriter.create<VcaddV2V64U32XInstrOp>(loc, wordType, groups);
++}
++
+ static Operation *createLoadOpFori1Type(Value dataPtr,
+                                         PatternRewriter &rewriter,
+                                         int elementAlignment) {
+@@ -1361,9 +1404,12 @@ struct HIVMStoreOpLowering : public ConvertOpToLLVMPattern<VFMaskedStoreOp> {
+                         hacc::utils::isAscend960(moduleOp);
+     Value mask = getVLRegValueOrSelf(store.getMask(), rewriter);
+ 
+-    if (archIs910_95 && store->hasAttr(UnalignedAttr::name) &&
+-        !isONEPTDist(dist)) {
+-      if (dElemType.isInteger(1)) {
++    auto prefixBytes = hacc::utils::isAscend960(moduleOp)
++                           ? getShortPredicateBytes(store)
++                           : std::nullopt;
++    if (prefixBytes || (archIs910_95 && store->hasAttr(UnalignedAttr::name) &&
++                        !isONEPTDist(dist))) {
++      if (dElemType.isInteger(1) && !prefixBytes) {
+         int pbMode = getBitWidthFromAttr(store);
+         auto asResult = createPstuOp(data, dataPtr, rewriter, pbMode);
+         rewriter.replaceOp(store, asResult);
+@@ -1374,8 +1420,15 @@ struct HIVMStoreOpLowering : public ConvertOpToLLVMPattern<VFMaskedStoreOp> {
+       // vstus have no mask operand. vstus will only store the least significant
+       // Sm-byte of Vd. Method getElemSizeByStoreMask will calculate Sm by dist
+       // and mask.
+-      Value elemSize =
+-          getElemSizeByStoreMask(store.getMask(), dElemType, loc, rewriter);
++      Value elemSize;
++      if (prefixBytes) {
++        data = packPredicateWord(data, getBitWidthFromAttr(store), rewriter);
++        elemSize = rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI32Type(),
++                                                     *prefixBytes);
++      } else {
++        elemSize =
++            getElemSizeByStoreMask(store.getMask(), dElemType, loc, rewriter);
++      }
+       VectorType vector32I8Type = VectorType::get(32, rewriter.getI8Type());
+       auto alignData =
+           rewriter.create<InitVectorAlignDataInstrOp>(loc, vector32I8Type);
+@@ -1540,7 +1593,7 @@ struct HIVMStoreStrideOpLowering
+                  ->getResult(0);
+     Value dataPtr = this->getStridedElementPtr(loc, memRefTy, adaptor.getBase(),
+                                                adaptor.getIndices(), rewriter);
+-    auto strideOperand = store.getOperand(3).getDefiningOp<arith::ConstantOp>();
++    auto strideOperand = store.getStride().getDefiningOp<arith::ConstantOp>();
+     auto strideValue = strideOperand.getValue();
+     auto elementsStride =
+         dyn_cast<IntegerAttr>(strideValue).getValue().getSExtValue();
+diff --git a/bishengir/lib/Conversion/VectorToHIVMAVE/VectorToHIVMAVE.cpp b/bishengir/lib/Conversion/VectorToHIVMAVE/VectorToHIVMAVE.cpp
+index 89296ed1e..e8daacac7 100644
+--- a/bishengir/lib/Conversion/VectorToHIVMAVE/VectorToHIVMAVE.cpp
++++ b/bishengir/lib/Conversion/VectorToHIVMAVE/VectorToHIVMAVE.cpp
+@@ -36,6 +36,7 @@
+ #include "llvm/Support/MathExtras.h"
+ #include <algorithm>
+ #include <cstddef>
++#include <optional>
+ #include <utility>
+ 
+ #define DEBUG_TYPE "convert-vector-to-hivmave"
+@@ -735,6 +736,94 @@ struct TransferReadOpPattern : public OpRewritePattern<vector::TransferReadOp> {
+   }
+ };
+ 
++namespace {
++// A supported constant mask is either a true prefix or explicit lane bits.
++struct ConstantMaskInfo {
++  int64_t extent = -1;
++  DenseIntElementsAttr bits;
++};
++} // namespace
++
++static FailureOr<ConstantMaskInfo> getPgeMaskInfo(Value mask) {
++  auto pge = mask ? mask.getDefiningOp<hivmave::VFPgeOp>() : nullptr;
++  if (!pge)
++    return failure();
++  // H depends on the predicate width, which must already be known.
++  if (pge.getPattern() == hivmave::PgePattern::H &&
++      hivmave::getBitWidthFromAttr(pge) == -1)
++    return failure();
++  int64_t extent = hivmave::getNumfromPgePattern(pge);
++  if (extent > cast<VectorType>(mask.getType()).getNumElements())
++    return failure();
++  return ConstantMaskInfo{extent, {}};
++}
++
++// A flat store increments the address once per logical vector lane. A
++// non-unit vector dimension therefore needs the product of the inner vector
++// extents as its physical stride. A dynamic base offset cancels out.
++static bool hasKnownNoncontiguousStoreLanes(vector::TransferWriteOp op) {
++  auto memref = dyn_cast<MemRefType>(op.getSource().getType());
++  VectorType vec = op.getVectorType();
++  if (!memref || memref.getElementType() != vec.getElementType() ||
++      (memref.hasStaticShape() && memref.getNumElements() == 1) ||
++      vec.isScalable())
++    return false;
++
++  SmallVector<int64_t> strides;
++  int64_t offset;
++  if (failed(getStridesAndOffset(memref, strides, offset)))
++    return false;
++  AffineMap map = op.getPermutationMap();
++  auto maskBounds =
++      getMaskBoundsInSourceShape(op.getMask(), op.getMaskType(), map);
++  Value mask = unwrapMaskShapeCasts(op.getMask(), op.getMaskType());
++  if (auto info = getPgeMaskInfo(mask); succeeded(info)) {
++    auto flatMask = cast<VectorType>(mask.getType());
++    auto bounds = reshapeMaskBounds({info->extent}, flatMask.getShape(),
++                                    op.getMaskType().getShape());
++    maskBounds = restoreSourceMaskBounds(map, bounds);
++  }
++  if (llvm::is_contained(maskBounds, 0))
++    return false;
++  int64_t laneStride = 1;
++  for (int64_t dim = vec.getRank() - 1; dim >= 0; --dim) {
++    unsigned sourceDim = map.getDimPosition(dim);
++    int64_t size = vec.getDimSize(dim);
++    int64_t extent = maskBounds.empty() ? size : maskBounds[sourceDim];
++    int64_t stride = strides[sourceDim];
++    if (extent > 1 && !ShapedType::isDynamic(stride) && stride != laneStride)
++      return true;
++    laneStride *= size;
++  }
++  return false;
++}
++
++// VSSTB advances by its configured pitch once per 32-byte block of lanes.
++// Its layout must describe the vector tile as well as the destination view.
++static std::optional<int64_t>
++getTransferWriteBlockStride(vector::TransferWriteOp op) {
++  if (!utils::isTransferWriteSuitForStoreWithStride(op) ||
++      !op.getPermutationMap().isIdentity())
++    return std::nullopt;
++  auto memref = cast<MemRefType>(op.getSource().getType());
++  ArrayRef<int64_t> tile = op.getVectorType().getShape();
++  if (tile.size() != static_cast<size_t>(memref.getRank()) ||
++      tile.front() > hivm::util::BLOCK_NUM_PER_VL ||
++      tile.drop_front() != memref.getShape().drop_front())
++    return std::nullopt;
++
++  SmallVector<int64_t> strides;
++  int64_t offset;
++  if (failed(getStridesAndOffset(memref, strides, offset)))
++    return std::nullopt;
++  int64_t blockLanes = tile.back();
++  int64_t pitch = strides.front();
++  if (strides.back() != 1 || pitch <= 0 || pitch % blockLanes != 0 ||
++      !llvm::isUInt<16>(pitch / blockLanes))
++    return std::nullopt;
++  return pitch;
++}
++
+ struct TransferWriteOpPattern
+     : public OpRewritePattern<vector::TransferWriteOp> {
+   using OpRewritePattern<vector::TransferWriteOp>::OpRewritePattern;
+@@ -742,19 +831,12 @@ struct TransferWriteOpPattern
+   bool transferWriteWithStride(vector::TransferWriteOp writeOp,
+                                PatternRewriter &rewriter, Value mask,
+                                Value vector, Value source) const {
+-    if (!utils::isTransferWriteSuitForStoreWithStride(writeOp)) {
++    auto pitch = getTransferWriteBlockStride(writeOp);
++    if (!pitch)
+       return false;
+-    }
+-#ifndef __LLVM_MAJOR_VERSION_22_COMPATIBLE__
+-    auto memrefTy = mlir::dyn_cast<MemRefType>(writeOp.getSource().getType());
+-    auto [strides, offset] = getStridesAndOffset(memrefTy);
+-#else
+-    auto memrefTy = mlir::dyn_cast<MemRefType>(writeOp.getBase().getType());
+-    auto [strides, offset] = memrefTy.getStridesAndOffset();
+-#endif
+     auto loc = writeOp.getLoc();
+     Value strideConst = rewriter.create<arith::ConstantOp>(
+-        writeOp.getLoc(), rewriter.getIndexAttr(strides[0]));
++        writeOp.getLoc(), rewriter.getIndexAttr(*pitch));
+     hivmave::VFStoreWithStrideOp storeOp =
+         rewriter.create<hivmave::VFStoreWithStrideOp>(
+             loc, source, writeOp.getIndices(), strideConst, mask, vector);
+@@ -975,14 +1057,6 @@ struct VecBroadcastOpPattern : public OpRewritePattern<vector::BroadcastOp> {
+   }
+ };
+ 
+-namespace {
+-// A supported constant mask is either a true prefix or explicit lane bits.
+-struct ConstantMaskInfo {
+-  int64_t extent = -1;
+-  DenseIntElementsAttr bits;
+-};
+-} // namespace
+-
+ struct VecGatherOpPattern : public OpRewritePattern<vector::GatherOp> {
+   using OpRewritePattern<vector::GatherOp>::OpRewritePattern;
+   LogicalResult matchAndRewrite(vector::GatherOp op,
+@@ -1048,21 +1122,6 @@ struct VecGatherOpPattern : public OpRewritePattern<vector::GatherOp> {
+   }
+ 
+ private:
+-  static FailureOr<ConstantMaskInfo> getPgeMaskInfo(Value mask,
+-                                                    int64_t numLanes) {
+-    auto pge = mask.getDefiningOp<hivmave::VFPgeOp>();
+-    if (!pge)
+-      return failure();
+-    // H depends on the predicate width, which must already be known.
+-    if (pge.getPattern() == hivmave::PgePattern::H &&
+-        hivmave::getBitWidthFromAttr(pge) == -1)
+-      return failure();
+-    int64_t extent = hivmave::getNumfromPgePattern(pge);
+-    if (extent > numLanes)
+-      return failure();
+-    return ConstantMaskInfo{extent, {}};
+-  }
+-
+   static FailureOr<ConstantMaskInfo> getConstantMaskInfo(Value mask) {
+     auto maskType = dyn_cast<VectorType>(mask.getType());
+     if (!maskType || maskType.getRank() != 1)
+@@ -1089,7 +1148,7 @@ private:
+       return ConstantMaskInfo{std::min<int64_t>(bound.value(), numLanes), {}};
+     }
+ 
+-    return getPgeMaskInfo(mask, numLanes);
++    return getPgeMaskInfo(mask);
+   }
+ 
+   static Value createHalfMask(PatternRewriter &rewriter, Location loc,
+@@ -1650,6 +1709,21 @@ struct VectorToHIVMAVEPass
+       signalPassFailure();
+       return;
+     }
++    // Inspect original masks before conversion replaces their static bounds.
++    WalkResult unsupportedStore =
++        moduleOp->walk([](vector::TransferWriteOp op) {
++          if (!hasKnownNoncontiguousStoreLanes(op) ||
++              getTransferWriteBlockStride(op))
++            return WalkResult::advance();
++          op.emitOpError(
++              "cannot flatten noncontiguous transfer_write lanes to an "
++              "AVE store");
++          return WalkResult::interrupt();
++        });
++    if (unsupportedStore.wasInterrupted()) {
++      signalPassFailure();
++      return;
++    }
+     // Fold before mask producers are converted, while their exact bits are
+     // still available. In particular, an empty read must not access memory.
+     IRRewriter rewriter(&getContext());
+diff --git a/bishengir/lib/Dialect/HIVM/TransformOps/VectorizeLinalg.cpp b/bishengir/lib/Dialect/HIVM/TransformOps/VectorizeLinalg.cpp
+index af05c73d2..5de5b8af8 100644
+--- a/bishengir/lib/Dialect/HIVM/TransformOps/VectorizeLinalg.cpp
++++ b/bishengir/lib/Dialect/HIVM/TransformOps/VectorizeLinalg.cpp
+@@ -205,55 +205,22 @@ bool supportsMultiAxisVectorize(ArrayRef<Operation *> scope) {
+   });
+ }
+ 
+-struct TransposedInput {
+-  AffineMap map;
+-  ArrayRef<int64_t> shape;
+-};
+-
+-std::optional<TransposedInput> findTransposedInput(linalg::GenericOp generic) {
++std::optional<unsigned> getTransposeOutputInnerLoop(linalg::LinalgOp op) {
++  auto generic = dyn_cast<linalg::GenericOp>(op.getOperation());
++  if (!generic || generic.getNumDpsInits() != 1)
++    return std::nullopt;
++  AffineMap outputMap =
++      generic.getMatchingIndexingMap(generic.getDpsInitOperand(0));
++  if (!outputMap.isPermutation() || outputMap.getNumResults() == 0)
++    return std::nullopt;
+   for (OpOperand *input : generic.getDpsInputOperands()) {
+-    AffineMap map = generic.getMatchingIndexingMap(input);
+-    if (!map.isPermutation() || map.isIdentity())
+-      continue;
+-    auto shapedType = dyn_cast<ShapedType>(input->get().getType());
+-    if (!shapedType)
+-      continue;
+-    return TransposedInput{map, shapedType.getShape()};
++    AffineMap inputMap = generic.getMatchingIndexingMap(input);
++    if (inputMap.isPermutation() && inputMap != outputMap)
++      return cast<AffineDimExpr>(outputMap.getResults().back()).getPosition();
+   }
+   return std::nullopt;
+ }
+ 
+-SmallVector<int64_t>
+-computeTransposedTileSize(linalg::GenericOp generic, TransposedInput input,
+-                          int64_t vectorLengthInBytes, int64_t elemWidthInBytes,
+-                          int64_t maxAxisNum, int64_t loopRank) {
+-  SmallVector<int64_t> inputTiles = computeMultiAxisTileSize(
+-      input.shape, vectorLengthInBytes, elemWidthInBytes, maxAxisNum, loopRank);
+-  SmallVector<int64_t> iterationTiles(generic.getNumLoops(), 1);
+-  for (auto [index, expr] : llvm::enumerate(input.map.getResults())) {
+-    auto dimExpr = dyn_cast<AffineDimExpr>(expr);
+-    if (!dimExpr)
+-      return inputTiles;
+-    iterationTiles[dimExpr.getPosition()] = inputTiles[index];
+-  }
+-  return iterationTiles;
+-}
+-
+-SmallVector<int64_t> computeRawTileSize(linalg::LinalgOp op,
+-                                        ArrayRef<int64_t> maxShape,
+-                                        int64_t vectorLengthInBytes,
+-                                        int64_t elemWidthInBytes,
+-                                        int64_t maxAxisNum) {
+-  if (auto generic = dyn_cast<linalg::GenericOp>(op.getOperation()))
+-    if (auto transpose = findTransposedInput(generic))
+-      return computeTransposedTileSize(generic, *transpose, vectorLengthInBytes,
+-                                       elemWidthInBytes, maxAxisNum,
+-                                       op.getNumLoops());
+-  return computeMultiAxisTileSize(maxShape, vectorLengthInBytes,
+-                                  elemWidthInBytes, maxAxisNum,
+-                                  op.getNumLoops());
+-}
+-
+ SmallVector<int64_t> clampToIterationDomain(linalg::LinalgOp op,
+                                             ArrayRef<int64_t> tileSizes) {
+   SmallVector<int64_t> loopRanges = op.getStaticLoopRanges();
+@@ -299,25 +266,31 @@ SmallVector<int64_t> computeTileSizes(linalg::LinalgOp op,
+   }
+   int64_t elemWidthInBytes =
+       std::max<int64_t>(llvm::divideCeil(elemBitWidth, kBitsPerByte), 1);
+-  if (elemBitWidth == 32 && !hasReductionIterator(op) &&
+-      hacc::utils::isRegBasedArch(op->getParentOfType<ModuleOp>())) {
+-    auto generic = dyn_cast<linalg::GenericOp>(op.getOperation());
+-    if (!generic || !findTransposedInput(generic))
+-      return computeSingleAxisTileSize(op.getNumLoops(), options.vectorLength,
+-                                       elemWidthInBytes);
++  if (auto innerLoop = getTransposeOutputInnerLoop(op)) {
++    // A transfer_read can gather a strided source. Keep each transfer_write
++    // inside one destination row so consecutive lanes have consecutive
++    // addresses.
++    SmallVector<int64_t> tiles(op.getNumLoops(), 1);
++    tiles[*innerLoop] = options.vectorLength / elemWidthInBytes;
++    return clampToIterationDomain(op, tiles);
+   }
++  if (elemBitWidth == 32 && !hasReductionIterator(op) &&
++      hacc::utils::isRegBasedArch(op->getParentOfType<ModuleOp>()))
++    return computeSingleAxisTileSize(op.getNumLoops(), options.vectorLength,
++                                     elemWidthInBytes);
+   int64_t maxAxisNum =
+       supportsMultiAxisVectorize(scope) ? options.maxVectorizeAxes : 1;
+   if (maxAxisNum == 0)
+     maxAxisNum = 1;
+ 
+   SmallVector<int64_t> maxShape = getOpMaxShape(op.getOperation());
+-  SmallVector<int64_t> tileSizes = computeRawTileSize(
+-      op, maxShape, options.vectorLength, elemWidthInBytes, maxAxisNum);
++  SmallVector<int64_t> tileSizes =
++      computeMultiAxisTileSize(maxShape, options.vectorLength, elemWidthInBytes,
++                               maxAxisNum, op.getNumLoops());
+   tileSizes = clampToIterationDomain(op, tileSizes);
+   if (maxAxisNum != 1 && !isSupportedTileProduct(tileSizes)) {
+-    tileSizes = computeRawTileSize(op, maxShape, options.vectorLength,
+-                                   elemWidthInBytes, 1);
++    tileSizes = computeMultiAxisTileSize(maxShape, options.vectorLength,
++                                         elemWidthInBytes, 1, op.getNumLoops());
+     tileSizes = clampToIterationDomain(op, tileSizes);
+   }
+   if (hasReductionIterator(op.getOperation())) {
+diff --git a/bishengir/test/Conversion/HIVMAVEToAVEIntrin/a6-short-packed-predicate-stores.mlir b/bishengir/test/Conversion/HIVMAVEToAVEIntrin/a6-short-packed-predicate-stores.mlir
+new file mode 100644
+index 000000000..89a8ca7d7
+--- /dev/null
++++ b/bishengir/test/Conversion/HIVMAVEToAVEIntrin/a6-short-packed-predicate-stores.mlir
+@@ -0,0 +1,47 @@
++// RUN: bishengir-opt -hacc-append-device-spec=target=Ascend960DT_968B7 -convert-hivmave-to-ave-intrin -cse %s | FileCheck %s
++// RUN: bishengir-opt -hacc-append-device-spec=target=Ascend910_9589 -convert-hivmave-to-ave-intrin -cse %s | FileCheck %s --check-prefix=A5 --implicit-check-not=hivm.vstus
++
++#pb16 = #ave.func_dist_type<pb16>
++#pb32 = #ave.func_dist_type<pb32>
++#unaligned = #ave.unaligned_ub_access
++!row16 = memref<16xi1, strided<[1], offset: 16>, #hivm.address_space<ub>>
++!row32 = memref<32xi1, strided<[1], offset: 32>, #hivm.address_space<ub>>
++!full = memref<256xi1, #hivm.address_space<ub>>
++
++// A 32-bit PB16 row starts at byte four. The flush must consume the alignment
++// state and the updated pointer from the four-byte store.
++// CHECK-LABEL: @pb16
++// CHECK: %[[FOUR:.*]] = llvm.mlir.constant(4 : i32)
++// CHECK: %[[WRITE:.*]] = "hivm_regbaseintrins.intr.hivm.vstus.post.s32"({{.*}}, %[[FOUR]], %{{[^)]+}})
++// CHECK-DAG: %[[TAIL:.*]] = llvm.extractvalue %[[WRITE]][0]
++// CHECK-DAG: %[[NEXT:.*]] = llvm.extractvalue %[[WRITE]][1]
++// CHECK: "hivm_regbaseintrins.intr.hivm.vstas"(%[[TAIL]], %[[NEXT]],
++// CHECK: "hivm_regbaseintrins.intr.hivm.pstu.b16"
++// A5-LABEL: @pb16
++// A5-COUNT-2: "hivm_regbaseintrins.intr.hivm.pstu.b16"
++func.func @pb16(%row: !row32, %full: !full, %data: vector<128xi1>) {
++  %c0 = arith.constant 0 : index
++  %c32 = arith.constant 32 : index
++  %short, %rem = ave.hir.plt %c32 {functionType = #pb16} : vector<128xi1>, index
++  %all = ave.hir.pge <ALL> {functionType = #pb16} : vector<128xi1>
++  ave.hir.masked_store <NORM_B8> %row[%c0], %short, %data {ave.unaligned_ub_access = #unaligned, functionType = #pb16} : !row32, vector<128xi1>, vector<128xi1>
++  ave.hir.masked_store <NORM_B8> %full[%c0], %all, %data {ave.unaligned_ub_access = #unaligned, functionType = #pb16} : !full, vector<128xi1>, vector<128xi1>
++  return
++}
++
++// A 16-bit PB32 row at byte two must leave the following row untouched.
++// CHECK-LABEL: @pb32
++// CHECK: %[[TWO:.*]] = llvm.mlir.constant(2 : i32)
++// CHECK: "hivm_regbaseintrins.intr.hivm.vstus.post.s32"({{.*}}, %[[TWO]], %{{[^)]+}})
++// CHECK: "hivm_regbaseintrins.intr.hivm.vstas"
++// CHECK: "hivm_regbaseintrins.intr.hivm.pstu.b32"
++// A5-LABEL: @pb32
++// A5-COUNT-2: "hivm_regbaseintrins.intr.hivm.pstu.b32"
++func.func @pb32(%row: !row16, %full: !full, %data: vector<64xi1>) {
++  %c0 = arith.constant 0 : index
++  %short = ave.hir.pge <VL16> {functionType = #pb32} : vector<64xi1>
++  %all = ave.hir.pge <ALL> {functionType = #pb32} : vector<64xi1>
++  ave.hir.masked_store <NORM_B8> %row[%c0], %short, %data {ave.unaligned_ub_access = #unaligned, functionType = #pb32} : !row16, vector<64xi1>, vector<64xi1>
++  ave.hir.masked_store <NORM_B8> %full[%c0], %all, %data {ave.unaligned_ub_access = #unaligned, functionType = #pb32} : !full, vector<64xi1>, vector<64xi1>
++  return
++}
+diff --git a/bishengir/test/Conversion/HIVMToLLVM/regbase-convert-llvm.mlir b/bishengir/test/Conversion/HIVMToLLVM/regbase-convert-llvm.mlir
+index ad809ab2f..c4501a0c0 100644
+--- a/bishengir/test/Conversion/HIVMToLLVM/regbase-convert-llvm.mlir
++++ b/bishengir/test/Conversion/HIVMToLLVM/regbase-convert-llvm.mlir
+@@ -716,6 +716,18 @@ func.func @test_gather_v256_f8e5m2(%arg0 : memref<256x1xf8E5M2, strided<[16, 1],
+   return
+ }
+ 
++// CHECK-LABEL: test_vsstb_rank_three
++func.func @test_vsstb_rank_three(%dst: memref<4x1x16xf16, strided<[1024, 16, 1]>, #hivm.address_space<ub>>,
++    %mask: vector<128xi1>, %value: vector<128xf16>) {
++  %c0 = arith.constant 0 : index
++  %pitch = arith.constant 1024 : index
++  // CHECK: %[[PITCH:.*]] = llvm.mlir.constant(4194304 : i32) : i32
++  // CHECK: "hivm_regbaseintrins.intr.hivm.vsstb.v128f16"({{.*}}, {{.*}}, %[[PITCH]],
++  ave.hir.store_with_stride %dst[%c0, %c0, %c0], %pitch, %mask, %value
++      : memref<4x1x16xf16, strided<[1024, 16, 1]>, #hivm.address_space<ub>>, vector<128xi1>, vector<128xf16>
++  return
++}
++
+ // CHECK-LABEL: test_vsstb_v128_f16
+ func.func @test_vsstb_v128_f16(%arg0 : memref<4x16xf16, affine_map<(d0, d1)[s0] -> (d0 * 1024 + d1 + s0)>, #hivm.address_space<ub>>, %arg1 : vector<64xi1>, %arg2 : vector<64xf16>) -> () {
+   %c1024 = arith.constant 1024 : index
+diff --git a/bishengir/test/Conversion/VectorToHIVMAVE/noncontiguous-transfer-write.mlir b/bishengir/test/Conversion/VectorToHIVMAVE/noncontiguous-transfer-write.mlir
+new file mode 100644
+index 000000000..54552c2d8
+--- /dev/null
++++ b/bishengir/test/Conversion/VectorToHIVMAVE/noncontiguous-transfer-write.mlir
+@@ -0,0 +1,38 @@
++// RUN: bishengir-opt %s --split-input-file --convert-vector-to-hivmave --verify-diagnostics
++
++module {
++  func.func @gapped_rows(%v: vector<16x4xf32>,
++      %dst: memref<16x4xf32, strided<[64, 1], offset: ?>, #hivm.address_space<ub>>) {
++    %c0 = arith.constant 0 : index
++    // expected-error @below {{cannot flatten noncontiguous transfer_write lanes to an AVE store}}
++    vector.transfer_write %v, %dst[%c0, %c0] {in_bounds = [true, true]}
++        : vector<16x4xf32>, memref<16x4xf32, strided<[64, 1], offset: ?>, #hivm.address_space<ub>>
++    return
++  }
++}
++
++// -----
++
++module {
++  func.func @gapped_planes(%v: vector<4x2x16xf16>,
++      %dst: memref<4x2x16xf16, strided<[1024, 16, 1], offset: ?>, #hivm.address_space<ub>>) {
++    %c0 = arith.constant 0 : index
++    // expected-error @below {{cannot flatten noncontiguous transfer_write lanes to an AVE store}}
++    vector.transfer_write %v, %dst[%c0, %c0, %c0] {in_bounds = [true, true, true]}
++        : vector<4x2x16xf16>, memref<4x2x16xf16, strided<[1024, 16, 1], offset: ?>, #hivm.address_space<ub>>
++    return
++  }
++}
++
++// -----
++
++module {
++  func.func @partial_native_block(%v: vector<4x4xf32>,
++      %dst: memref<4x8xf32, strided<[16, 1]>, #hivm.address_space<ub>>) {
++    %c0 = arith.constant 0 : index
++    // expected-error @below {{cannot flatten noncontiguous transfer_write lanes to an AVE store}}
++    vector.transfer_write %v, %dst[%c0, %c0] {in_bounds = [true, true]}
++        : vector<4x4xf32>, memref<4x8xf32, strided<[16, 1]>, #hivm.address_space<ub>>
++    return
++  }
++}
+diff --git a/bishengir/test/Conversion/VectorToHIVMAVE/strided-transfer-write.mlir b/bishengir/test/Conversion/VectorToHIVMAVE/strided-transfer-write.mlir
+new file mode 100644
+index 000000000..47b19482e
+--- /dev/null
++++ b/bishengir/test/Conversion/VectorToHIVMAVE/strided-transfer-write.mlir
+@@ -0,0 +1,48 @@
++// RUN: bishengir-opt %s --hacc-append-device-spec=target=Ascend960DT_968B7 --convert-vector-to-hivmave --verify-each | FileCheck %s
++
++module {
++  // CHECK-LABEL: func.func @one_row
++  // CHECK: ave.hir.masked_store <NORM_B32>
++  func.func @one_row(%v: vector<1x8xf32>,
++      %dst: memref<?x16xf32, strided<[?, 1], offset: ?>, #hivm.address_space<ub>>, %row: index) {
++    %c0 = arith.constant 0 : index
++    vector.transfer_write %v, %dst[%row, %c0] {in_bounds = [true, true]}
++        : vector<1x8xf32>, memref<?x16xf32, strided<[?, 1], offset: ?>, #hivm.address_space<ub>>
++    return
++  }
++
++  // CHECK-LABEL: func.func @strided_blocks
++  // CHECK: ave.hir.store_with_stride
++  func.func @strided_blocks(%v: vector<4x8xf32>,
++      %dst: memref<4x8xf32, strided<[16, 1], offset: ?>, #hivm.address_space<ub>>) {
++    %c0 = arith.constant 0 : index
++    vector.transfer_write %v, %dst[%c0, %c0] {in_bounds = [true, true]}
++        : vector<4x8xf32>, memref<4x8xf32, strided<[16, 1], offset: ?>, #hivm.address_space<ub>>
++    return
++  }
++
++  // CHECK-LABEL: func.func @first_lane
++  // CHECK: ave.hir.masked_store <ONEPT_B32>
++  func.func @first_lane(%v: vector<2x32xf32>,
++      %dst: memref<2x32xf32, strided<[64, 1], offset: ?>, #hivm.address_space<ub>>) {
++    %c0 = arith.constant 0 : index
++    %mask1d = vector.constant_mask [1] : vector<64xi1>
++    %mask = vector.shape_cast %mask1d : vector<64xi1> to vector<2x32xi1>
++    vector.transfer_write %v, %dst[%c0, %c0], %mask {in_bounds = [true, true]}
++        : vector<2x32xf32>, memref<2x32xf32, strided<[64, 1], offset: ?>, #hivm.address_space<ub>>
++    return
++  }
++
++  // CHECK-LABEL: func.func @first_row_prefix
++  // CHECK: ave.hir.masked_store <NORM_B32>
++  func.func @first_row_prefix(%v: vector<2x32xf32>,
++      %dst: memref<2x32xf32, strided<[64, 1], offset: ?>, #hivm.address_space<ub>>) {
++    %c0 = arith.constant 0 : index
++    %flat = ave.hir.pge <VL8> : vector<64xi1>
++    %mask = vector.shape_cast %flat : vector<64xi1> to vector<2x32xi1>
++    vector.transfer_write %v, %dst[%c0, %c0], %mask {in_bounds = [true, true]}
++        : vector<2x32xf32>, memref<2x32xf32, strided<[64, 1], offset: ?>, #hivm.address_space<ub>>
++    return
++  }
++
++}
+diff --git a/bishengir/test/Dialect/HIVM/Vectorize/hivm-vectorize-transpose-store-rows.mlir b/bishengir/test/Dialect/HIVM/Vectorize/hivm-vectorize-transpose-store-rows.mlir
+new file mode 100644
+index 000000000..ad00db581
+--- /dev/null
++++ b/bishengir/test/Dialect/HIVM/Vectorize/hivm-vectorize-transpose-store-rows.mlir
+@@ -0,0 +1,25 @@
++// RUN: bishengir-opt %s --split-input-file --hacc-append-device-spec=target=Ascend960DT_968B7 --hivm-vectorize=phase=buffers --verify-each | FileCheck %s
++// RUN: bishengir-opt %s --split-input-file --hacc-append-device-spec=target=Ascend950PR_9579 --hivm-vectorize=phase=buffers --verify-each | FileCheck %s
++
++module {
++  // CHECK-LABEL: func.func private @transpose2d_fused_0(
++  // CHECK: vector.transfer_write {{.*}} : vector<1x64xf32>, memref<1x64xf32
++  func.func @transpose2d(%src: memref<64x16xf32, #hivm.address_space<ub>>, %dst: memref<16x64xf32, #hivm.address_space<ub>>) {
++    hivm.hir.vtranspose ins(%src : memref<64x16xf32, #hivm.address_space<ub>>)
++        outs(%dst : memref<16x64xf32, #hivm.address_space<ub>>) permutation = [1, 0]
++    return
++  }
++
++}
++
++// -----
++
++module {
++  // CHECK-LABEL: func.func private @transpose3d_fused_0(
++  // CHECK: vector.transfer_write {{.*}} : vector<1x1x16xf16>, memref<1x1x16xf16
++  func.func @transpose3d(%src: memref<64x4x16xf16, #hivm.address_space<ub>>, %dst: memref<4x64x16xf16, #hivm.address_space<ub>>) {
++    hivm.hir.vtranspose ins(%src : memref<64x4x16xf16, #hivm.address_space<ub>>)
++        outs(%dst : memref<4x64x16xf16, #hivm.address_space<ub>>) permutation = [1, 0, 2]
++    return
++  }
++}

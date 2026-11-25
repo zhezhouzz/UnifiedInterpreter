@@ -19,3 +19,21 @@ rocq/Extraction/unified_semantics.cmo
 
 # lia tactic cache
 .lia.cache
+
+
+# LaTeX
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.synctex(busy)
+*.synctex.gz(busy)
+*.xdv
+
+# Generated pretty-printed Core AST files
+*.pretty.core

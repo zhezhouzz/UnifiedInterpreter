@@ -1,0 +1,805 @@
+// RUN: bishengir-opt %s -hfusion-simplify-ops -split-input-file | FileCheck %s
+
+// CHECK-LABEL: @unusedCast
+// CHECK-SAME: (%[[arg0:.*]]: tensor<bf16>)
+// CHECK-NOT: hfusion.cast
+// CHECK: return %[[arg0]] : tensor<bf16>
+
+func.func @unusedCast(%arg0 : tensor<bf16>) -> tensor<bf16> {
+  %empty = tensor.empty() : tensor<f32>
+  %0 = hfusion.cast ins(%arg0 : tensor<bf16>) outs(%empty : tensor<f32>) -> tensor<f32>
+  return %arg0 : tensor<bf16>
+}
+
+// -----
+
+// CHECK-LABEL: @sameTypes
+// CHECK-SAME: (%[[arg0:.*]]: tensor<bf16>)
+// CHECK: hfusion.cast
+// CHECK-NOT: return %[[arg0]]
+
+func.func @sameTypes(%arg0: tensor<bf16>) -> tensor<bf16> {
+    %empty = tensor.empty() : tensor<bf16>
+    %0 = hfusion.cast ins(%arg0 : tensor<bf16>) outs(%empty: tensor<bf16>) -> tensor<bf16>
+    return %0 : tensor<bf16>
+}
+
+// -----
+
+// CHECK-LABEL: @pair
+// CHECK-SAME: (%[[arg0:.*]]: tensor<bf16>)
+// CHECK-NOT: hfusion.cast
+// CHECK: return %[[arg0]] : tensor<bf16>
+
+func.func @pair(%arg0: tensor<bf16>) -> tensor<bf16> {
+    %empty_f32 = tensor.empty() : tensor<f32>
+    %empty_bf16 = tensor.empty() : tensor<bf16>
+    %0 = hfusion.cast {arith.fastmath = #arith.fastmath<contract>} ins(%arg0 : tensor<bf16>) outs(%empty_f32 : tensor<f32>) -> tensor<f32>
+    %1 = hfusion.cast {arith.fastmath = #arith.fastmath<contract>} ins(%0 : tensor<f32>) outs(%empty_bf16 : tensor<bf16>) -> tensor<bf16>
+    return %1 : tensor<bf16>
+}
+
+// -----
+
+// CHECK-LABEL: @pairNoFastmathUpcast
+// CHECK-SAME: (%[[arg0:.*]]: tensor<bf16>)
+// CHECK-NOT: hfusion.cast
+// CHECK: return %[[arg0]] : tensor<bf16>
+
+func.func @pairNoFastmathUpcast(%arg0: tensor<bf16>) -> tensor<bf16> {
+    %empty_f32 = tensor.empty() : tensor<f32>
+    %empty_bf16 = tensor.empty() : tensor<bf16>
+    %0 = hfusion.cast ins(%arg0 : tensor<bf16>) outs(%empty_f32 : tensor<f32>) -> tensor<f32>
+    %1 = hfusion.cast {arith.fastmath = #arith.fastmath<contract>} ins(%0 : tensor<f32>) outs(%empty_bf16 : tensor<bf16>) -> tensor<bf16>
+    return %1 : tensor<bf16>
+}
+
+// -----
+
+// CHECK-LABEL: @castChainThroughExpandShape
+// CHECK-NOT: hfusion.cast
+// CHECK: tensor.expand_shape %[[arg0:.*]]
+// CHECK-NOT: hfusion.cast
+// CHECK: return
+func.func @castChainThroughExpandShape(%arg0: tensor<8xf32>) -> tensor<1x8xf32> {
+    %empty_bf16 = tensor.empty() : tensor<8xbf16>
+    %down = hfusion.cast {arith.fastmath = #arith.fastmath<contract>}
+        ins(%arg0 : tensor<8xf32>) outs(%empty_bf16 : tensor<8xbf16>)
+        -> tensor<8xbf16>
+    %expanded = tensor.expand_shape %down [[0, 1]] output_shape [1, 8]
+        : tensor<8xbf16> into tensor<1x8xbf16>
+    %empty_f32 = tensor.empty() : tensor<1x8xf32>
+    %up = hfusion.cast
+        ins(%expanded : tensor<1x8xbf16>) outs(%empty_f32 : tensor<1x8xf32>)
+        -> tensor<1x8xf32>
+    return %up : tensor<1x8xf32>
+}
+
+// -----
+
+// CHECK-LABEL: @castChainThroughCollapseShape
+// CHECK-NOT: hfusion.cast
+// CHECK: tensor.collapse_shape %[[arg0:.*]]
+// CHECK-NOT: hfusion.cast
+// CHECK: return
+func.func @castChainThroughCollapseShape(%arg0: tensor<1x8xf32>) -> tensor<8xf32> {
+    %empty_bf16 = tensor.empty() : tensor<1x8xbf16>
+    %down = hfusion.cast {arith.fastmath = #arith.fastmath<contract>}
+        ins(%arg0 : tensor<1x8xf32>) outs(%empty_bf16 : tensor<1x8xbf16>)
+        -> tensor<1x8xbf16>
+    %collapsed = tensor.collapse_shape %down [[0, 1]]
+        : tensor<1x8xbf16> into tensor<8xbf16>
+    %empty_f32 = tensor.empty() : tensor<8xf32>
+    %up = hfusion.cast
+        ins(%collapsed : tensor<8xbf16>) outs(%empty_f32 : tensor<8xf32>)
+        -> tensor<8xf32>
+    return %up : tensor<8xf32>
+}
+
+// -----
+
+// CHECK-LABEL: @castChainThroughReshape
+// CHECK-NOT: hfusion.cast
+// CHECK: tensor.reshape %[[arg0:.*]]
+// CHECK-NOT: hfusion.cast
+// CHECK: return
+func.func @castChainThroughReshape(%arg0: tensor<8xf32>, %shape: tensor<2xi64>)
+    -> tensor<1x8xf32> {
+    %empty_bf16 = tensor.empty() : tensor<8xbf16>
+    %down = hfusion.cast {arith.fastmath = #arith.fastmath<contract>}
+        ins(%arg0 : tensor<8xf32>) outs(%empty_bf16 : tensor<8xbf16>)
+        -> tensor<8xbf16>
+    %reshaped = tensor.reshape %down(%shape)
+        : (tensor<8xbf16>, tensor<2xi64>) -> tensor<1x8xbf16>
+    %empty_f32 = tensor.empty() : tensor<1x8xf32>
+    %up = hfusion.cast
+        ins(%reshaped : tensor<1x8xbf16>) outs(%empty_f32 : tensor<1x8xf32>)
+        -> tensor<1x8xf32>
+    return %up : tensor<1x8xf32>
+}
+
+// -----
+
+// CHECK-LABEL: @symmetricChain
+// CHECK-SAME: (%[[arg0:.*]]: tensor<bf16>)
+// CHECK-4: hfusion.cast
+// CHECK: return %[[arg0]] : tensor<bf16>
+
+func.func @symmetricChain(%arg0: tensor<bf16>) -> tensor<bf16> {
+    %empty_f32 = tensor.empty() : tensor<f32>
+    %empty_i1 = tensor.empty() : tensor<i1>
+    %empty_bf16 = tensor.empty() : tensor<bf16>
+    %0 = hfusion.cast {arith.fastmath = #arith.fastmath<contract>} ins(%arg0 : tensor<bf16>) outs(%empty_f32 : tensor<f32>) -> tensor<f32>
+    %1 = hfusion.cast {arith.fastmath = #arith.fastmath<contract>} ins(%0 : tensor<f32>) outs(%empty_i1 : tensor<i1>) -> tensor<i1>
+    %2 = hfusion.cast {arith.fastmath = #arith.fastmath<contract>} ins(%1 : tensor<i1>) outs(%empty_f32 : tensor<f32>) -> tensor<f32>
+    %3 = hfusion.cast {arith.fastmath = #arith.fastmath<contract>} ins(%2 : tensor<f32>) outs(%empty_bf16 : tensor<bf16>) -> tensor<bf16>
+    return %3 : tensor<bf16>
+}
+
+// -----
+
+// CHECK-LABEL: @asymmetricChain
+// CHECK-3: hfusion.cast
+
+func.func @asymmetricChain(%arg0: tensor<bf16>) -> tensor<bf16> {
+    %empty_f32 = tensor.empty() : tensor<f32>
+    %empty_i1 = tensor.empty() : tensor<i1>
+    %empty_bf16 = tensor.empty() : tensor<bf16>
+    %0 = hfusion.cast ins(%arg0 : tensor<bf16>) outs(%empty_f32 : tensor<f32>) -> tensor<f32>
+    %1 = hfusion.cast ins(%0 : tensor<f32>) outs(%empty_i1 : tensor<i1>) -> tensor<i1>
+    %2 = hfusion.cast ins(%1 : tensor<i1>) outs(%empty_bf16 : tensor<bf16>) -> tensor<bf16>
+    return %2 : tensor<bf16>
+}
+
+// -----
+
+// CHECK-LABEL: @unusedChain
+// CHECK-SAME: (%[[arg0:.*]]: tensor<bf16>)
+// CHECK-NOT: hfusion.cast
+// CHECK: return %[[arg0]] : tensor<bf16>
+
+func.func @unusedChain(%arg0: tensor<bf16>) -> tensor<bf16> {
+    %empty_f32 = tensor.empty() : tensor<f32>
+    %empty_bf16 = tensor.empty() : tensor<bf16>
+    %0 = hfusion.cast ins(%arg0 : tensor<bf16>) outs(%empty_f32 : tensor<f32>) -> tensor<f32>
+    %1 = hfusion.cast ins(%0 : tensor<f32>) outs(%empty_bf16 : tensor<bf16>) -> tensor<bf16>
+    return %arg0 : tensor<bf16>
+}
+
+// -----
+
+// CHECK-LABEL: @bifurcation
+// CHECK-SAME: (%[[arg0:.*]]: tensor<bf16>)
+// CHECK-4: hfusion.cast
+
+func.func @bifurcation(%arg0: tensor<bf16>) -> tensor<bf16> {
+    %empty_f32 = tensor.empty() : tensor<f32>
+    %empty_i1 = tensor.empty() : tensor<i1>
+    %empty_bf16 = tensor.empty() : tensor<bf16>
+    %0 = hfusion.cast {arith.fastmath = #arith.fastmath<contract>} ins(%arg0 : tensor<bf16>) outs(%empty_f32 : tensor<f32>) -> tensor<f32>
+    %1 = hfusion.cast ins(%0 : tensor<f32>) outs(%empty_i1 : tensor<i1>) -> tensor<i1>
+    %2 = hfusion.cast ins(%1 : tensor<i1>) outs(%empty_bf16 : tensor<bf16>) -> tensor<bf16>
+    %3 = hfusion.cast ins(%1 : tensor<i1>) outs(%empty_f32 : tensor<f32>) -> tensor<f32>
+    %4 = hfusion.cast {arith.fastmath = #arith.fastmath<contract>} ins(%3 : tensor<f32>) outs(%empty_bf16 : tensor<bf16>) -> tensor<bf16>
+    %add_res = linalg.elemwise_binary { add, fun = #linalg.binary_fn<add> } ins(%2, %4 : tensor<bf16>, tensor<bf16>) outs(%empty_bf16 : tensor<bf16>) -> tensor<bf16>
+    return %add_res : tensor<bf16>
+}
+
+// -----
+
+// CHECK-LABEL: @bifurcationMultiOuts
+// CHECK-SAME: (%[[arg0:.*]]: tensor<bf16>)
+// CHECK: %[[cast0:.*]] = hfusion.cast {arith.fastmath = #arith.fastmath<contract>} ins(%[[arg0]] : tensor<bf16>)
+// CHECK: return %[[cast0]], %[[arg0]] : tensor<f32>, tensor<bf16>
+func.func @bifurcationMultiOuts(%arg0: tensor<bf16>) -> (tensor<f32>, tensor<bf16>) {
+    %empty_f32 = tensor.empty() : tensor<f32>
+    %empty_bf16 = tensor.empty() : tensor<bf16>
+    %0 = hfusion.cast {arith.fastmath = #arith.fastmath<contract>} ins(%arg0 : tensor<bf16>) outs(%empty_f32 : tensor<f32>) -> tensor<f32>
+    %1 = hfusion.cast {arith.fastmath = #arith.fastmath<contract>} ins(%0 : tensor<f32>) outs(%empty_bf16 : tensor<bf16>) -> tensor<bf16>
+    return %0, %1 : tensor<f32>, tensor<bf16>
+}
+
+// -----
+
+// CHECK-LABEL: @unusedBifurcation
+// CHECK-SAME: (%[[arg0:.*]]: tensor<bf16>)
+// CHECK-NOT: hfusion.cast
+// CHECK: %[[result:.*]] = linalg.elemwise_binary
+// CHECK: %[[arg0]], %[[arg0]] : tensor<bf16>, tensor<bf16>
+// CHECK-NOT: hfusion.cast
+// CHECK: return %[[result]] : tensor<bf16>
+
+func.func @unusedBifurcation(%arg0: tensor<bf16>) -> tensor<bf16> {
+    %empty_f32 = tensor.empty() : tensor<f32>
+    %empty_i1 = tensor.empty() : tensor<i1>
+    %empty_bf16 = tensor.empty() : tensor<bf16>
+    %0 = hfusion.cast {arith.fastmath = #arith.fastmath<contract>} ins(%arg0 : tensor<bf16>) outs(%empty_f32 : tensor<f32>) -> tensor<f32>
+    %1 = hfusion.cast ins(%0 : tensor<f32>) outs(%empty_i1 : tensor<i1>) -> tensor<i1>
+    %2 = hfusion.cast ins(%1 : tensor<i1>) outs(%empty_bf16 : tensor<bf16>) -> tensor<bf16>
+    %3 = hfusion.cast {arith.fastmath = #arith.fastmath<contract>} ins(%0 : tensor<f32>) outs(%empty_bf16 : tensor<bf16>) -> tensor<bf16>
+    %add_res = linalg.elemwise_binary { add, fun = #linalg.binary_fn<add> } ins(%arg0, %3 : tensor<bf16>, tensor<bf16>) outs(%empty_bf16 : tensor<bf16>) -> tensor<bf16>
+    return %add_res : tensor<bf16>
+}
+
+// -----
+
+// CHECK-LABEL: @liveSingleCast
+// CHECK-SAME: (%[[arg0:.*]]: tensor<bf16>)
+// CHECK: %[[liveCast:.*]] = hfusion.cast ins(%[[arg0]]
+// CHECK: return %[[liveCast]] : tensor<f32>
+
+func.func @liveSingleCast(%arg0: tensor<bf16>) -> tensor<f32> {
+    %empty_f32 = tensor.empty() : tensor<f32>
+    %0 = hfusion.cast ins(%arg0 : tensor<bf16>) outs(%empty_f32 : tensor<f32>) -> tensor<f32>
+    return %0 : tensor<f32>
+}
+
+// -----
+
+// CHECK-LABEL: @liveChain
+// CHECK-SAME: (%[[arg0:.*]]: tensor<bf16>)
+// CHECK: %[[cast0:.*]] = hfusion.cast ins(%[[arg0]]
+// CHECK: %[[cast1:.*]] = hfusion.cast ins(%[[cast0]]
+// CHECK: return %[[cast1]] : tensor<f32>
+
+func.func @liveChain(%arg0: tensor<bf16>) -> tensor<f32> {
+    %empty_i1 = tensor.empty() : tensor<i1>
+    %empty_f32 = tensor.empty() : tensor<f32>
+    %0 = hfusion.cast ins(%arg0 : tensor<bf16>) outs(%empty_i1 :tensor<i1>) -> tensor<i1>
+    %1 = hfusion.cast ins(%0 : tensor<i1>) outs(%empty_f32 : tensor<f32>) -> tensor<f32>
+    return %1 : tensor<f32>
+}
+
+// -----
+
+// CHECK-LABEL: @liveBifurcation
+// CHECK-SAME: (%[[arg0:.*]]: tensor<bf16>)
+// CHECK: %[[cast0:.*]] = hfusion.cast {arith.fastmath = #arith.fastmath<contract>} ins(%[[arg0]]
+// CHECK-NOT: hfusion.cast
+// CHECK: %[[result:.*]] = linalg.elemwise_binary
+// CHECK: ins(%[[cast0]], %[[cast0]]
+// CHECK: return %[[result]] : tensor<f32>
+
+func.func @liveBifurcation(%arg0: tensor<bf16>) -> tensor<f32> {
+    %empty_bf16 = tensor.empty() : tensor<bf16>
+    %empty_f32 = tensor.empty() : tensor<f32>
+    %0 = hfusion.cast {arith.fastmath = #arith.fastmath<contract>} ins(%arg0 : tensor<bf16>) outs(%empty_f32 : tensor<f32>) -> tensor<f32>
+    %1 = hfusion.cast {arith.fastmath = #arith.fastmath<contract>} ins(%0 : tensor<f32>) outs(%empty_bf16 : tensor<bf16>) -> tensor<bf16>
+    %2 = hfusion.cast {arith.fastmath = #arith.fastmath<contract>} ins(%1 : tensor<bf16>) outs(%empty_f32 : tensor<f32>) -> tensor<f32>
+    %add_res = linalg.elemwise_binary { add, fun = #linalg.binary_fn<add> } ins(%0, %2 : tensor<f32>, tensor<f32>) outs(%empty_f32 : tensor<f32>) -> tensor<f32>
+    return %add_res : tensor<f32>
+}
+
+// -----
+
+// CHECK-LABEL: @floorAndCeilCastF32
+// CHECK-SAME: (%[[arg0:.*]]: tensor<f32>)
+// CHECK: %[[floor:.*]] = hfusion.cast {round_mode = #hfusion.round_mode<floor>} ins(%[[arg0]]
+// CHECK: %[[ceil:.*]] = hfusion.cast {round_mode = #hfusion.round_mode<ceil>} ins(%[[arg0]]
+
+func.func @floorAndCeilCastF32(%arg0: tensor<f32>) -> (tensor<f32>, tensor<f32>) {
+    %empty_floor = tensor.empty() : tensor<f32>
+    %empty_ceil = tensor.empty() : tensor<f32>
+    %0 = hfusion.cast {round_mode = #hfusion.round_mode<floor>} ins(%arg0 : tensor<f32>) outs(%empty_floor : tensor<f32>) -> tensor<f32>
+    %1 = hfusion.cast {round_mode = #hfusion.round_mode<ceil>} ins(%arg0 : tensor<f32>) outs(%empty_ceil : tensor<f32>) -> tensor<f32>
+    return %0, %1 : tensor<f32>, tensor<f32>
+}
+
+// -----
+
+// CHECK-LABEL: @castBetweenSameType
+// CHECK: hfusion.cast
+// CHECK: hfusion.cast
+// CHECK: hfusion.cast
+
+func.func @castBetweenSameType(%arg0: tensor<f16>) -> tensor<f16>{
+    %empty_0 = tensor.empty() : tensor<f32>
+    %empty_1 = tensor.empty() : tensor<f32>
+    %empty_2 = tensor.empty() : tensor<f16>
+    %0 = hfusion.cast ins(%arg0 : tensor<f16>) outs(%empty_0 : tensor<f32>) -> tensor<f32>
+    %1 = hfusion.cast ins(%0 : tensor<f32>) outs(%empty_1 : tensor<f32>) -> tensor<f32>
+    %2 = hfusion.cast ins(%1 : tensor<f32>) outs(%empty_2 : tensor<f16>) -> tensor<f16>
+    return %2 : tensor<f16>
+}
+
+// -----
+
+// Check not to remove live transpose (memref)
+// CHECK-LABEL: func @liveTransposeMemref
+// CHECK: linalg.transpose
+func.func @liveTransposeMemref(%arg0: memref<1x16xf32>, %arg1: memref<16x1xf32>) {
+  linalg.transpose ins(%arg0 : memref<1x16xf32>) outs(%arg1 : memref<16x1xf32>) permutation = [1, 0]
+  return
+}
+
+// -----
+
+// Check not to remove live transpose (tensor)
+// CHECK-LABEL: func @liveTransposeTensor
+// CHECK: linalg.transpose
+func.func @liveTransposeTensor(%arg0: tensor<1x16xf32>) -> tensor<16x1xf32> {
+  %empty = tensor.empty() : tensor<16x1xf32>
+  %0 = linalg.transpose ins(%arg0 : tensor<1x16xf32>) outs(%empty : tensor<16x1xf32>) permutation = [1, 0]
+  return %0 : tensor<16x1xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @unusedTranspose
+// CHECK-NOT: linalg.transpose
+func.func @unusedTranspose(%arg0 : tensor<1x16xf32>) -> tensor<1x16xf32> {
+  %empty = tensor.empty() : tensor<16x1xf32>
+  %0 = linalg.transpose ins(%arg0 : tensor<1x16xf32>) outs(%empty : tensor<16x1xf32>) permutation = [1, 0]
+  return %arg0 : tensor<1x16xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @TransposeChain0
+// CHECK: (%[[arg0:.*]]: tensor<1x16xf32>)
+// CHECK-NOT: linalg.transpose
+// CHECK: return %[[arg0]]
+func.func @TransposeChain0(%arg0: tensor<1x16xf32>) -> tensor<1x16xf32> {
+  %empty = tensor.empty() : tensor<16x1xf32>
+  %empty_transpose = tensor.empty() : tensor<1x16xf32>
+  %0 = linalg.transpose ins(%arg0 : tensor<1x16xf32>) outs(%empty : tensor<16x1xf32>) permutation = [1, 0]
+  %1 = linalg.transpose ins(%0 : tensor<16x1xf32>) outs(%empty_transpose : tensor<1x16xf32>) permutation = [1, 0]
+  return %1 : tensor<1x16xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @TransposeChain1
+// CHECK: (%[[arg0:.*]]: tensor<1x16xf32>)
+// CHECK: %[[trans:.*]] = linalg.transpose ins(%[[arg0]]
+// CHECK: return %[[trans]]
+func.func @TransposeChain1(%arg0: tensor<1x16xf32>) -> tensor<16x1xf32> {
+  %empty = tensor.empty() : tensor<16x1xf32>
+  %empty_transpose = tensor.empty() : tensor<1x16xf32>
+  %0 = linalg.transpose ins(%arg0 : tensor<1x16xf32>) outs(%empty : tensor<16x1xf32>) permutation = [1, 0]
+  %1 = linalg.transpose ins(%0 : tensor<16x1xf32>) outs(%empty_transpose : tensor<1x16xf32>) permutation = [1, 0]
+  %2 = linalg.transpose ins(%1 : tensor<1x16xf32>) outs(%empty : tensor<16x1xf32>) permutation = [1, 0]
+  return %2 : tensor<16x1xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @TransposeChain2
+// CHECK: (%[[arg0:.*]]: tensor<1x16xf32>)
+// CHECK-NOT: linalg.transpose
+// CHECK: return %[[arg0]]
+func.func @TransposeChain2(%arg0: tensor<1x16xf32>) -> tensor<1x16xf32> {
+  %empty = tensor.empty() : tensor<16x1xf32>
+  %empty_transpose = tensor.empty() : tensor<1x16xf32>
+  %0 = linalg.transpose ins(%arg0 : tensor<1x16xf32>) outs(%empty : tensor<16x1xf32>) permutation = [1, 0]
+  %1 = linalg.transpose ins(%0 : tensor<16x1xf32>) outs(%empty_transpose : tensor<1x16xf32>) permutation = [1, 0]
+  %2 = linalg.transpose ins(%1 : tensor<1x16xf32>) outs(%empty : tensor<16x1xf32>) permutation = [1, 0]
+  %3 = linalg.transpose ins(%2 : tensor<16x1xf32>) outs(%empty_transpose : tensor<1x16xf32>) permutation = [1, 0]
+  return %3 : tensor<1x16xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @TransposeChain3
+// CHECK: (%[[arg0:.*]]: tensor<1x16x8xf32>)
+// CHECK-NOT: linalg.transpose
+// CHECK: return %[[arg0]]
+func.func @TransposeChain3(%arg0: tensor<1x16x8xf32>) -> tensor<1x16x8xf32> {
+  %empty0 = tensor.empty() : tensor<16x1x8xf32>
+  %empty1 = tensor.empty() : tensor<8x1x16xf32>
+  %empty2 = tensor.empty() : tensor<1x8x16xf32>
+  %empty3 = tensor.empty() : tensor<1x16x8xf32>
+  %0 = linalg.transpose ins(%arg0 : tensor<1x16x8xf32>) outs(%empty0 : tensor<16x1x8xf32>) permutation = [1, 0, 2]
+  %1 = linalg.transpose ins(%0 : tensor<16x1x8xf32>) outs(%empty1 : tensor<8x1x16xf32>) permutation = [2, 1, 0]
+  %2 = linalg.transpose ins(%1 : tensor<8x1x16xf32>) outs(%empty2 : tensor<1x8x16xf32>) permutation = [1, 0, 2]
+  %3 = linalg.transpose ins(%2 : tensor<1x8x16xf32>) outs(%empty3 : tensor<1x16x8xf32>) permutation = [0, 2, 1]
+  return %3 : tensor<1x16x8xf32>
+}
+
+// -----
+// CHECK-LABEL:   func.func @castInLoop(
+// CHECK-SAME:                            %[[VAL_0:.*]]: tensor<1x1x12xbf16>,
+// CHECK-SAME:                            %[[VAL_1:.*]]: tensor<1x1x12xbf16>) -> tensor<1x1x12xbf16> {
+func.func @castInLoop(%arg0: tensor<1x1x12xbf16>, %arg1: tensor<1x1x12xbf16>) -> tensor<1x1x12xbf16> {
+  // CHECK:           %[[VAL_2:.*]] = arith.constant 1 : i32
+  // CHECK:           %[[VAL_3:.*]] = arith.constant 4 : i32
+  // CHECK:           %[[VAL_4:.*]] = tensor.empty
+  // CHECK:           %[[VAL_5:.*]] = tensor.empty
+  // CHECK:           %[[VAL_6:.*]] = hfusion.cast
+  // CHECK:           %[[VAL_7:.*]] = hfusion.cast
+  %c1_i32 = arith.constant 1 : i32
+  %c4_i32 = arith.constant 4 : i32
+  %0 = tensor.empty() : tensor<1x1x12xbf16>
+  %1 = tensor.empty() : tensor<1x1x12xf32>
+  %2 = hfusion.cast {enable_overflow = true, round_mode = #hfusion.round_mode<rint>} ins(%arg0 : tensor<1x1x12xbf16>) outs(%1 : tensor<1x1x12xf32>) -> tensor<1x1x12xf32>
+  %4 = hfusion.cast {enable_overflow = true, round_mode = #hfusion.round_mode<rint>} ins(%0 : tensor<1x1x12xbf16>) outs(%1 : tensor<1x1x12xf32>) -> tensor<1x1x12xf32>
+
+  // CHECK:           %[[VAL_8:.*]] = tensor.empty() : tensor<1x1x12xf32>
+  // CHECK:           %[[VAL_9:.*]] = hfusion.cast {{.*}} ins(%[[VAL_1]] : tensor<1x1x12xbf16>) outs(%[[VAL_8]] : tensor<1x1x12xf32>) -> tensor<1x1x12xf32>
+  // CHECK:           %[[VAL_10:.*]] = scf.for %[[VAL_11:.*]] = %[[VAL_2]] to %[[VAL_3]] step %[[VAL_2]] iter_args(%[[VAL_12:.*]] = %[[VAL_9]]) -> (tensor<1x1x12xf32>)  : i32 {
+  // CHECK:             %[[VAL_13:.*]] = linalg.elemwise_binary {{.*}} ins(%[[VAL_12]], %[[VAL_6]] : tensor<1x1x12xf32>, tensor<1x1x12xf32>) outs(%[[VAL_7]] : tensor<1x1x12xf32>) -> tensor<1x1x12xf32>
+  // CHECK:             scf.yield %[[VAL_13]] : tensor<1x1x12xf32>
+  // CHECK:           }
+  // CHECK:           %[[VAL_14:.*]] = tensor.empty() : tensor<1x1x12xbf16>
+  // CHECK:           %[[VAL_15:.*]] = hfusion.cast {{.*}} ins(%[[VAL_10]] : tensor<1x1x12xf32>) outs(%[[VAL_14]] : tensor<1x1x12xbf16>) -> tensor<1x1x12xbf16>
+  // CHECK:           return %[[VAL_15]] : tensor<1x1x12xbf16>
+  %7 = scf.for %arg2 = %c1_i32 to %c4_i32 step %c1_i32 iter_args(%arg3 = %arg1) -> (tensor<1x1x12xbf16>)  : i32 {
+    %8 = hfusion.cast {enable_overflow = true, round_mode = #hfusion.round_mode<rint>} ins(%arg3 : tensor<1x1x12xbf16>) outs(%1 : tensor<1x1x12xf32>) -> tensor<1x1x12xf32>
+    %9 = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%8, %2 : tensor<1x1x12xf32>, tensor<1x1x12xf32>) outs(%4 : tensor<1x1x12xf32>) -> tensor<1x1x12xf32>
+    %10 = hfusion.cast {enable_overflow = true, round_mode = #hfusion.round_mode<rint>} ins(%9 : tensor<1x1x12xf32>) outs(%0 : tensor<1x1x12xbf16>) -> tensor<1x1x12xbf16>
+    scf.yield %10 : tensor<1x1x12xbf16>
+  }
+  return %7 : tensor<1x1x12xbf16>
+}
+
+// -----
+// CHECK-LABEL: func.func @triton_not_8d
+func.func @triton_not_8d(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xi64>, %arg3: memref<?xi64>) {
+  %c-1_i64 = arith.constant -1 : i64
+  %0 = tensor.empty() : tensor<2x2x2x2x2x2x2x2xi64>
+  %1 = linalg.fill ins(%c-1_i64 : i64) outs(%0 : tensor<2x2x2x2x2x2x2x2xi64>) -> tensor<2x2x2x2x2x2x2x2xi64>
+  %reinterpret_cast = memref.reinterpret_cast %arg2 to offset: [0], sizes: [2, 2, 2, 2, 2, 2, 2, 2], strides: [128, 64, 32, 16, 8, 4, 2, 1] : memref<?xi64> to memref<2x2x2x2x2x2x2x2xi64, strided<[128, 64, 32, 16, 8, 4, 2, 1]>>
+  %alloc = memref.alloc() : memref<2x2x2x2x2x2x2x2xi64>
+  memref.copy %reinterpret_cast, %alloc : memref<2x2x2x2x2x2x2x2xi64, strided<[128, 64, 32, 16, 8, 4, 2, 1]>> to memref<2x2x2x2x2x2x2x2xi64>
+  %2 = bufferization.to_tensor %alloc restrict writable : memref<2x2x2x2x2x2x2x2xi64>
+  // CHECK:  %[[VAL_2:.*]] = hfusion.elemwise_unary {fun = #hfusion.unary_fn<vnot>}
+  // CHECK-NOT: hfusion.binary_fn<vxor>
+  // CHECK-NOT: hfusion.binary_fn<vor>
+  // CHECK-NOT: hfusion.binary_fn<vand>
+  %3 = hfusion.elemwise_binary {fun = #hfusion.binary_fn<vxor>} ins(%2, %1 : tensor<2x2x2x2x2x2x2x2xi64>, tensor<2x2x2x2x2x2x2x2xi64>) outs(%0 : tensor<2x2x2x2x2x2x2x2xi64>) -> tensor<2x2x2x2x2x2x2x2xi64>
+  %reinterpret_cast_0 = memref.reinterpret_cast %arg3 to offset: [0], sizes: [2, 2, 2, 2, 2, 2, 2, 2], strides: [128, 64, 32, 16, 8, 4, 2, 1] : memref<?xi64> to memref<2x2x2x2x2x2x2x2xi64, strided<[128, 64, 32, 16, 8, 4, 2, 1]>>
+  bufferization.materialize_in_destination %3 in writable %reinterpret_cast_0 : (tensor<2x2x2x2x2x2x2x2xi64>,  memref<2x2x2x2x2x2x2x2xi64, strided<[128, 64, 32, 16, 8, 4, 2, 1]>>) -> ()
+  return
+}
+
+// -----
+
+// CHECK-LABEL: @reserve_cast
+// CHECK: hfusion.cast
+// CHECK: %[[VAL:.*]] = hfusion.cast
+// CHECK-SAME: -> tensor<f32>
+// CHECK: return %[[VAL]] : tensor<f32>
+
+func.func @reserve_cast(%arg0: tensor<f32>) -> tensor<f32> {
+    %empty_f32 = tensor.empty() : tensor<f32>
+    %empty_bf16 = tensor.empty() : tensor<bf16>
+    %0 = hfusion.cast ins(%arg0 : tensor<f32>) outs(%empty_bf16 : tensor<bf16>) -> tensor<bf16>
+    %1 = hfusion.cast ins(%0 : tensor<bf16>) outs(%empty_f32 : tensor<f32>) -> tensor<f32>
+    return %1 : tensor<f32>
+}
+
+// -----
+
+// CHECK-LABEL: @still_eliminate_cast
+// CHECK-SAME: (%[[arg0:.*]]: tensor<f32>)
+// CHECK-NOT: hfusion.cast
+// CHECK: return %[[arg0]] : tensor<f32>
+
+func.func @still_eliminate_cast(%arg0: tensor<f32>) -> tensor<f32> {
+    %empty_f32 = tensor.empty() : tensor<f32>
+    %empty_bf16 = tensor.empty() : tensor<bf16>
+    %0 = hfusion.cast {arith.fastmath = #arith.fastmath<contract>} ins(%arg0 : tensor<f32>) outs(%empty_bf16 : tensor<bf16>) -> tensor<bf16>
+    %1 = hfusion.cast ins(%0 : tensor<bf16>) outs(%empty_f32 : tensor<f32>) -> tensor<f32>
+    return %1 : tensor<f32>
+}
+
+// -----
+
+// CHECK-LABEL: func @castInLoopWithInnerUse
+// CHECK: scf.for
+// CHECK: hfusion.cast
+// CHECK: tensor.extract_slice
+// CHECK: scf.yield
+func.func @castInLoopWithInnerUse(%arg0: tensor<16x32xf16>, %arg1: tensor<16x32xf16>) -> (tensor<16x32xf16>, tensor<1x32xf16>) {
+  %c1_i32 = arith.constant 1 : i32
+  %c4_i32 = arith.constant 4 : i32
+  %empty_f32 = tensor.empty() : tensor<16x32xf32>
+  %empty_f16 = tensor.empty() : tensor<16x32xf16>
+  %init_slice = tensor.empty() : tensor<1x32xf16>
+  %0 = hfusion.cast ins(%arg0 : tensor<16x32xf16>) outs(%empty_f32 : tensor<16x32xf32>) -> tensor<16x32xf32>
+  %1:2 = scf.for %i = %c1_i32 to %c4_i32 step %c1_i32 iter_args(%arg = %arg1, %arg_slice = %init_slice) -> (tensor<16x32xf16>, tensor<1x32xf16>) : i32 {
+    %2 = hfusion.cast ins(%arg : tensor<16x32xf16>) outs(%empty_f32 : tensor<16x32xf32>) -> tensor<16x32xf32>
+    %3 = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%2, %0 : tensor<16x32xf32>, tensor<16x32xf32>) outs(%empty_f32 : tensor<16x32xf32>) -> tensor<16x32xf32>
+    %4 = hfusion.cast ins(%3 : tensor<16x32xf32>) outs(%empty_f16 : tensor<16x32xf16>) -> tensor<16x32xf16>
+    %extracted_slice = tensor.extract_slice %4[0, 0] [1, 32] [1, 1] : tensor<16x32xf16> to tensor<1x32xf16>
+    scf.yield %4, %extracted_slice : tensor<16x32xf16>, tensor<1x32xf16>
+  }
+  return %1#0, %1#1 : tensor<16x32xf16>, tensor<1x32xf16>
+}
+
+// -----
+// CHECK-LABEL: func.func @collapse_chain
+// CHECK:         %[[C:.*]] = arith.constant dense<4> : tensor<32xi32>
+// CHECK:         %[[M:.*]] = linalg.elemwise_binary {fun = #linalg.binary_fn<mul>} ins(%arg0, %[[C]]
+// CHECK:         linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%[[M]], %arg1
+// CHECK-NOT:     binary_fn<add>
+func.func @collapse_chain(%inv: tensor<32xi32>, %b: tensor<32xi32>, %e: tensor<32xi32>) -> tensor<32xi32> {
+  %0 = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%inv, %b : tensor<32xi32>, tensor<32xi32>) outs(%e : tensor<32xi32>) -> tensor<32xi32>
+  %1 = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%inv, %0 : tensor<32xi32>, tensor<32xi32>) outs(%e : tensor<32xi32>) -> tensor<32xi32>
+  %2 = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%inv, %1 : tensor<32xi32>, tensor<32xi32>) outs(%e : tensor<32xi32>) -> tensor<32xi32>
+  %3 = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%inv, %2 : tensor<32xi32>, tensor<32xi32>) outs(%e : tensor<32xi32>) -> tensor<32xi32>
+  return %3 : tensor<32xi32>
+}
+
+// -----
+// CHECK-LABEL: func.func @collapse_multi_operand
+// CHECK:         arith.constant dense<2>
+// CHECK-COUNT-2: binary_fn<mul>
+// CHECK:         binary_fn<add>
+// CHECK-NOT:     binary_fn<add>
+// CHECK:         return
+func.func @collapse_multi_operand(%a: tensor<8xi32>, %b: tensor<8xi32>, %e: tensor<8xi32>) -> tensor<8xi32> {
+  %0 = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%a, %b : tensor<8xi32>, tensor<8xi32>) outs(%e : tensor<8xi32>) -> tensor<8xi32>
+  %1 = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%0, %a : tensor<8xi32>, tensor<8xi32>) outs(%e : tensor<8xi32>) -> tensor<8xi32>
+  %2 = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%1, %b : tensor<8xi32>, tensor<8xi32>) outs(%e : tensor<8xi32>) -> tensor<8xi32>
+  return %2 : tensor<8xi32>
+}
+
+// -----
+// CHECK-LABEL: func.func @collapse_self_add
+// CHECK:         %[[C:.*]] = arith.constant dense<2> : tensor<4xi32>
+// CHECK:         %[[M:.*]] = linalg.elemwise_binary {fun = #linalg.binary_fn<mul>} ins(%arg0, %[[C]]
+// CHECK:         return %[[M]]
+// CHECK-NOT:     binary_fn<add>
+func.func @collapse_self_add(%a: tensor<4xi32>, %e: tensor<4xi32>) -> tensor<4xi32> {
+  %0 = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%a, %a : tensor<4xi32>, tensor<4xi32>) outs(%e : tensor<4xi32>) -> tensor<4xi32>
+  return %0 : tensor<4xi32>
+}
+
+// -----
+// CHECK-LABEL: func.func @collapse_multiuse
+// CHECK:         %[[C:.*]] = arith.constant dense<2> : tensor<4xi32>
+// CHECK:         %[[K:.*]] = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%arg0, %arg1
+// CHECK:         %[[M:.*]] = linalg.elemwise_binary {fun = #linalg.binary_fn<mul>} ins(%arg0, %[[C]]
+// CHECK:         %[[R:.*]] = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%[[M]], %[[K]]
+// CHECK:         return %[[R]], %[[K]]
+func.func @collapse_multiuse(%inv: tensor<4xi32>, %b: tensor<4xi32>, %e: tensor<4xi32>) -> (tensor<4xi32>, tensor<4xi32>) {
+  %0 = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%inv, %b : tensor<4xi32>, tensor<4xi32>) outs(%e : tensor<4xi32>) -> tensor<4xi32>
+  %1 = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%inv, %0 : tensor<4xi32>, tensor<4xi32>) outs(%e : tensor<4xi32>) -> tensor<4xi32>
+  %2 = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%inv, %1 : tensor<4xi32>, tensor<4xi32>) outs(%e : tensor<4xi32>) -> tensor<4xi32>
+  return %2, %0 : tensor<4xi32>, tensor<4xi32>
+}
+
+// -----
+// CHECK-LABEL: func.func @no_collapse_float
+// CHECK-COUNT-2: binary_fn<add>
+// CHECK-NOT:     binary_fn<mul>
+func.func @no_collapse_float(%inv: tensor<4xf32>, %b: tensor<4xf32>, %e: tensor<4xf32>) -> tensor<4xf32> {
+  %0 = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%inv, %b : tensor<4xf32>, tensor<4xf32>) outs(%e : tensor<4xf32>) -> tensor<4xf32>
+  %1 = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%inv, %0 : tensor<4xf32>, tensor<4xf32>) outs(%e : tensor<4xf32>) -> tensor<4xf32>
+  return %1 : tensor<4xf32>
+}
+
+// -----
+// CHECK-LABEL: func.func @no_collapse_distinct
+// CHECK-COUNT-2: binary_fn<add>
+// CHECK-NOT:     binary_fn<mul>
+func.func @no_collapse_distinct(%a: tensor<4xi32>, %b: tensor<4xi32>, %c: tensor<4xi32>, %e: tensor<4xi32>) -> tensor<4xi32> {
+  %0 = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%a, %b : tensor<4xi32>, tensor<4xi32>) outs(%e : tensor<4xi32>) -> tensor<4xi32>
+  %1 = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%0, %c : tensor<4xi32>, tensor<4xi32>) outs(%e : tensor<4xi32>) -> tensor<4xi32>
+  return %1 : tensor<4xi32>
+}
+
+// -----
+// Test: hoist negation through two consecutive matmuls to the final output
+// The pattern moves both negations forward: matmul1 result negation hoists through matmul2,
+// and matmul2 result negation becomes the final negation
+// CHECK-LABEL: func.func @hoist_negation_two_matmuls
+// CHECK-SAME: (%[[A:.*]]: tensor<4x8xf32>, %[[B:.*]]: tensor<8x4xf32>, %[[C:.*]]: tensor<4x4xf32>)
+// CHECK-DAG: %[[NEG_ONE:.*]] = arith.constant -1.000000e+00 : f32
+// CHECK: %[[MATMUL1:.*]] = linalg.matmul ins(%[[A]], %[[B]] : tensor<4x8xf32>, tensor<8x4xf32>)
+// CHECK: %[[MATMUL2:.*]] = linalg.matmul ins(%[[MATMUL1]], %[[C]] : tensor<4x4xf32>, tensor<4x4xf32>)
+// CHECK: %[[NEG2:.*]] = linalg.elemwise_binary {fun = #linalg.binary_fn<mul>} ins(%[[MATMUL2]], %[[NEG_ONE]]
+// CHECK: %[[NEG_FINAL:.*]] = linalg.elemwise_binary {fun = #linalg.binary_fn<mul>} ins(%[[NEG2]], %[[NEG_ONE]]
+// CHECK: return %[[NEG_FINAL]]
+func.func @hoist_negation_two_matmuls(%a: tensor<4x8xf32>, %b: tensor<8x4xf32>, %c: tensor<4x4xf32>) -> tensor<4x4xf32> {
+  %init1 = tensor.empty() : tensor<4x4xf32>
+  %cst_zero = arith.constant 0.000000e+00 : f32
+  %fill1 = linalg.fill ins(%cst_zero : f32) outs(%init1 : tensor<4x4xf32>) -> tensor<4x4xf32>
+  %matmul1 = linalg.matmul ins(%a, %b : tensor<4x8xf32>, tensor<8x4xf32>) outs(%fill1 : tensor<4x4xf32>) -> tensor<4x4xf32>
+  %cst_neg1 = arith.constant -1.000000e+00 : f32
+  %out1 = tensor.empty() : tensor<4x4xf32>
+  %neg1 = linalg.elemwise_binary {fun = #linalg.binary_fn<mul>} ins(%matmul1, %cst_neg1 : tensor<4x4xf32>, f32) outs(%out1 : tensor<4x4xf32>) -> tensor<4x4xf32>
+
+  %init2 = tensor.empty() : tensor<4x4xf32>
+  %fill2 = linalg.fill ins(%cst_zero : f32) outs(%init2 : tensor<4x4xf32>) -> tensor<4x4xf32>
+  %matmul2 = linalg.matmul ins(%neg1, %c : tensor<4x4xf32>, tensor<4x4xf32>) outs(%fill2 : tensor<4x4xf32>) -> tensor<4x4xf32>
+  %out2 = tensor.empty() : tensor<4x4xf32>
+  %neg2 = linalg.elemwise_binary {fun = #linalg.binary_fn<mul>} ins(%matmul2, %cst_neg1 : tensor<4x4xf32>, f32) outs(%out2 : tensor<4x4xf32>) -> tensor<4x4xf32>
+
+  return %neg2 : tensor<4x4xf32>
+}
+
+// -----
+// Test: negation NOT hoisted when scaling op has multiple uses (not just one consumer matmul)
+// CHECK-LABEL: func.func @no_hoist_multi_use
+// CHECK: %[[MATMUL1:.*]] = linalg.matmul ins(%arg0, %arg1
+// CHECK: %[[NEG:.*]] = linalg.elemwise_binary {fun = #linalg.binary_fn<mul>} ins(%[[MATMUL1]],
+// CHECK: %[[MATMUL2:.*]] = linalg.matmul ins(%[[NEG]], %arg2
+// CHECK: %[[ADD:.*]] = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%[[NEG]], %[[NEG]]
+// CHECK: return %[[MATMUL2]], %[[ADD]]
+func.func @no_hoist_multi_use(%a: tensor<4x8xf32>, %b: tensor<8x4xf32>, %c: tensor<4x4xf32>) -> (tensor<4x4xf32>, tensor<4x4xf32>) {
+  %init = tensor.empty() : tensor<4x4xf32>
+  %cst_zero = arith.constant 0.000000e+00 : f32
+  %fill = linalg.fill ins(%cst_zero : f32) outs(%init : tensor<4x4xf32>) -> tensor<4x4xf32>
+  %matmul1 = linalg.matmul ins(%a, %b : tensor<4x8xf32>, tensor<8x4xf32>) outs(%fill : tensor<4x4xf32>) -> tensor<4x4xf32>
+  %cst_neg1 = arith.constant -1.000000e+00 : f32
+  %out = tensor.empty() : tensor<4x4xf32>
+  %neg = linalg.elemwise_binary {fun = #linalg.binary_fn<mul>} ins(%matmul1, %cst_neg1 : tensor<4x4xf32>, f32) outs(%out : tensor<4x4xf32>) -> tensor<4x4xf32>
+  %fill2 = linalg.fill ins(%cst_zero : f32) outs(%init : tensor<4x4xf32>) -> tensor<4x4xf32>
+  %matmul2 = linalg.matmul ins(%neg, %c : tensor<4x4xf32>, tensor<4x4xf32>) outs(%fill2 : tensor<4x4xf32>) -> tensor<4x4xf32>
+  %out2 = tensor.empty() : tensor<4x4xf32>
+  %add = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%neg, %neg : tensor<4x4xf32>, tensor<4x4xf32>) outs(%out2 : tensor<4x4xf32>) -> tensor<4x4xf32>
+  return %matmul2, %add : tensor<4x4xf32>, tensor<4x4xf32>
+}
+
+// -----
+// Test: sub(0, matmul) NOT hoisted when scaling op has multiple uses (not just one consumer matmul)
+// CHECK-LABEL: func.func @no_hoist_sub_zero_multi_use_matmul
+// CHECK: %[[MATMUL1:.*]] = linalg.matmul ins(%arg0, %arg1
+// CHECK: %[[NEG:.*]] = linalg.elemwise_binary {fun = #linalg.binary_fn<sub>} ins(%{{.*}}, %[[MATMUL1]]
+// CHECK: %[[MATMUL2:.*]] = linalg.matmul ins(%[[NEG]], %arg2
+// CHECK: %[[ADD:.*]] = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%[[NEG]], %[[NEG]]
+// CHECK: return %[[MATMUL2]], %[[ADD]]
+func.func @no_hoist_sub_zero_multi_use_matmul(%a: tensor<4x8xf32>, %b: tensor<8x4xf32>, %c: tensor<4x4xf32>) -> (tensor<4x4xf32>, tensor<4x4xf32>) {
+  %init = tensor.empty() : tensor<4x4xf32>
+  %cst_zero = arith.constant 0.000000e+00 : f32
+  %fill = linalg.fill ins(%cst_zero : f32) outs(%init : tensor<4x4xf32>) -> tensor<4x4xf32>
+  %matmul1 = linalg.matmul ins(%a, %b : tensor<4x8xf32>, tensor<8x4xf32>) outs(%fill : tensor<4x4xf32>) -> tensor<4x4xf32>
+
+  %out1 = tensor.empty() : tensor<4x4xf32>
+  %neg = linalg.elemwise_binary {fun = #linalg.binary_fn<sub>} ins(%cst_zero, %matmul1 : f32, tensor<4x4xf32>) outs(%out1 : tensor<4x4xf32>) -> tensor<4x4xf32>
+
+  %fill2 = linalg.fill ins(%cst_zero : f32) outs(%init : tensor<4x4xf32>) -> tensor<4x4xf32>
+  %matmul2 = linalg.matmul ins(%neg, %c : tensor<4x4xf32>, tensor<4x4xf32>) outs(%fill2 : tensor<4x4xf32>) -> tensor<4x4xf32>
+
+  %out2 = tensor.empty() : tensor<4x4xf32>
+  %add = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%neg, %neg : tensor<4x4xf32>, tensor<4x4xf32>) outs(%out2 : tensor<4x4xf32>) -> tensor<4x4xf32>
+
+  return %matmul2, %add : tensor<4x4xf32>, tensor<4x4xf32>
+}
+
+// -----
+// Test: hoist sub(0, x) negation through two consecutive matmuls to the final output
+// CHECK-LABEL: func.func @hoist_sub_zero_negation_two_matmuls
+// CHECK-SAME: (%[[A:.*]]: tensor<4x8xf32>, %[[B:.*]]: tensor<8x4xf32>, %[[C:.*]]: tensor<4x4xf32>)
+// CHECK-DAG: %[[ZERO:.*]] = arith.constant 0.000000e+00 : f32
+// CHECK-DAG: %[[NEG_ONE:.*]] = arith.constant -1.000000e+00 : f32
+// CHECK: %[[MATMUL1:.*]] = linalg.matmul ins(%[[A]], %[[B]] : tensor<4x8xf32>, tensor<8x4xf32>)
+// CHECK: %[[MATMUL2:.*]] = linalg.matmul ins(%[[MATMUL1]], %[[C]] : tensor<4x4xf32>, tensor<4x4xf32>)
+// CHECK: %[[NEG2:.*]] = linalg.elemwise_binary {fun = #linalg.binary_fn<mul>} ins(%[[MATMUL2]], %[[NEG_ONE]]
+// CHECK: %[[NEG_FINAL:.*]] = linalg.elemwise_binary {fun = #linalg.binary_fn<sub>} ins(%[[ZERO]], %[[NEG2]]
+// CHECK: return %[[NEG_FINAL]]
+func.func @hoist_sub_zero_negation_two_matmuls(%a: tensor<4x8xf32>, %b: tensor<8x4xf32>, %c: tensor<4x4xf32>) -> tensor<4x4xf32> {
+  %init1 = tensor.empty() : tensor<4x4xf32>
+  %cst_zero = arith.constant 0.000000e+00 : f32
+  %fill1 = linalg.fill ins(%cst_zero : f32) outs(%init1 : tensor<4x4xf32>) -> tensor<4x4xf32>
+  %matmul1 = linalg.matmul ins(%a, %b : tensor<4x8xf32>, tensor<8x4xf32>) outs(%fill1 : tensor<4x4xf32>) -> tensor<4x4xf32>
+
+  %out1 = tensor.empty() : tensor<4x4xf32>
+  %neg1 = linalg.elemwise_binary {fun = #linalg.binary_fn<sub>} ins(%cst_zero, %matmul1 : f32, tensor<4x4xf32>) outs(%out1 : tensor<4x4xf32>) -> tensor<4x4xf32>
+
+  %init2 = tensor.empty() : tensor<4x4xf32>
+  %fill2 = linalg.fill ins(%cst_zero : f32) outs(%init2 : tensor<4x4xf32>) -> tensor<4x4xf32>
+  %matmul2 = linalg.matmul ins(%neg1, %c : tensor<4x4xf32>, tensor<4x4xf32>) outs(%fill2 : tensor<4x4xf32>) -> tensor<4x4xf32>
+
+  %out2 = tensor.empty() : tensor<4x4xf32>
+  %neg2 = linalg.elemwise_binary {fun = #linalg.binary_fn<sub>} ins(%cst_zero, %matmul2 : f32, tensor<4x4xf32>) outs(%out2 : tensor<4x4xf32>) -> tensor<4x4xf32>
+
+  return %neg2 : tensor<4x4xf32>
+}
+
+// -----
+// Test: negation NOT hoisted when matmul accumulates onto a non-zero bias.
+// The forward hoisting would give s*(A*B + bias) but we can't move the scale
+// through a consumer if the producer has bias, so the mul stays on the result.
+// CHECK-LABEL: func.func @no_hoist_negation_bias_matmul
+// CHECK: %[[MATMUL1:.*]] = linalg.matmul ins(%arg0, %arg1{{.*}}outs(%arg2
+// CHECK: %[[NEG:.*]] = linalg.elemwise_binary {fun = #linalg.binary_fn<mul>} ins(%[[MATMUL1]],
+// CHECK: %[[MATMUL2:.*]] = linalg.matmul ins(%[[NEG]], %arg3
+// CHECK: return
+func.func @no_hoist_negation_bias_matmul(%a: tensor<4x8xf32>, %b: tensor<8x4xf32>, %bias: tensor<4x4xf32>, %c: tensor<4x4xf32>) -> tensor<4x4xf32> {
+  %matmul = linalg.matmul ins(%a, %b : tensor<4x8xf32>, tensor<8x4xf32>) outs(%bias : tensor<4x4xf32>) -> tensor<4x4xf32>
+  %cst_neg1 = arith.constant -1.000000e+00 : f32
+  %out = tensor.empty() : tensor<4x4xf32>
+  %neg = linalg.elemwise_binary {fun = #linalg.binary_fn<mul>} ins(%matmul, %cst_neg1 : tensor<4x4xf32>, f32) outs(%out : tensor<4x4xf32>) -> tensor<4x4xf32>
+  %init = tensor.empty() : tensor<4x4xf32>
+  %cst_zero = arith.constant 0.000000e+00 : f32
+  %fill = linalg.fill ins(%cst_zero : f32) outs(%init : tensor<4x4xf32>) -> tensor<4x4xf32>
+  %matmul2 = linalg.matmul ins(%neg, %c : tensor<4x4xf32>, tensor<4x4xf32>) outs(%fill : tensor<4x4xf32>) -> tensor<4x4xf32>
+  return %matmul2 : tensor<4x4xf32>
+}
+
+// -----
+// Test: scalar mul NOT hoisted when consumer matmul accumulates onto a non-zero bias.
+// CHECK-LABEL: func.func @no_hoist_scale_bias_matmul
+// CHECK: %[[MATMUL1:.*]] = linalg.matmul ins(%arg0, %arg1
+// CHECK: %[[SCALE:.*]] = linalg.elemwise_binary {fun = #linalg.binary_fn<mul>} ins(%[[MATMUL1]],
+// CHECK: %[[MATMUL2:.*]] = linalg.matmul ins(%[[SCALE]], %arg2{{.*}}outs(%arg3
+// CHECK: return
+func.func @no_hoist_scale_bias_matmul(%a: tensor<4x8xf32>, %b: tensor<8x4xf32>, %c: tensor<4x4xf32>, %bias: tensor<4x4xf32>) -> tensor<4x4xf32> {
+  %init = tensor.empty() : tensor<4x4xf32>
+  %cst_zero = arith.constant 0.000000e+00 : f32
+  %fill = linalg.fill ins(%cst_zero : f32) outs(%init : tensor<4x4xf32>) -> tensor<4x4xf32>
+  %matmul = linalg.matmul ins(%a, %b : tensor<4x8xf32>, tensor<8x4xf32>) outs(%fill : tensor<4x4xf32>) -> tensor<4x4xf32>
+  %cst_scale = arith.constant 2.000000e+00 : f32
+  %out = tensor.empty() : tensor<4x4xf32>
+  %scaled = linalg.elemwise_binary {fun = #linalg.binary_fn<mul>} ins(%matmul, %cst_scale : tensor<4x4xf32>, f32) outs(%out : tensor<4x4xf32>) -> tensor<4x4xf32>
+  %matmul2 = linalg.matmul ins(%scaled, %c : tensor<4x4xf32>, tensor<4x4xf32>) outs(%bias : tensor<4x4xf32>) -> tensor<4x4xf32>
+  return %matmul2 : tensor<4x4xf32>
+}
+
+// -----
+// Test: hoist mul->sub pattern through matmul chain (real-world case)
+// Pattern: matmul1 -> mul(result, -1) -> matmul2 -> sub(0, result) -> matmul3
+// After hoisting: matmul1 -> matmul2 -> matmul3 -> mul(result, -1) -> mul(result, -1)
+// CHECK-LABEL: func.func @hoist_mul_sub_matmul_chain
+// CHECK-SAME: (%[[A:.*]]: tensor<128x17xbf16>, %[[B:.*]]: tensor<17x19xbf16>, %[[C:.*]]: tensor<19x23xf32>, %[[D:.*]]: tensor<23x128xf32>)
+// CHECK-DAG: %[[NEG_ONE:.*]] = arith.constant -1.000000e+00 : f32
+// CHECK-DAG: %[[ZERO:.*]] = arith.constant 0.000000e+00 : f32
+// CHECK: %[[MATMUL1:.*]] = linalg.matmul {{.*}} ins(%[[A]], %[[B]]
+// CHECK-NOT: linalg.elemwise_binary {fun = #linalg.binary_fn<mul>}
+// CHECK: %[[MATMUL2:.*]] = linalg.matmul {{.*}} ins(%[[MATMUL1]], %[[C]]
+// CHECK-NOT: linalg.elemwise_binary {fun = #linalg.binary_fn<sub>}
+// CHECK: %[[MATMUL3:.*]] = linalg.matmul {{.*}} ins(%[[MATMUL2]], %[[D]]
+// CHECK: %[[MUL1:.*]] = linalg.elemwise_binary {fun = #linalg.binary_fn<mul>} ins(%[[MATMUL3]], %[[NEG_ONE]]
+// CHECK: %[[MUL2:.*]] = linalg.elemwise_binary {fun = #linalg.binary_fn<mul>} ins(%[[MUL1]], %[[NEG_ONE]]
+// CHECK: return %[[MUL2]]
+func.func @hoist_mul_sub_matmul_chain(%a: tensor<128x17xbf16>, %b: tensor<17x19xbf16>, %c: tensor<19x23xf32>, %d: tensor<23x128xf32>) -> tensor<128x128xf32> {
+  %cst = arith.constant -1.000000e+00 : f32
+  %cst_0 = arith.constant 0.000000e+00 : f32
+  %empty1 = tensor.empty() : tensor<128x19xf32>
+  %init1 = linalg.fill ins(%cst_0 : f32) outs(%empty1 : tensor<128x19xf32>) -> tensor<128x19xf32>
+  %scale = linalg.fill ins(%cst : f32) outs(%empty1 : tensor<128x19xf32>) -> tensor<128x19xf32>
+  %empty2 = tensor.empty() : tensor<128x23xf32>
+  %init2 = linalg.fill ins(%cst_0 : f32) outs(%empty2 : tensor<128x23xf32>) -> tensor<128x23xf32>
+  %empty3 = tensor.empty() : tensor<128x128xf32>
+  %init3 = linalg.fill ins(%cst_0 : f32) outs(%empty3 : tensor<128x128xf32>) -> tensor<128x128xf32>
+
+  %matmul1 = linalg.matmul {input_precision = "ieee"} ins(%a, %b : tensor<128x17xbf16>, tensor<17x19xbf16>) outs(%init1 : tensor<128x19xf32>) -> tensor<128x19xf32>
+  %mul = linalg.elemwise_binary {fun = #linalg.binary_fn<mul>} ins(%matmul1, %scale : tensor<128x19xf32>, tensor<128x19xf32>) outs(%empty1 : tensor<128x19xf32>) -> tensor<128x19xf32>
+  %matmul2 = linalg.matmul {input_precision = "ieee"} ins(%mul, %c : tensor<128x19xf32>, tensor<19x23xf32>) outs(%init2 : tensor<128x23xf32>) -> tensor<128x23xf32>
+  %sub = linalg.elemwise_binary {fun = #linalg.binary_fn<sub>} ins(%init2, %matmul2 : tensor<128x23xf32>, tensor<128x23xf32>) outs(%empty2 : tensor<128x23xf32>) -> tensor<128x23xf32>
+  %matmul3 = linalg.matmul {input_precision = "ieee"} ins(%sub, %d : tensor<128x23xf32>, tensor<23x128xf32>) outs(%init3 : tensor<128x128xf32>) -> tensor<128x128xf32>
+  return %matmul3 : tensor<128x128xf32>
+}
+
+// -----
+// CHECK-LABEL: @fp8DownUpKept
+// CHECK: hfusion.cast
+// CHECK: hfusion.cast
+// CHECK: return
+func.func @fp8DownUpKept(%arg0: tensor<f32>) -> tensor<f32> {
+    %empty_f8 = tensor.empty() : tensor<f8E4M3FN>
+    %empty_f32 = tensor.empty() : tensor<f32>
+    %0 = hfusion.cast ins(%arg0 : tensor<f32>) outs(%empty_f8 : tensor<f8E4M3FN>) -> tensor<f8E4M3FN>
+    %1 = hfusion.cast ins(%0 : tensor<f8E4M3FN>) outs(%empty_f32 : tensor<f32>) -> tensor<f32>
+    return %1 : tensor<f32>
+}
+
+// -----
+// CHECK-LABEL: @fp8E5M2DownUpKept
+// CHECK: hfusion.cast
+// CHECK: hfusion.cast
+// CHECK: return
+func.func @fp8E5M2DownUpKept(%arg0: tensor<f32>) -> tensor<f32> {
+    %empty_f8 = tensor.empty() : tensor<f8E5M2>
+    %empty_f32 = tensor.empty() : tensor<f32>
+    %0 = hfusion.cast ins(%arg0 : tensor<f32>) outs(%empty_f8 : tensor<f8E5M2>) -> tensor<f8E5M2>
+    %1 = hfusion.cast ins(%0 : tensor<f8E5M2>) outs(%empty_f32 : tensor<f32>) -> tensor<f32>
+    return %1 : tensor<f32>
+}
+
+// -----
+// CHECK-LABEL: @fp8DownUpFastmathFolds
+// CHECK-NOT: hfusion.cast
+// CHECK: return
+func.func @fp8DownUpFastmathFolds(%arg0: tensor<f32>) -> tensor<f32> {
+    %empty_f8 = tensor.empty() : tensor<f8E4M3FN>
+    %empty_f32 = tensor.empty() : tensor<f32>
+    %0 = hfusion.cast {arith.fastmath = #arith.fastmath<contract>} ins(%arg0 : tensor<f32>) outs(%empty_f8 : tensor<f8E4M3FN>) -> tensor<f8E4M3FN>
+    %1 = hfusion.cast ins(%0 : tensor<f8E4M3FN>) outs(%empty_f32 : tensor<f32>) -> tensor<f32>
+    return %1 : tensor<f32>
+}
+
+// -----

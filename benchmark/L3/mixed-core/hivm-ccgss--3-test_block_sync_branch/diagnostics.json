@@ -1,0 +1,14 @@
+[
+  {
+    "function": "test_block_sync_branch",
+    "location": "loc(\"<stdin>\":5:5)",
+    "op": "hivm.hir.set_ffts_base_addr",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_block_sync_branch",
+    "location": "loc(\"<stdin>\":23:5)",
+    "op": "hivm.hir.mmadL1",
+    "reason": "mmadL1 sync_related_args require internal MTE1/M protocol"
+  }
+]

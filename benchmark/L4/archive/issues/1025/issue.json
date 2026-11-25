@@ -1,0 +1,11 @@
+{
+  "title": "[Bug]: HFusion folds away FP8 quantization in FP32 → FP8 → FP32 cast chains",
+  "iid": 1025,
+  "updated_at": "2026-11-20T16:24:26.005+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1025",
+  "linked_mrs": [
+    "4137",
+    "5175"
+  ]
+}

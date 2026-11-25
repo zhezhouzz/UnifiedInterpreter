@@ -1,0 +1,36 @@
+{
+  "id": "issue-input/1046",
+  "tier": "L3",
+  "category": "issue-input",
+  "source_ref": "https://gitcode.com/Ascend/AscendNPU-IR/blob/d04e61b57b7258f0bd97c9f2b7ef035c658dcde3/bishengir/test/Dialect/HIVM/l12l0-layout.mlir",
+  "chip_profile": "Ascend950PR_9589",
+  "core_ratio": "1:0",
+  "compile_argv": [
+    "bishengir-opt",
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2"
+  ],
+  "entry_functions": [
+    "ca_f16_plain",
+    "ca_f16_transpose",
+    "cb_f16_plain",
+    "cb_f16_transpose",
+    "ca_bf16_plain",
+    "ca_bf16_transpose",
+    "cb_bf16_plain",
+    "cb_bf16_transpose",
+    "ca_f32_plain",
+    "ca_f32_transpose",
+    "cb_f32_plain",
+    "cb_f32_transpose",
+    "transpose_hint",
+    "a_parent_views",
+    "b_parent_views",
+    "legacy_partition",
+    "gm_to_l1_to_l0"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "split_index": 0
+}

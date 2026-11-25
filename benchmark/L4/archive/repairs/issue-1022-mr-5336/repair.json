@@ -1,0 +1,13 @@
+{
+  "issue": 1022,
+  "mr": "5336",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/5336",
+  "commit": "bea9110159d4edf4f6585fa48dc713b569c4dc18",
+  "parent": "6674d03a8d189f1599fd374e2e7e94c88cba02a9",
+  "title": "[HIVM][PipelineV2] fix: fold tensor transfers before bufferization",
+  "tests": [
+    "bishengir/test/Dialect/HIVM/PipelineV2/fold-transfer-read-after-write.mlir",
+    "bishengir/test/Dialect/HIVM/hivm-v2-pipeline-a6-order.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

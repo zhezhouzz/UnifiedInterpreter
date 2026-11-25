@@ -1,0 +1,13 @@
+{
+  "issue": null,
+  "mr": "3520",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/3520",
+  "commit": "95ec65165da1e9cb1c7db9ea782f88f019eb9f65",
+  "parent": "ed6479aa2ddb9904274ae1368c175364883b1da6",
+  "title": "[HIVM] fix: preserve memref traceback scope inference",
+  "tests": [
+    "bishengir/test/Dialect/HIVM/infer-hivm-mem-scope.mlir",
+    "bishengir/test/Dialect/HIVM/infer-simt-vf-mem-scope-hint.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

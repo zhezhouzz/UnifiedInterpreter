@@ -1,0 +1,56 @@
+[
+  {
+    "function": "kern4_mix_aic",
+    "location": "loc(\"<stdin>\":12:5)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kern4_mix_aic",
+    "location": "loc(\"<stdin>\":14:7)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kern4_mix_aic",
+    "location": "loc(\"<stdin>\":15:7)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kern4_mix_aic",
+    "location": "loc(\"<stdin>\":17:5)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kern4_mix_aiv",
+    "location": "loc(\"<stdin>\":21:5)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kern4_mix_aiv",
+    "location": "loc(\"<stdin>\":26:7)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kern4_mix_aiv",
+    "location": "loc(\"<stdin>\":28:7)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kern4_mix_aiv",
+    "location": "loc(\"<stdin>\":35:7)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kern4_mix_aiv",
+    "location": "loc(\"<stdin>\":38:5)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  }
+]

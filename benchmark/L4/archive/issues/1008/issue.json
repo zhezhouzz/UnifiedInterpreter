@@ -1,0 +1,10 @@
+{
+  "title": "[Feature]: 在 A2 和 A3 上默认启用 Cube 布局优化 / Enable Cube layout optimization by default on A2 and A3",
+  "iid": 1008,
+  "updated_at": "2026-11-20T00:23:04.939+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1008",
+  "linked_mrs": [
+    "5285"
+  ]
+}

@@ -1,0 +1,8 @@
+[
+  {
+    "function": "test_plan_memory_for_result",
+    "location": "loc(\"<stdin>\":20:10)",
+    "op": "scf.for",
+    "reason": "iteration-dependent carried view"
+  }
+]

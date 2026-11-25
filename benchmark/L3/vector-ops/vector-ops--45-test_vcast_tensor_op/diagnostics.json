@@ -1,0 +1,602 @@
+[
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":3:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":4:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":5:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":6:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":7:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":8:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":9:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":10:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":11:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":12:10)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":13:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":14:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":15:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":16:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":17:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":19:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":20:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":21:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":22:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":23:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":24:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":25:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":26:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":27:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":28:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":29:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":30:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":31:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":32:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":33:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":34:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":35:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":36:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":37:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":38:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":39:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":40:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":41:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":42:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":43:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":44:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":45:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":46:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":47:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":49:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":51:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":53:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":55:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":57:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":59:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":61:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":63:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":65:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":67:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":69:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":71:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":73:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":75:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":77:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":79:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":81:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":83:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":85:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":87:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":89:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":91:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":93:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":95:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":97:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":99:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":101:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":103:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":105:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":107:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":109:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":111:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":112:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":113:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":114:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":115:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":116:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":117:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":119:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":121:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":123:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":125:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":127:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":129:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":131:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":132:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":133:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":134:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":136:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":138:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":140:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":142:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":144:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":145:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":146:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_vcast_tensor_op",
+    "location": "loc(\"<stdin>\":147:11)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  }
+]

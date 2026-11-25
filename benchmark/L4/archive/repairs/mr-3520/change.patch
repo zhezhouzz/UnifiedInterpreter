@@ -1,0 +1,150 @@
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/InferSimtVFMemScopeHint.cpp b/bishengir/lib/Dialect/HIVM/Transforms/InferSimtVFMemScopeHint.cpp
+index 119f6f136..0acde3edd 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/InferSimtVFMemScopeHint.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/InferSimtVFMemScopeHint.cpp
+@@ -72,6 +72,18 @@ bool isMemScopeHintAnchor(Value val) {
+ }
+ 
+ std::optional<AddressSpaceAttr> inferMemScopeFromAnchor(Value root) {
++#ifndef __LLVM_MAJOR_VERSION_22_COMPATIBLE__
++  if (auto toMemref = root.getDefiningOp<bufferization::ToMemrefOp>()) {
++#else
++  if (auto toMemref = root.getDefiningOp<bufferization::ToBufferOp>()) {
++#endif
++    // Generic memref traceback deliberately stops at a to_memref whose tensor
++    // cannot be traced to an inverse to_tensor. For SIMT VF hint inference,
++    // inspect that tensor source locally so known tensor producers can still
++    // identify the mixed-boundary storage class.
++    return inferMemScopeFromAnchor(toMemref.getTensor());
++  }
++
+   if (auto bbArg = dyn_cast<BlockArgument>(root)) {
+     auto *parentOp = bbArg.getOwner()->getParentOp();
+     if (auto func = dyn_cast<func::FuncOp>(parentOp)) {
+diff --git a/bishengir/lib/Dialect/Utils/Util.cpp b/bishengir/lib/Dialect/Utils/Util.cpp
+index b95c61e79..0c10cfc74 100644
+--- a/bishengir/lib/Dialect/Utils/Util.cpp
++++ b/bishengir/lib/Dialect/Utils/Util.cpp
+@@ -169,9 +169,9 @@ SmallVector<Value> tracebackImpl(Value memrefVal) {
+       result.emplace_back(
+           dyn_cast<bufferization::ToTensorOp>(toTensor).getBuffer());
+ #endif
+-    } else {
+-      result.emplace_back(op.getTensor());
+     }
++    // Otherwise, leave the result empty so traceback stops at this to_memref
++    // result. Returning its tensor operand violates the memref-only contract.
+   }
+ 
+   return result;
+diff --git a/bishengir/test/Dialect/HIVM/infer-hivm-mem-scope.mlir b/bishengir/test/Dialect/HIVM/infer-hivm-mem-scope.mlir
+index c2dae8b37..d513cb3e4 100644
+--- a/bishengir/test/Dialect/HIVM/infer-hivm-mem-scope.mlir
++++ b/bishengir/test/Dialect/HIVM/infer-hivm-mem-scope.mlir
+@@ -142,6 +142,38 @@ module {
+ 
+ // -----
+ 
++module {
++  // A tensor materialized directly as a memref is the nearest memref root.
++  // Traceback must stop at to_memref instead of returning the tensor value.
++  // CHECK-LABEL: func.func @simt_vf_to_memref_caller(
++  func.func @simt_vf_to_memref_caller() attributes {
++      hacc.function_kind = #hacc.function_kind<DEVICE>} {
++    %tensor = "test.tensor_source"() : () -> tensor<1xi32>
++    // CHECK: %[[BUFFER:.*]] = bufferization.to_memref %{{.*}} : memref<1xi32, strided<[?], offset: ?>, #hivm.address_space<ub>>
++    %buffer = bufferization.to_memref %tensor :
++        memref<1xi32, strided<[?], offset: ?>>
++    // CHECK: %[[CAST:.*]] = memref.cast %[[BUFFER]]
++    // CHECK-SAME: to memref<1xi32, #hivm.address_space<ub>>
++    %cast = memref.cast %buffer :
++        memref<1xi32, strided<[?], offset: ?>> to memref<1xi32>
++    // CHECK: call @simt_vf_from_tensor(%[[CAST]])
++    // CHECK-SAME: (memref<1xi32, #hivm.address_space<ub>>) -> ()
++    call @simt_vf_from_tensor(%cast) {hivm.vector_function} :
++        (memref<1xi32>) -> ()
++    return
++  }
++
++  // CHECK-LABEL: func.func @simt_vf_from_tensor(
++  // CHECK-SAME: %{{.*}}: memref<1xi32, #hivm.address_space<ub>>)
++  func.func @simt_vf_from_tensor(%local: memref<1xi32>)
++      attributes {hivm.vector_function,
++                  hivm.vf_mode = #hivm.vf_mode<SIMT>} {
++    return
++  }
++}
++
++// -----
++
+ // CHECK: func.func @test_scf_if_0
+ // CHECK: scf.if
+ func.func @test_scf_if_0(%arg0: memref<19xf32>, %arg1: memref<17xf32>, %arg2: index, %arg3: index) {
+diff --git a/bishengir/test/Dialect/HIVM/infer-simt-vf-mem-scope-hint.mlir b/bishengir/test/Dialect/HIVM/infer-simt-vf-mem-scope-hint.mlir
+index 713ebde6f..ed21d9bfe 100644
+--- a/bishengir/test/Dialect/HIVM/infer-simt-vf-mem-scope-hint.mlir
++++ b/bishengir/test/Dialect/HIVM/infer-simt-vf-mem-scope-hint.mlir
+@@ -34,9 +34,12 @@ module {
+ 
+ // -----
+ 
+-// CHECK: hivm.simt_mem_scope_hint = #hivm.simt_mem_scope_hint<ub>
++// A direct to_memref of an HIVM-produced tensor stops generic memref traceback;
++// the hint pass inspects the tensor source locally and identifies UB.
++// CHECK-LABEL: func.func @simt_vf_from_hivm(
++// CHECK-SAME: %arg0: memref<8xi64> {hivm.simt_mem_scope_hint = #hivm.simt_mem_scope_hint<ub>}
+ module {
+-  func.func @simt_vf(%arg0: memref<8xi64>) attributes {hivm.func_core_type = #hivm.func_core_type<AIV>, no_inline, outline, hivm.vf_mode = #hivm.vf_mode<SIMT>} {
++  func.func @simt_vf_from_hivm(%arg0: memref<8xi64>) attributes {hivm.func_core_type = #hivm.func_core_type<AIV>, no_inline, outline, hivm.vf_mode = #hivm.vf_mode<SIMT>} {
+     return
+   }
+ 
+@@ -44,23 +47,44 @@ module {
+     %0 = tensor.empty() : tensor<8xi64>
+     %1 = hivm.hir.vadd ins(%arg0, %arg1: tensor<8xi64>, tensor<8xi64>) outs(%0 : tensor<8xi64>) -> tensor<8xi64>
+     %2 = bufferization.to_memref %1 : memref<8xi64>
+-    call @simt_vf(%2) : (memref<8xi64>) -> ()
++    call @simt_vf_from_hivm(%2) : (memref<8xi64>) -> ()
+     return
+   }
+ }
+ 
+ // -----
+ 
+-// CHECK: hivm.simt_mem_scope_hint = #hivm.simt_mem_scope_hint<ub>
++// tensor.empty follows the same direct-to-memref stop path and defaults to UB.
++// CHECK-LABEL: func.func @simt_vf_from_tensor_empty(
++// CHECK-SAME: %arg0: memref<8xi64> {hivm.simt_mem_scope_hint = #hivm.simt_mem_scope_hint<ub>}
+ module {
+-  func.func @simt_vf(%arg0: memref<8xi64>) attributes {hivm.func_core_type = #hivm.func_core_type<AIV>, no_inline, outline, hivm.vf_mode = #hivm.vf_mode<SIMT>} {
++  func.func @simt_vf_from_tensor_empty(%arg0: memref<8xi64>) attributes {hivm.func_core_type = #hivm.func_core_type<AIV>, no_inline, outline, hivm.vf_mode = #hivm.vf_mode<SIMT>} {
+     return
+   }
+ 
+   func.func @simple_kernel_with_empty_inp(%arg0: tensor<8xi64>, %arg1: tensor<8xi64>) attributes {hacc.entry, hacc.function_kind = #hacc.function_kind<DEVICE>, hivm.func_core_type = #hivm.func_core_type<AIV>, hivm.vf_mode = #hivm.vf_mode<SIMD>} {
+     %0 = tensor.empty() : tensor<8xi64>
+     %1 = bufferization.to_memref %0 : memref<8xi64>
+-    call @simt_vf(%1) : (memref<8xi64>) -> ()
++    call @simt_vf_from_tensor_empty(%1) : (memref<8xi64>) -> ()
++    return
++  }
++}
++
++// -----
++
++// An inverse to_tensor -> to_memref pair must continue tracing to the original
++// memref. Here that root is a device-entry argument, so the SIMT hint is GM.
++// CHECK-LABEL: func.func @simt_vf_from_roundtrip(
++// CHECK-SAME: %arg0: memref<8xi64> {hivm.simt_mem_scope_hint = #hivm.simt_mem_scope_hint<gm>}
++module {
++  func.func @simt_vf_from_roundtrip(%arg0: memref<8xi64>) attributes {hivm.func_core_type = #hivm.func_core_type<AIV>, no_inline, outline, hivm.vf_mode = #hivm.vf_mode<SIMT>} {
++    return
++  }
++
++  func.func @simple_kernel_with_roundtrip(%arg0: memref<8xi64>) attributes {hacc.entry, hacc.function_kind = #hacc.function_kind<DEVICE>, hivm.func_core_type = #hivm.func_core_type<AIV>, hivm.vf_mode = #hivm.vf_mode<SIMD>} {
++    %0 = bufferization.to_tensor %arg0 restrict writable : memref<8xi64>
++    %1 = bufferization.to_memref %0 : memref<8xi64>
++    call @simt_vf_from_roundtrip(%1) : (memref<8xi64>) -> ()
+     return
+   }
+ }

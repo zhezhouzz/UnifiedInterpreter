@@ -1,0 +1,56 @@
+[
+  {
+    "function": "rms_norm_f32_split_n_with_vf_merge_outlined_vf_0",
+    "location": "loc(\"<stdin>\":15:10)",
+    "op": "scf.for",
+    "reason": "iteration-dependent carried view"
+  },
+  {
+    "function": "rms_norm_f32_split_n_with_vf_merge_outlined_vf_1",
+    "location": "loc(\"<stdin>\":33:10)",
+    "op": "scf.for",
+    "reason": "iteration-dependent carried view"
+  },
+  {
+    "function": "rms_norm_f32_split_n_with_vf_merge_outlined_vf_2",
+    "location": "loc(\"<stdin>\":58:10)",
+    "op": "scf.for",
+    "reason": "iteration-dependent carried view"
+  },
+  {
+    "function": "rms_norm_f32_split_n_with_vf_merge_outlined_vf_3",
+    "location": "loc(\"<stdin>\":81:10)",
+    "op": "scf.for",
+    "reason": "iteration-dependent carried view"
+  },
+  {
+    "function": "rms_norm_f32_split_n_with_vf_merge",
+    "location": "loc(\"<stdin>\":105:5)",
+    "op": "hivm.hir.set_ctrl",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "rms_norm_f32_split_n_with_vf_merge",
+    "location": "loc(\"<stdin>\":106:5)",
+    "op": "hivm.hir.set_ctrl",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "rms_norm_f32_split_n_with_vf_merge",
+    "location": "loc(\"<stdin>\":107:14)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "rms_norm_f32_split_n_with_vf_merge",
+    "location": "loc(\"<stdin>\":108:16)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "rms_norm_f32_split_n_with_vf_merge",
+    "location": "loc(\"<stdin>\":111:12)",
+    "op": "scf.for",
+    "reason": "general loop carries require a Core state representation"
+  }
+]

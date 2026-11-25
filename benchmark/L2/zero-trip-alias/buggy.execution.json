@@ -1,0 +1,31 @@
+{
+  "verdict": "wrong_value",
+  "states_discovered": 50,
+  "witness": [
+    "0:0 arith.constant",
+    "0:1 hivm.hir.pointer_cast",
+    "0:2 arith.constant",
+    "0:3 hivm.hir.pointer_cast",
+    "0:4 arith.constant",
+    "0:5 arith.constant",
+    "0:6 for-done",
+    "0:7 arith.cmpi",
+    "0:8 arith.select",
+    "0:9 issue",
+    "0:10 issue",
+    "0:11 setflag",
+    "0:12 waitflag",
+    "0:13 issue",
+    "0:10 issue.done[V] ub:0:256=uninit",
+    "0:9 issue.done[MTE2] ub:0:0=7",
+    "0:11 setflag.done[V]",
+    "0:12 waitflag.done[MTE3]",
+    "0:13 issue.done[MTE3] gm:2=uninit"
+  ],
+  "observation": {
+    "gm:2": {
+      "expected": 7,
+      "actual": "uninit"
+    }
+  }
+}

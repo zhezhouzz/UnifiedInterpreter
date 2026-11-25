@@ -1,0 +1,39 @@
+{
+  "id": "double-buffer",
+  "tier": "L2",
+  "category": "protocol-model",
+  "source_ref": "#316 three-round slot reuse; related preload lifetime in #1020/#1022",
+  "chip_profile": "Ascend910B1",
+  "core_ratio": "0:1",
+  "compile_argv": [
+    "bishengir-opt",
+    "-canonicalize"
+  ],
+  "entry_functions": [
+    "kernel"
+  ],
+  "expected_verdict": {
+    "buggy": "race",
+    "fixed": "safe"
+  },
+  "oracle_note": "A,B,A over three rounds. Expected per-round vector reads are 3,3,7.",
+  "execution": {
+    "streams": [
+      "kernel"
+    ],
+    "initial": {
+      "gm:0": 3,
+      "gm:1": 7
+    },
+    "arguments": {
+      "2": 3
+    },
+    "read_sequence": {
+      "vabs": [
+        3,
+        3,
+        7
+      ]
+    }
+  }
+}

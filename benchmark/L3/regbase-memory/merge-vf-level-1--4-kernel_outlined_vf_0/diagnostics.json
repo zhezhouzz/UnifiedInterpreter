@@ -1,0 +1,50 @@
+[
+  {
+    "function": "kernel_outlined_vf_0",
+    "location": "loc(\"<stdin>\":14:14)",
+    "op": "vector.create_mask",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kernel_outlined_vf_0",
+    "location": "loc(\"<stdin>\":15:9)",
+    "op": "vector.transfer_write",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kernel_outlined_vf_1",
+    "location": "loc(\"<stdin>\":31:14)",
+    "op": "vector.create_mask",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kernel_outlined_vf_1",
+    "location": "loc(\"<stdin>\":32:9)",
+    "op": "vector.transfer_write",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "not_merge_when_load_write_to_same_buffer",
+    "location": "loc(\"<stdin>\":40:14)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "not_merge_when_load_write_to_same_buffer",
+    "location": "loc(\"<stdin>\":42:5)",
+    "op": "func.call",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "not_merge_when_load_write_to_same_buffer",
+    "location": "loc(\"<stdin>\":48:16)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "not_merge_when_load_write_to_same_buffer",
+    "location": "loc(\"<stdin>\":49:5)",
+    "op": "func.call",
+    "reason": "missing Core interpretation"
+  }
+]

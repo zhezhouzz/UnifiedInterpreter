@@ -1,0 +1,32 @@
+[
+  {
+    "function": "test_tightly_coupled_buffer_in_AIC",
+    "location": "loc(\"<stdin>\":6:5)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_tightly_coupled_buffer_in_AIC",
+    "location": "loc(\"<stdin>\":11:5)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_tightly_coupled_buffer_in_AIV",
+    "location": "loc(\"<stdin>\":21:5)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_tightly_coupled_buffer_in_AIV",
+    "location": "loc(\"<stdin>\":23:5)",
+    "op": "hivm.hir.copy",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_tightly_coupled_buffer_in_AIV",
+    "location": "loc(\"<stdin>\":25:5)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  }
+]

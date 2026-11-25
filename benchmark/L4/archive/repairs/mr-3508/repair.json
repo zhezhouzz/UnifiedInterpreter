@@ -1,0 +1,14 @@
+{
+  "issue": null,
+  "mr": "3508",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/3508",
+  "commit": "4b1549188ef7b0750d35b894df25f8f8cd0a589a",
+  "parent": "eeca6a25406acf3fb0f0215e2319b1c96902a814",
+  "title": "[AscendNPU-IR] fix: correct CV-pipelining set/wait parent lookup",
+  "tests": [
+    "bishengir/test/Dialect/HIVM/SyncSolver/hivm-ccgss-cv-pipelining-reg.mlir",
+    "bishengir/test/Dialect/HIVM/SyncSolver/hivm-ccgss-cv-pipelining.mlir",
+    "bishengir/test/Dialect/HIVM/SyncSolver/hivm-ccgss.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

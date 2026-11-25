@@ -1,0 +1,20 @@
+{
+  "id": "issue-input/1008",
+  "tier": "L3",
+  "category": "issue-input",
+  "source_ref": "https://gitcode.com/Ascend/AscendNPU-IR/blob/1b11119553df3c52166fbcada24e1ec0e73bf2f5/bishengir/test/Dialect/HFusion/hfusion-adapt-triton-kernel.mlir",
+  "chip_profile": "Ascend950PR_957b",
+  "core_ratio": null,
+  "compile_argv": [
+    "bishengir-opt",
+    "-allow-unregistered-dialect",
+    "-convert-hfusion-to-hivm"
+  ],
+  "entry_functions": [
+    "rtz_broadcast_normalized"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "split_index": 0
+}

@@ -1,0 +1,8 @@
+{
+  "title": "[Bug]: Scalar FP8 (f8E4M3FN / f8E5M2) conversions fail to compile",
+  "iid": 997,
+  "updated_at": "2026-11-19T13:52:37.614+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/997",
+  "linked_mrs": []
+}

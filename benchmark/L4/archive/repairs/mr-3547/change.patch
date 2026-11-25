@@ -1,0 +1,88 @@
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/InlineFixpipe.cpp b/bishengir/lib/Dialect/HIVM/Transforms/InlineFixpipe.cpp
+index 4f0060a6b..59ef17500 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/InlineFixpipe.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/InlineFixpipe.cpp
+@@ -414,14 +414,38 @@ bool isAccumulation(Operation *op) {
+ /// NZ fractal dest type for L1 fixpipe: [N1, M1, 16, C0].
+ /// Use ceilDiv so M/N below the fractal tile (e.g. M=1) pad instead of
+ /// producing a zero-sized dimension (M1 = M/16 == 0).
+-static RankedTensorType computeNz2NzL1DstType(RankedTensorType ndType) {
++RankedTensorType computeNz2NzL1DstTypeChannelSplit(RankedTensorType ndType) {
++  assert(ndType.getElementType().isF32() && "only support f32");
+   auto rank = ndType.getRank();
+   int64_t M = ndType.getDimSize(rank - 2);
+   int64_t N = ndType.getDimSize(rank - 1);
+-  static constexpr int64_t alignM = 16;
+-  auto numElemPerBlock = mlir::utils::getNumPerBlock(ndType);
++  const int64_t alignM = 16;
++  const int64_t numElemPerBlock = 8;
+   int64_t M1 = static_cast<int64_t>(llvm::divideCeil(M, alignM));
+-  int64_t N1 = static_cast<int64_t>(llvm::divideCeil(N, numElemPerBlock));
++  int64_t N1 = static_cast<int64_t>(llvm::divideCeil(N, alignM)) * 2;
++  SmallVector<int64_t> shape;
++  for (int64_t i = 0; i < rank - 2; i++) {
++    shape.push_back(ndType.getDimSize(i));
++  }
++  shape.push_back(N1);
++  shape.push_back(M1);
++  shape.push_back(alignM);
++  shape.push_back(numElemPerBlock);
++  return RankedTensorType::get(shape, ndType.getElementType());
++}
++
++/// NZ fractal dest type for L1 fixpipe: [N1, M1, 16, C0].
++/// Use ceilDiv so M/N below the fractal tile (e.g. M=1) pad instead of
++/// producing a zero-sized dimension (M1 = M/16 == 0).
++RankedTensorType computeNz2NzL1DstTypeChannelMerge(RankedTensorType ndType) {
++  auto rank = ndType.getRank();
++  int64_t M = ndType.getDimSize(rank - 2);
++  int64_t N = ndType.getDimSize(rank - 1);
++  const int64_t alignM = 16;
++  const int64_t numElemPerBlock = mlir::utils::getNumPerBlock(ndType);
++  int64_t M1 = static_cast<int64_t>(llvm::divideCeil(M, alignM));
++  int64_t N1 =
++      static_cast<int64_t>(llvm::divideCeil(N, numElemPerBlock));
+   SmallVector<int64_t> shape;
+   for (int64_t i = 0; i < rank - 2; i++) {
+     shape.push_back(ndType.getDimSize(i));
+@@ -448,7 +472,7 @@ static FixpipeOp convertNz2NdFixpipeToNz2Nz(PatternRewriter &rewriter,
+     return op;
+   }
+ 
+-  auto dstTy = computeNz2NzL1DstType(tensorType);
++  auto dstTy = channelSplit ? computeNz2NzL1DstTypeChannelSplit(tensorType) : computeNz2NzL1DstTypeChannelMerge(tensorType);
+   Location loc = op.getLoc();
+   Value src = op.getSrc();
+   auto dualDstMode = op.getDualDstModeAttr();
+diff --git a/bishengir/test/Dialect/HIVM/Regbase/inline-fixpipe-enable-fixpipe-nz2nz.mlir b/bishengir/test/Dialect/HIVM/Regbase/inline-fixpipe-enable-fixpipe-nz2nz.mlir
+index 6746cdadf..a3f4a14a9 100644
+--- a/bishengir/test/Dialect/HIVM/Regbase/inline-fixpipe-enable-fixpipe-nz2nz.mlir
++++ b/bishengir/test/Dialect/HIVM/Regbase/inline-fixpipe-enable-fixpipe-nz2nz.mlir
+@@ -341,3 +341,27 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+     return %mmad1 : tensor<32x32xi32>
+   }
+ }
++
++// -----
++
++// N not a multiple of 16 must pad to 16 before C0=8 channel split.
++// 37x70xf32: M1=ceil(37/16)=3, N1=ceil(ceil(70/16)*16 / 8)=10
++// (not ceil(70/8)=9). From mmad 37x48xf16 * 48x70xf16 -> 37x70xf32,
++// then 37x70xf32 * 70x96xf32.
++// CHECK-LABEL: func.func @dotdot_f32_m37n70
++// CHECK: %[[ARG0:.*]] = hivm.hir.fixpipe {channel_split = true} ins(%{{.*}} : tensor<37x70xf32>) outs(%{{.*}} : tensor<10x3x16x8xf32>) -> tensor<10x3x16x8xf32>
++// CHECK: %[[ARG1:.*]] = hivm.hir.mmadL1 {fixpipe_for_result_already_inserted = true} ins(%[[ARG0]]
++module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
++  func.func @dotdot_f32_m37n70(%a: tensor<37x48xf16>, %b: tensor<48x70xf16>, %c: tensor<70x96xf32>) -> tensor<37x96xf32> {
++    %true = arith.constant true
++    %c37 = arith.constant 37 : index
++    %c48 = arith.constant 48 : index
++    %c70 = arith.constant 70 : index
++    %c96 = arith.constant 96 : index
++    %7 = tensor.empty() : tensor<37x70xf32>
++    %8 = hivm.hir.mmadL1 ins(%a, %b, %true, %c37, %c48, %c70 : tensor<37x48xf16>, tensor<48x70xf16>, i1, index, index, index) outs(%7 : tensor<37x70xf32>) -> tensor<37x70xf32>
++    %9 = tensor.empty() : tensor<37x96xf32>
++    %10 = hivm.hir.mmadL1 ins(%8, %c, %true, %c37, %c70, %c96 : tensor<37x70xf32>, tensor<70x96xf32>, i1, index, index, index) outs(%9 : tensor<37x96xf32>) -> tensor<37x96xf32>
++    return %10 : tensor<37x96xf32>
++  }
++}

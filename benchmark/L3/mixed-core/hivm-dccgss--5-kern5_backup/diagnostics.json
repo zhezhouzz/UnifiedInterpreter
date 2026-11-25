@@ -1,0 +1,26 @@
+[
+  {
+    "function": "kern5_mix_aic",
+    "location": "loc(\"<stdin>\":8:5)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kern5_mix_aic",
+    "location": "loc(\"<stdin>\":12:5)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kern5_mix_aiv",
+    "location": "loc(\"<stdin>\":16:5)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kern5_mix_aiv",
+    "location": "loc(\"<stdin>\":22:5)",
+    "op": "hivm.hir.anchor",
+    "reason": "missing Core interpretation"
+  }
+]

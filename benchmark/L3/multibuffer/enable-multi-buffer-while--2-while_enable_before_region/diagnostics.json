@@ -1,0 +1,8 @@
+[
+  {
+    "function": "while_enable_before_region",
+    "location": "loc(\"<stdin>\":8:10)",
+    "op": "scf.while",
+    "reason": "missing Core interpretation"
+  }
+]

@@ -1,0 +1,10 @@
+{
+  "title": "[Bug]: rank-1 静态带步长 `vector.transfer_write` 被 `ConvertVectorToHIVMAVE` 静默降为连续写，丢失 lane 间步长",
+  "iid": 1024,
+  "updated_at": "2026-11-20T15:34:17.679+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1024",
+  "linked_mrs": [
+    "5314"
+  ]
+}

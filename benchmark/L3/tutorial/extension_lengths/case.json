@@ -1,0 +1,18 @@
+{
+  "id": "tutorial/extension_lengths",
+  "tier": "L3",
+  "category": "tutorial",
+  "source_ref": "https://github.com/Ascend/triton-ascend-ops/blob/d6986ddc6f21ebe5e36805c2c03bd4a481773775/tutorial/basic/003-ub_overflow.py#L42",
+  "chip_profile": null,
+  "core_ratio": null,
+  "compile_argv": [
+    "bishengir-opt",
+    "-hivm-graph-sync-solver=solver-version=v2"
+  ],
+  "entry_functions": [
+    "extension_lengths"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5"
+}

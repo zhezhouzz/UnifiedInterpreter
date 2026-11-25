@@ -1,0 +1,8 @@
+[
+  {
+    "function": "test_stride_align_through_scope_scope",
+    "location": "loc(\"<stdin>\":3:10)",
+    "op": "scope.scope",
+    "reason": "missing Core interpretation"
+  }
+]

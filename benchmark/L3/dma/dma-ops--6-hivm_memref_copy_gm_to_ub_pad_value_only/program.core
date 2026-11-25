@@ -1,0 +1,77 @@
+{
+  "hivm_memref_copy_gm_to_ub_pad_value_only": {
+    "params": [],
+    "body": [
+      {
+        "cmd": "scalar",
+        "fn": "arith.constant",
+        "args": [],
+        "results": [
+          0
+        ],
+        "types": [
+          "f16"
+        ],
+        "attrs": {
+          "value": "1.000000e+01 : f16"
+        }
+      },
+      {
+        "cmd": "alloc",
+        "space": "gm",
+        "args": [],
+        "results": [
+          1
+        ],
+        "types": [
+          "memref<16x16xf16, #hivm.address_space<gm>>"
+        ],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>"
+        }
+      },
+      {
+        "cmd": "alloc",
+        "space": "ub",
+        "args": [],
+        "results": [
+          2
+        ],
+        "types": [
+          "memref<16x16xf16, #hivm.address_space<ub>>"
+        ],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>"
+        }
+      },
+      {
+        "cmd": "issue",
+        "p": "MTE2",
+        "fn": "load",
+        "write_operand": 1,
+        "read_operands": [
+          0
+        ],
+        "args": [
+          1,
+          2,
+          0
+        ],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 1, 1, 1, 0, 0, 0>",
+          "pad_mode": "#hivm.padmode<PadValue>"
+        }
+      },
+      {
+        "cmd": "return",
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {}
+      }
+    ],
+    "core_kind": null
+  }
+}

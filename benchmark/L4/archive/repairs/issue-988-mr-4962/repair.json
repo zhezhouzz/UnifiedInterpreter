@@ -1,0 +1,13 @@
+{
+  "issue": 988,
+  "mr": "4962",
+  "commit": "be8cca076aca3ea2479f3fa0e41a3b108eb7007a",
+  "parent": "7b2c990e3f4c96a5b4f2667fd88d135060bda3d2",
+  "title": "[HIVM][mmadL1] refactor: derive s4 addressing from B type",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/4962",
+  "tests": [
+    "bishengir/test/Conversion/HIVMToStandard/RegBase/mmadl1-hetero.mlir",
+    "bishengir/test/Dialect/HIVM/IR/invalid.mlir",
+    "bishengir/test/Dialect/HIVM/IR/ops.mlir"
+  ]
+}

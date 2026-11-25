@@ -1,0 +1,14 @@
+{
+  "issue": 996,
+  "mr": "4950",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/4950",
+  "commit": "3ff1c600c364ad6f144831291038280ef826f72d",
+  "parent": "18fd6805ee0831e12404965ace71b4b472ff29ae",
+  "title": "[Tensor][Reshape] fix: share Vector print snapshots",
+  "tests": [
+    "bishengir/test/Dialect/HIVM/hivm-enable-stride-align-copy-no-propagate.mlir",
+    "bishengir/test/Dialect/Tensor/fold-nd-load-reshape-to-3d.mlir",
+    "bishengir/test/bishengir-compile/triton/device-debug/mixed-layout-print.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

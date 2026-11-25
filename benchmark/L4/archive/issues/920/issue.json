@@ -1,0 +1,10 @@
+{
+  "title": "[Bug]: hivm-cv-pipelining skew 流水错误处理 CV 反馈边 loop，结果整体滞后一个迭代",
+  "iid": 920,
+  "updated_at": "2026-11-12T15:18:51.340+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/920",
+  "linked_mrs": [
+    "5025"
+  ]
+}

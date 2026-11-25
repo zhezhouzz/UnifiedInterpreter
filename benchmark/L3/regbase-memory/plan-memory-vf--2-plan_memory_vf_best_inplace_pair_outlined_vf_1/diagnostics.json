@@ -1,0 +1,62 @@
+[
+  {
+    "function": "plan_memory_vf_best_inplace_pair_outlined_vf_1",
+    "location": "loc(\"<stdin>\":10:12)",
+    "op": "vector.transfer_read",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "plan_memory_vf_best_inplace_pair_outlined_vf_1",
+    "location": "loc(\"<stdin>\":11:12)",
+    "op": "math.log",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "plan_memory_vf_best_inplace_pair_outlined_vf_1",
+    "location": "loc(\"<stdin>\":12:7)",
+    "op": "vector.transfer_write",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "plan_memory_vf_best_inplace_pair_outlined_vf_1",
+    "location": "loc(\"<stdin>\":14:12)",
+    "op": "arith.truncf",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "plan_memory_vf_best_inplace_pair_outlined_vf_1",
+    "location": "loc(\"<stdin>\":15:7)",
+    "op": "vector.transfer_write",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "plan_memory_vf_best_inplace_pair",
+    "location": "loc(\"<stdin>\":21:5)",
+    "op": "hivm.hir.debug",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "plan_memory_vf_best_inplace_pair",
+    "location": "loc(\"<stdin>\":24:5)",
+    "op": "func.call",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "plan_memory_vf_best_inplace_pair",
+    "location": "loc(\"<stdin>\":25:5)",
+    "op": "hivm.hir.set_flag",
+    "reason": "intra-stream scalar endpoint requires local-scalar-memory profile"
+  },
+  {
+    "function": "plan_memory_vf_best_inplace_pair",
+    "location": "loc(\"<stdin>\":26:5)",
+    "op": "hivm.hir.wait_flag",
+    "reason": "intra-stream scalar endpoint requires local-scalar-memory profile"
+  },
+  {
+    "function": "plan_memory_vf_best_inplace_pair",
+    "location": "loc(\"<stdin>\":27:5)",
+    "op": "hivm.hir.debug",
+    "reason": "missing Core interpretation"
+  }
+]

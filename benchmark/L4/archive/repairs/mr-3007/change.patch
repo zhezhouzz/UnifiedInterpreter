@@ -1,0 +1,800 @@
+diff --git a/bishengir/include/bishengir/Dialect/HIVM/Utils/Utils.h b/bishengir/include/bishengir/Dialect/HIVM/Utils/Utils.h
+index 2798c24c8..3857b5336 100644
+--- a/bishengir/include/bishengir/Dialect/HIVM/Utils/Utils.h
++++ b/bishengir/include/bishengir/Dialect/HIVM/Utils/Utils.h
+@@ -115,6 +115,8 @@ static constexpr llvm::StringLiteral kMayImplicitTransposeWithLastAxis =
+ static constexpr llvm::StringLiteral kNormalizeMatmulCounterAttr =
+     "normalize_matmul_counter";
+ 
++constexpr StringLiteral kNormalizedInL0C = "normalized_in_L0C";
++
+ // The amount of data processed by the VBITSORT instruction in one repeat.
+ constexpr int VBITSORT_NUM_PER_REPEAT = 32;
+ 
+@@ -148,7 +150,7 @@ const std::map<std::string, int> membarType = {
+     {"SS_ALL", 12}, {"ST_LD", 13},  {"LD_ST", 14},  {"ST_ST", 15},
+ };
+ 
+-bool isOpResultRequiredInL0C(Operation *op, OpResult result);
++bool isResultInL0C(OpResult result);
+ 
+ /// Set the input type's memory scope to the input HIVM Address Space.
+ void setBaseMemRefTypeScope(Value val, AddressSpaceAttr targetMemScope);
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/InlineFixpipe.cpp b/bishengir/lib/Dialect/HIVM/Transforms/InlineFixpipe.cpp
+index d1ab9dc22..2bf28c5e1 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/InlineFixpipe.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/InlineFixpipe.cpp
+@@ -30,10 +30,12 @@
+ #include "bishengir/Dialect/Utils/Util.h"
+ #include "mlir/Dialect/Linalg/Transforms/Transforms.h"
+ #include "mlir/Dialect/Tensor/IR/Tensor.h"
++#include "mlir/Dialect/SCF/IR/SCF.h"
+ #include "mlir/IR/BuiltinOps.h"
+ #include "mlir/IR/BuiltinTypeInterfaces.h"
+ #include "mlir/IR/IRMapping.h"
+ #include "mlir/IR/PatternMatch.h"
++#include "mlir/IR/Value.h"
+ #include "mlir/Interfaces/SideEffectInterfaces.h"
+ #include "mlir/Support/LLVM.h"
+ #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+@@ -41,6 +43,7 @@
+ #include "llvm/ADT/TypeSwitch.h"
+ #include "llvm/Support/Casting.h"
+ #include "llvm/Support/MathExtras.h"
++#include <cstdint>
+ 
+ namespace mlir {
+ #define GEN_PASS_DEF_INSERTFIXPIPE
+@@ -106,6 +109,44 @@ std::optional<bool> isStoreOp(Operation *dstOp) {
+ 
+ static bool isOnRegBasedArch(Operation *op);
+ 
++
++
++/// Walk a region result through ancestor yields. True when this result, or a
++/// result it is forwarded to, is required to stay in L0C.
++static bool isForwardedResultRequiredInL0C(OpResult result) {
++  if (isResultInL0C(result))
++    return true;
++  for (OpOperand &use : result.getUses()) {
++    auto yieldOp = dyn_cast<scf::YieldOp>(use.getOwner());
++    if (!yieldOp)
++      continue;
++    auto parent = dyn_cast<RegionBranchOpInterface>(yieldOp->getParentOp());
++    if (!parent)
++      continue;
++    if (isForwardedResultRequiredInL0C(
++            parent->getOpResult(use.getOperandNumber())))
++      return true;
++  }
++  return false;
++}
++
++/// Keep a yield on the raw L0C value when rewriting it to a fixpipe result
++/// would evict a value that must stay in L0C:
++///  1. The producer is marked remain_in_l0c (the enclosing scf.for may not
++///     carry the loop-level attribute, e.g. a nested accumulation), or
++///  2. This yield, or an ancestor yield it is forwarded to, produces a
++///     region result required in L0C.
++static bool shouldKeepYieldInL0C(OpOperand &use) {
++  if (!isa<scf::YieldOp>(use.getOwner()))
++    return false;
++  auto parentOp =
++      dyn_cast<RegionBranchOpInterface>(use.getOwner()->getParentOp());
++  if (!parentOp)
++    return false;
++  return isForwardedResultRequiredInL0C(
++      parentOp->getOpResult(use.getOperandNumber()));
++}
++
+ static hivm::MmadL1Op traceAlongL0C(Value val) {
+   hivm::MmadL1Op source = llvm::dyn_cast_if_present<hivm::MmadL1Op>(
+       traceDefOp<hivm::MmadL1Op>(val).value_or(nullptr));
+@@ -208,7 +249,9 @@ static bool needYieldOut(Operation *user, Value val) {
+ /// (such as annotation.mark bind_buffer) the fixpipe output rather than the
+ /// value still living in L0C.
+ Operation *getInsertPointOutOfIf(Operation *op, int &resultIndx) {
+-  Value result = op->getResult(resultIndx);
++  OpResult result = op->getResult(resultIndx);
++  if (!op->hasAttr(RemainInL0CAttr::name))
++    return op;
+   // if op has multiple users, don't push the insert point down
+   int32_t count = 0;
+   scf::YieldOp yieldOperand = nullptr;
+@@ -219,7 +262,7 @@ Operation *getInsertPointOutOfIf(Operation *op, int &resultIndx) {
+     if (!yieldOp)
+       continue;
+     auto ifOp = dyn_cast<scf::IfOp>(yieldOp->getParentOp());
+-    if (!ifOp || isMixKernel(ifOp, result))
++    if (!ifOp || (!isResultInL0C(result) && isMixKernel(ifOp, result)))
+       continue;
+     yieldOperand = yieldOp;
+   }
+@@ -372,14 +415,22 @@ bool isAccumulation(Operation *op) {
+ /// Use ceilDiv so M/N below the fractal tile (e.g. M=1) pad instead of
+ /// producing a zero-sized dimension (M1 = M/16 == 0).
+ static RankedTensorType computeNz2NzL1DstType(RankedTensorType ndType) {
+-  int64_t M = ndType.getDimSize(0);
+-  int64_t N = ndType.getDimSize(1);
++  auto rank = ndType.getRank();
++  int64_t M = ndType.getDimSize(rank - 2);
++  int64_t N = ndType.getDimSize(rank - 1);
+   static constexpr int64_t alignM = 16;
+   auto numElemPerBlock = mlir::utils::getNumPerBlock(ndType);
+   int64_t M1 = static_cast<int64_t>(llvm::divideCeil(M, alignM));
+   int64_t N1 = static_cast<int64_t>(llvm::divideCeil(N, numElemPerBlock));
+-  return RankedTensorType::get({N1, M1, alignM, numElemPerBlock},
+-                               ndType.getElementType());
++  SmallVector<int64_t> shape;
++  for (int64_t i = 0; i < rank - 2; i++) {
++    shape.push_back(ndType.getDimSize(i));
++  }
++  shape.push_back(N1);
++  shape.push_back(M1);
++  shape.push_back(alignM);
++  shape.push_back(numElemPerBlock);
++  return RankedTensorType::get(shape, ndType.getElementType());
+ }
+ 
+ /// Convert an NZ2ND Fixpipe to NZ2NZ. Applies channel_split or channel_merge
+@@ -475,7 +526,6 @@ static FixpipeOp insertFixpipe(PatternRewriter &rewriter, Operation *point,
+ 
+   auto fixpipe = (isMovingToL1 ? insertFixpipeToL1
+                                : insertFixpipeToLocal)(rewriter, point, src);
+-
+   rewriter.replaceUsesWithIf(
+       src, fixpipe.getResultTensor(), [](OpOperand &use) {
+         auto *op = use.getOwner();
+@@ -490,6 +540,12 @@ static FixpipeOp insertFixpipe(PatternRewriter &rewriter, Operation *point,
+                        init.get().getDefiningOp<hivm::MmadL1Op>();
+               }));
+         }
++        // handle normalized_in_l0c and remain_in_l0c, including nested
++        // scf.for yields whose enclosing loop (or the mmad itself) keeps
++        // the value in L0C.
++        auto *defOp = use.get().getDefiningOp();
++        if (defOp->hasAttr(RemainInL0CAttr::name) && shouldKeepYieldInL0C(use))
++          return false;
+         return true;
+       });
+ 
+@@ -622,10 +678,7 @@ static bool shouldSkipOuterFixpipeForAccumulation(Operation *opInst,
+   auto forOp = dyn_cast<scf::ForOp>(insertAfterOp);
+   if (!forOp)
+     return false;
+-  if (forOp->getAttr(hivm::RemainInL0CAttr::name) == nullptr)
+-    return false;
+-  if (!isOpResultRequiredInL0C(cast<RegionBranchOpInterface>(insertAfterOp),
+-                               loopResult))
++  if (!isResultInL0C(loopResult))
+     return false;
+ 
+   return anyUserReachesMatmulOuts(loopResult);
+@@ -677,7 +730,7 @@ public:
+             (!op.isInitConstant() && isOnRegBasedArch(opInst));
+       }
+       skipFixpipeForBiasDecompose = skipFixpipeForBiasDecompose &&
+-                                    !isOpResultRequiredInL0C(op, mmadLikeOpRes);
++                                    !isResultInL0C(mmadLikeOpRes);
+     }
+     if (skipFixpipeForBiasDecompose) {
+       // the op will decompose to mmadL1 + vadd, so fixpipe cannot be inserted
+@@ -720,11 +773,13 @@ public:
+ 
+       LDBG("Replacing fix pipe for " << op);
+       Value result = insertAfterOp->getResult(resultIndx);
+-      if (!tryInsertFractalOutputFixpipe(rewriter, insertAfterOp, result))
++      if (!tryInsertFractalOutputFixpipe(rewriter, insertAfterOp, result)) {
++        LDBG("Inserting fractal output fixpipe after " << *insertAfterOp);
+         insertFixpipe(rewriter, insertAfterOp, result);
+-      op->setAttr(mmadFixpipeForResultAlreadyInserted,
+-                  rewriter.getBoolAttr(true));
+-      changed = true;
++        op->setAttr(mmadFixpipeForResultAlreadyInserted,
++                    rewriter.getBoolAttr(true));
++        changed = true;
++      }
+     }
+ 
+     // When the mmad-like op is an accumulation, the fixpipe above only serves
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/PropagateOp.cpp b/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/PropagateOp.cpp
+index 0dfe3a0f0..d4f64444c 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/PropagateOp.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/PropagateOp.cpp
+@@ -342,7 +342,7 @@ PropagateUpPattern::matchAndRewrite(UnrealizedConversionCastOp propagateOp,
+         if (step != PropagationStep::ALL)
+           return failure();
+ 
+-        if (isOpResultRequiredInL0C(branch, res))
++        if (isResultInL0C(res))
+           return failure();
+         // Unstructured load case should be propagated from the inside.
+         if (auto forOp = dyn_cast<scf::ForOp>(branch.getOperation())) {
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/NormalizeMatmul.cpp b/bishengir/lib/Dialect/HIVM/Transforms/NormalizeMatmul.cpp
+index 51cc64251..474fde4a3 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/NormalizeMatmul.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/NormalizeMatmul.cpp
+@@ -72,7 +72,6 @@ namespace {
+ constexpr llvm::StringLiteral kDotPadOnlyK = "dot_pad_only_k";
+ 
+ constexpr StringLiteral kAlreadySetRealMKN = "already_set_real_mkn";
+-constexpr StringLiteral kNormalizedInL0C = "normalized_in_L0C";
+ constexpr StringLiteral kNormalizedInitOrBias = "normalized_init_or_bias";
+ constexpr StringLiteral kMayNotExec = "may_not_exec";
+ constexpr StringLiteral kFallBackNotExec = "fallback_not_exec";
+diff --git a/bishengir/lib/Dialect/HIVM/Utils/Utils.cpp b/bishengir/lib/Dialect/HIVM/Utils/Utils.cpp
+index ae1735a8d..6d5cd9199 100644
+--- a/bishengir/lib/Dialect/HIVM/Utils/Utils.cpp
++++ b/bishengir/lib/Dialect/HIVM/Utils/Utils.cpp
+@@ -42,6 +42,7 @@
+ #include "mlir/Dialect/Vector/IR/VectorOps.h"
+ #include "mlir/IR/Block.h"
+ #include "mlir/IR/Builders.h"
++#include "mlir/IR/BuiltinAttributes.h"
+ #include "mlir/IR/BuiltinTypeInterfaces.h"
+ #include "mlir/IR/BuiltinTypes.h"
+ #include "mlir/IR/Location.h"
+@@ -75,7 +76,6 @@
+ 
+ namespace mlir {
+ namespace hivm {
+-
+ bool shouldEnableChannelSplit(Type dstType) {
+   const int64_t alignM = 16;
+   const int64_t numElemPerBlock = mlir::utils::getNumPerBlock(dstType);
+@@ -230,28 +230,32 @@ LoopLikeOpInterface getParentLoopImpl(Value val,
+ }
+ } // namespace
+ 
+-bool isOpResultRequiredInL0C(Operation *op, OpResult result) {
+-  if (op->hasAttr(RemainInL0CAttr::name))
+-    return true;
+-
+-  Attribute attr = op->getAttr("normalized_in_L0C");
+-  if (!attr)
+-    return false;
+-
+-  if (llvm::isa<RegionBranchOpInterface>(op)) {
+-    auto arrayAttr = dyn_cast<ArrayAttr>(attr);
+-    if (!arrayAttr)
+-      return true;
++bool isResultInL0C(OpResult result) {
++  Operation *op = result.getOwner();
+ 
+-    uint64_t idx = result.getResultNumber();
+-    return llvm::any_of(arrayAttr, [idx](Attribute element) {
++  auto findValueInArrayAttr = [](ArrayAttr arrayAttr, uint64_t idx) {
++    return llvm::any_of(arrayAttr.getValue(), [idx](Attribute element) {
+       auto intAttr = dyn_cast<IntegerAttr>(element);
+       return intAttr && intAttr.getValue().getZExtValue() == idx;
+     });
+-  }
++  };
+ 
+-  // otherwise respect the result from NormalizeMatmul
+-  return true;
++  auto isInL0CBasedOnAttr = [&result, &op,
++                             findValueInArrayAttr](StringRef attrName) {
++    if (auto attr = op->getAttrOfType<UnitAttr>(attrName))
++      return true;
++    if (auto arrayAttr = op->getAttrOfType<ArrayAttr>(attrName))
++      return findValueInArrayAttr(arrayAttr, result.getResultNumber());
++    return false;
++  };
++
++  if (isInL0CBasedOnAttr(RemainInL0CAttr::name))
++    return true;
++
++  if (isInL0CBasedOnAttr(kNormalizedInL0C))
++    return true;
++
++  return false;
+ }
+ 
+ FailureOr<memref::AllocOp> getMemRefAlloc(Value operand) {
+diff --git a/bishengir/test/Dialect/HIVM/Regbase/inline-fixpipe-enable-fixpipe-nz2nz.mlir b/bishengir/test/Dialect/HIVM/Regbase/inline-fixpipe-enable-fixpipe-nz2nz.mlir
+index 01ab1f723..6746cdadf 100644
+--- a/bishengir/test/Dialect/HIVM/Regbase/inline-fixpipe-enable-fixpipe-nz2nz.mlir
++++ b/bishengir/test/Dialect/HIVM/Regbase/inline-fixpipe-enable-fixpipe-nz2nz.mlir
+@@ -1,4 +1,3 @@
+-// REQUIRES: regbase
+ // RUN: bishengir-opt -hivm-insert-fixpipe -hivm-inline-fixpipe %s -split-input-file -verify-diagnostics | FileCheck %s
+ 
+ // On reg-based A5 targets, mmadL1->mmadL1 inserts fixpipe directly to L1
+diff --git a/bishengir/test/Dialect/HIVM/Regbase/inline-fixpipe.mlir b/bishengir/test/Dialect/HIVM/Regbase/inline-fixpipe.mlir
+index b25a3d765..1b3c7c598 100644
+--- a/bishengir/test/Dialect/HIVM/Regbase/inline-fixpipe.mlir
++++ b/bishengir/test/Dialect/HIVM/Regbase/inline-fixpipe.mlir
+@@ -1,4 +1,3 @@
+-// REQUIRES: regbase
+ // RUN: bishengir-opt -hivm-insert-fixpipe -hivm-inline-fixpipe %s -split-input-file -verify-diagnostics | FileCheck %s
+ 
+ // Fractal mmadL1: all-4D inputs/output, check fixpipe insertion doesn't crash
+@@ -1166,3 +1165,113 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+     return
+   }
+ }
++
++// -----
++
++// 3D f32: 3x16x16 -> leading 3, M=16, N=16, C0=8
++// N1 = ceil(16/8) = 2, M1 = ceil(16/16) = 1  =>  3x2x1x16x8xf32
++// CHECK-LABEL: func.func @batch_dotdot_f32_keeps_leading_dim
++// CHECK: %[[FP:.*]] = hivm.hir.fixpipe {channel_split = true} ins(%{{.*}} : tensor<3x16x16xf32>) outs(%{{.*}} : tensor<3x2x1x16x8xf32>) -> tensor<3x2x1x16x8xf32>
++// CHECK: hivm.hir.batchMmadL1 {fixpipe_for_result_already_inserted = true} ins(%[[FP]]
++module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
++  func.func @batch_dotdot_f32_keeps_leading_dim(
++      %a: tensor<3x16x16xf32>, %b: tensor<3x16x16xf32>,
++      %c: tensor<3x16x16xf32>) -> tensor<3x16x16xf32> {
++    %true = arith.constant true
++    %c16 = arith.constant 16 : index
++    %empty0 = tensor.empty() : tensor<3x16x16xf32>
++    %mmad0 = hivm.hir.batchMmadL1
++        ins(%a, %b, %true, %c16, %c16, %c16
++            : tensor<3x16x16xf32>, tensor<3x16x16xf32>, i1, index, index, index)
++        outs(%empty0 : tensor<3x16x16xf32>) -> tensor<3x16x16xf32>
++    %empty1 = tensor.empty() : tensor<3x16x16xf32>
++    %mmad1 = hivm.hir.batchMmadL1
++        ins(%mmad0, %c, %true, %c16, %c16, %c16
++            : tensor<3x16x16xf32>, tensor<3x16x16xf32>, i1, index, index, index)
++        outs(%empty1 : tensor<3x16x16xf32>) -> tensor<3x16x16xf32>
++    return %mmad1 : tensor<3x16x16xf32>
++  }
++}
++
++// -----
++
++// 3D i8: 2x32x32 -> leading 2, M=32, N=32, C0=32 (channel merge)
++// N1 = ceil(32/32) = 1, M1 = ceil(32/16) = 2  =>  2x1x2x16x32xi8
++// CHECK-LABEL: func.func @batch_dotdot_i8_keeps_leading_dim
++// CHECK: %[[FP:.*]] = hivm.hir.fixpipe ins(%{{.*}} : tensor<2x32x32xi8>) outs(%{{.*}} : tensor<2x1x2x16x32xi8>) -> tensor<2x1x2x16x32xi8>
++// CHECK-NOT: channel_split
++// CHECK: hivm.hir.batchMmadL1 {fixpipe_for_result_already_inserted = true} ins(%[[FP]]
++module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
++  func.func @batch_dotdot_i8_keeps_leading_dim(
++      %a: tensor<2x32x32xi8>, %b: tensor<2x32x32xi8>,
++      %c: tensor<2x32x32xi8>) -> tensor<2x32x32xi8> {
++    %true = arith.constant true
++    %c32 = arith.constant 32 : index
++    %empty0 = tensor.empty() : tensor<2x32x32xi8>
++    %mmad0 = hivm.hir.batchMmadL1
++        ins(%a, %b, %true, %c32, %c32, %c32
++            : tensor<2x32x32xi8>, tensor<2x32x32xi8>, i1, index, index, index)
++        outs(%empty0 : tensor<2x32x32xi8>) -> tensor<2x32x32xi8>
++    %empty1 = tensor.empty() : tensor<2x32x32xi8>
++    %mmad1 = hivm.hir.batchMmadL1
++        ins(%mmad0, %c, %true, %c32, %c32, %c32
++            : tensor<2x32x32xi8>, tensor<2x32x32xi8>, i1, index, index, index)
++        outs(%empty1 : tensor<2x32x32xi8>) -> tensor<2x32x32xi8>
++    return %mmad1 : tensor<2x32x32xi8>
++  }
++}
++
++// -----
++
++// Mix-kernel scf.if: then/else write different C dests, so isMixKernel is
++// true, but the yielded mmad stays in L0C (hivm.remain_in_l0c).
++// getInsertPointOutOfIf must still hoist past the if (isResultInL0C), so
++// one fixpipe after the merged result serves the store. annotation.mark
++// bind_buffer keeps the L0C if-result rather than the fixpipe output.
++// Distilled from a mix AIC/AIV kernel where an outer mmadL1 is yielded
++// through a may_not_exec scf.if whose then-branch writes a different L0C.
++// CHECK-LABEL: func.func @mmad_l0c_mix_if_single_fixpipe
++// CHECK: %[[MMAD0:.*]] = hivm.hir.mmadL1
++// CHECK: %[[IF:.*]] = scf.if
++// CHECK: %[[MMAD1:.*]] = hivm.hir.mmadL1
++// CHECK-NOT: hivm.hir.fixpipe
++// CHECK: scf.yield %[[MMAD1]]
++// CHECK: } else {
++// CHECK: scf.yield %[[MMAD0]]
++// CHECK: }
++// CHECK: hivm.hir.fixpipe
++// CHECK-SAME: ins(%[[IF]]
++// CHECK-SAME: outs(%{{.*}} : memref<64x64xf32
++// CHECK-NOT: hivm.hir.store
++module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
++  func.func @mmad_l0c_mix_if_single_fixpipe(
++      %cond: i1,
++      %a: tensor<64x32xbf16>,
++      %b: tensor<32x64xbf16>,
++      %c: tensor<64x64xbf16>,
++      %d: tensor<64x64xbf16>,
++      %dst: memref<64x64xf32, strided<[64, 1]>>) {
++    %true = arith.constant true
++    %false = arith.constant false
++    %c32 = arith.constant 32 : index
++    %c64 = arith.constant 64 : index
++    %empty0 = tensor.empty() : tensor<64x64xf32>
++    %mmad0 = hivm.hir.mmadL1 {already_set_real_mkn, hivm.remain_in_l0c}
++        ins(%a, %b, %true, %c64, %c32, %c64
++            : tensor<64x32xbf16>, tensor<32x64xbf16>, i1, index, index, index)
++        outs(%empty0 : tensor<64x64xf32>) -> tensor<64x64xf32>
++    %empty1 = tensor.empty() : tensor<64x64xf32>
++    %if_res = scf.if %cond -> (tensor<64x64xf32>) {
++      %mmad1 = hivm.hir.mmadL1 {a_transpose, already_set_real_mkn, hivm.remain_in_l0c}
++          ins(%c, %d, %false, %c64, %c64, %c64
++              : tensor<64x64xbf16>, tensor<64x64xbf16>, i1, index, index, index)
++          outs(%empty1 : tensor<64x64xf32>) -> tensor<64x64xf32>
++      scf.yield %mmad1 : tensor<64x64xf32>
++    } else {
++      scf.yield %mmad0 : tensor<64x64xf32>
++    } {may_not_exec, normalized_in_L0C = [0 : i32]}
++    hivm.hir.store ins(%if_res : tensor<64x64xf32>)
++        outs(%dst : memref<64x64xf32, strided<[64, 1]>>)
++    return
++  }
++}
+diff --git a/bishengir/test/Dialect/HIVM/dont-insert-fixpipe-for-scf-for-mmad-l0c.mlir b/bishengir/test/Dialect/HIVM/dont-insert-fixpipe-for-scf-for-mmad-l0c.mlir
+index 9eda1b234..b075bdd67 100644
+--- a/bishengir/test/Dialect/HIVM/dont-insert-fixpipe-for-scf-for-mmad-l0c.mlir
++++ b/bishengir/test/Dialect/HIVM/dont-insert-fixpipe-for-scf-for-mmad-l0c.mlir
+@@ -18,7 +18,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+ // CHECK:     scf.yield
+ // CHECK:   }
+ // CHECK:   scf.yield %[[IF1]]#0, %{{.*}}, %[[IF1]]#1
+-// CHECK: } {fixpipe_for_mmad_result_already_inserted = true, hivm.remain_in_l0c, normalized_in_L0C = [0 : i32]}
++// CHECK: } {fixpipe_for_mmad_result_already_inserted = true, normalized_in_L0C = [0 : i32]}
+ // CHECK-NOT: hivm.hir.fixpipe
+ // CHECK: %[[FOR2:.*]]:3 = scf.for {{.*}} iter_args(%[[ITER_ACC:.*]] = %[[FOR1]]#0, %[[ITER_AUX:.*]] = %[[FOR1]]#1, %[[ITER_CNT:.*]] = %[[FOR1]]#2)
+ // CHECK:   %[[IF2:.*]]:2 = scf.if
+@@ -57,7 +57,7 @@ func.func @cascade_mmad_multiple_results_to_same_downstream_loop(
+   %for1_res:3 = scf.for %i = %c0 to %c10 step %c1
+       iter_args(%acc = %3, %aux_arg = %4, %cnt = %c0_i32) -> (tensor<128x128xf32>, tensor<128x128xf32>, i32) {
+     %if_res:2 = scf.if %cond -> (tensor<128x128xf32>, i32) {
+-      %mmad1 = hivm.hir.mmadL1 {already_set_real_mkn, normalized_in_L0C}
++      %mmad1 = hivm.hir.mmadL1 {already_set_real_mkn, hivm.remain_in_l0c, normalized_in_L0C}
+           ins(%0, %1, %false, %c128, %c128, %c128 : tensor<128x128xf16>, tensor<128x128xf16>, i1, index, index, index)
+           outs(%acc : tensor<128x128xf32>) -> tensor<128x128xf32>
+       %next_cnt = arith.addi %cnt, %c1_i32 : i32
+@@ -66,13 +66,13 @@ func.func @cascade_mmad_multiple_results_to_same_downstream_loop(
+       scf.yield %acc, %cnt : tensor<128x128xf32>, i32
+     }
+     scf.yield %if_res#0, %aux_arg, %if_res#1 : tensor<128x128xf32>, tensor<128x128xf32>, i32
+-  } {hivm.remain_in_l0c, normalized_in_L0C = [0 : i32]}
++  } {normalized_in_L0C = [0 : i32]}
+ 
+   // Second loop: consumes all 3 return values as initial iter_args
+   %for2_res:3 = scf.for %j = %c0 to %c10 step %c1
+       iter_args(%acc2 = %for1_res#0, %aux2 = %for1_res#1, %cnt2 = %for1_res#2) -> (tensor<128x128xf32>, tensor<128x128xf32>, i32) {
+     %if_res2:2 = scf.if %cond -> (tensor<128x128xf32>, i32) {
+-      %mmad2 = hivm.hir.mmadL1 {already_set_real_mkn, normalized_in_L0C}
++      %mmad2 = hivm.hir.mmadL1 {already_set_real_mkn, hivm.remain_in_l0c, normalized_in_L0C}
+           ins(%0, %2, %false, %c128, %c128, %c128 : tensor<128x128xf16>, tensor<128x128xf16>, i1, index, index, index)
+           outs(%acc2 : tensor<128x128xf32>) -> tensor<128x128xf32>
+       %next_cnt2 = arith.addi %cnt2, %c1_i32 : i32
+@@ -116,7 +116,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+ // CHECK:     scf.yield
+ // CHECK:   }
+ // CHECK:   scf.yield %[[IF1_A]], %[[IF1_B]]
+-// CHECK: } {fixpipe_for_mmad_result_already_inserted = true, hivm.remain_in_l0c, normalized_in_L0C = [0 : i32, 1 : i32]}
++// CHECK: } {fixpipe_for_mmad_result_already_inserted = true, normalized_in_L0C = [0 : i32, 1 : i32]}
+ // CHECK-NOT: hivm.hir.fixpipe
+ //
+ // CHECK: %[[FOR_A:.*]] = scf.for {{.*}} iter_args(%[[ITER_A:.*]] = %[[FOR1]]#0)
+@@ -168,7 +168,7 @@ func.func @cascade_mmad_multiple_results_to_different_downstream_loops(
+   %for1_res:2 = scf.for %i = %c0 to %c10 step %c1
+       iter_args(%acc0 = %3, %acc1 = %4) -> (tensor<128x128xf32>, tensor<128x128xf32>) {
+     %res0 = scf.if %cond1 -> (tensor<128x128xf32>) {
+-      %mmad0 = hivm.hir.mmadL1 {already_set_real_mkn, normalized_in_L0C}
++      %mmad0 = hivm.hir.mmadL1 {already_set_real_mkn, hivm.remain_in_l0c, normalized_in_L0C}
+           ins(%0, %1, %false, %c128, %c128, %c128 : tensor<128x128xf16>, tensor<128x128xf16>, i1, index, index, index)
+           outs(%acc0 : tensor<128x128xf32>) -> tensor<128x128xf32>
+       scf.yield %mmad0 : tensor<128x128xf32>
+@@ -177,7 +177,7 @@ func.func @cascade_mmad_multiple_results_to_different_downstream_loops(
+     }
+ 
+     %res1 = scf.if %cond2 -> (tensor<128x128xf32>) {
+-      %mmad1 = hivm.hir.mmadL1 {already_set_real_mkn, normalized_in_L0C}
++      %mmad1 = hivm.hir.mmadL1 {already_set_real_mkn, hivm.remain_in_l0c, normalized_in_L0C}
+           ins(%0, %2, %false, %c128, %c128, %c128 : tensor<128x128xf16>, tensor<128x128xf16>, i1, index, index, index)
+           outs(%acc1 : tensor<128x128xf32>) -> tensor<128x128xf32>
+       scf.yield %mmad1 : tensor<128x128xf32>
+@@ -186,13 +186,13 @@ func.func @cascade_mmad_multiple_results_to_different_downstream_loops(
+     }
+ 
+     scf.yield %res0, %res1 : tensor<128x128xf32>, tensor<128x128xf32>
+-  } {hivm.remain_in_l0c, normalized_in_L0C = [0 : i32, 1 : i32]}
++  } {normalized_in_L0C = [0 : i32, 1 : i32]}
+ 
+   // Downstream loop A: consumes %for1_res#0
+   %forA_res = scf.for %j = %c0 to %c10 step %c1
+       iter_args(%accA = %for1_res#0) -> (tensor<128x128xf32>) {
+     %resA = scf.if %cond1 -> (tensor<128x128xf32>) {
+-      %mmadA = hivm.hir.mmadL1 {already_set_real_mkn, normalized_in_L0C}
++      %mmadA = hivm.hir.mmadL1 {already_set_real_mkn, hivm.remain_in_l0c, normalized_in_L0C}
+           ins(%0, %1, %false, %c128, %c128, %c128 : tensor<128x128xf16>, tensor<128x128xf16>, i1, index, index, index)
+           outs(%accA : tensor<128x128xf32>) -> tensor<128x128xf32>
+       scf.yield %mmadA : tensor<128x128xf32>
+@@ -207,7 +207,7 @@ func.func @cascade_mmad_multiple_results_to_different_downstream_loops(
+   %forB_res = scf.for %k = %c0 to %c10 step %c1
+       iter_args(%accB = %for1_res#1) -> (tensor<128x128xf32>) {
+     %resB = scf.if %cond2 -> (tensor<128x128xf32>) {
+-      %mmadB = hivm.hir.mmadL1 {already_set_real_mkn, normalized_in_L0C}
++      %mmadB = hivm.hir.mmadL1 {already_set_real_mkn, hivm.remain_in_l0c, normalized_in_L0C}
+           ins(%0, %2, %false, %c128, %c128, %c128 : tensor<128x128xf16>, tensor<128x128xf16>, i1, index, index, index)
+           outs(%accB : tensor<128x128xf32>) -> tensor<128x128xf32>
+       scf.yield %mmadB : tensor<128x128xf32>
+@@ -222,3 +222,167 @@ func.func @cascade_mmad_multiple_results_to_different_downstream_loops(
+ }
+ 
+ }
++
++// -----
++
++module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
++
++// Test 3: mmad result is both yielded from a remain_in_l0c loop and consumed
++// by a Vector op. InsertFixpipe must emit a fixpipe for vabs but leave the
++// yield on the raw L0C mmad result.
++// CHECK-LABEL: func.func @remain_in_l0c_yield_not_replaced_by_fixpipe
++// CHECK: %[[FOR:.*]]:2 = scf.for
++// CHECK:   %[[MMAD:.*]] = hivm.hir.mmadL1
++// CHECK:   %[[FIX:.*]] = hivm.hir.fixpipe {{.*}} ins(%[[MMAD]]
++// CHECK:   %[[ABS:.*]] = hivm.hir.vabs ins(%[[FIX]]
++// CHECK:   scf.yield %[[MMAD]], %[[ABS]]
++// CHECK: } {fixpipe_for_mmad_result_already_inserted = true, normalized_in_L0C = [0 : i32]}
++  func.func @remain_in_l0c_yield_not_replaced_by_fixpipe(
++      %A: tensor<64x64xf16>, %B: tensor<64x64xf16>,
++      %C_init: tensor<64x64xf32>) -> (tensor<64x64xf32>, tensor<64x64xf32>) {
++    %c0 = arith.constant 0 : index
++    %c2 = arith.constant 2 : index
++    %c1 = arith.constant 1 : index
++    %c64 = arith.constant 64 : index
++    %true = arith.constant true
++    %vec_init = tensor.empty() : tensor<64x64xf32>
++    %res:2 = scf.for %i = %c0 to %c2 step %c1
++        iter_args(%acc = %C_init, %vec = %vec_init)
++        -> (tensor<64x64xf32>, tensor<64x64xf32>) {
++      %mmad = hivm.hir.mmadL1 {already_set_real_mkn, hivm.remain_in_l0c, normalized_in_L0C}
++          ins(%A, %B, %true, %c64, %c64, %c64
++              : tensor<64x64xf16>, tensor<64x64xf16>, i1, index, index, index)
++          outs(%acc : tensor<64x64xf32>) -> tensor<64x64xf32>
++      %abs = hivm.hir.vabs ins(%mmad : tensor<64x64xf32>)
++          outs(%vec : tensor<64x64xf32>) -> tensor<64x64xf32>
++      scf.yield %mmad, %abs : tensor<64x64xf32>, tensor<64x64xf32>
++    } {normalized_in_L0C = [0 : i32]}
++    return %res#0, %res#1 : tensor<64x64xf32>, tensor<64x64xf32>
++  }
++}
++
++// -----
++
++module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
++// CHECK-LABEL: func.func @normalized_only_yield_replaced_by_fixpipe
++// CHECK: %[[FOR:.*]]:2 = scf.for
++// CHECK:   %[[MMAD:.*]] = hivm.hir.mmadL1
++// CHECK:   %[[FIX:.*]] = hivm.hir.fixpipe {{.*}} ins(%[[MMAD]]
++// CHECK:   %[[ABS:.*]] = hivm.hir.vabs ins(%[[FIX]]
++// CHECK:   scf.yield %[[MMAD]], %[[ABS]]
++  func.func @normalized_only_yield_replaced_by_fixpipe(
++      %A: tensor<64x64xf16>, %B: tensor<64x64xf16>,
++      %C_init: tensor<64x64xf32>) -> (tensor<64x64xf32>, tensor<64x64xf32>) {
++    %c0 = arith.constant 0 : index
++    %c2 = arith.constant 2 : index
++    %c1 = arith.constant 1 : index
++    %c64 = arith.constant 64 : index
++    %true = arith.constant true
++    %vec_init = tensor.empty() : tensor<64x64xf32>
++    %res:2 = scf.for %i = %c0 to %c2 step %c1
++        iter_args(%acc = %C_init, %vec = %vec_init)
++        -> (tensor<64x64xf32>, tensor<64x64xf32>) {
++      %mmad = hivm.hir.mmadL1 {already_set_real_mkn, hivm.remain_in_l0c}
++          ins(%A, %B, %true, %c64, %c64, %c64
++              : tensor<64x64xf16>, tensor<64x64xf16>, i1, index, index, index)
++          outs(%acc : tensor<64x64xf32>) -> tensor<64x64xf32>
++      %abs = hivm.hir.vabs ins(%mmad : tensor<64x64xf32>)
++          outs(%vec : tensor<64x64xf32>) -> tensor<64x64xf32>
++      scf.yield %mmad, %abs : tensor<64x64xf32>, tensor<64x64xf32>
++    } {normalized_in_L0C = [0 : i32]}
++    return %res#0, %res#1 : tensor<64x64xf32>, tensor<64x64xf32>
++  }
++}
++
++// -----
++
++module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
++
++// Test normalized_in_L0C = [0] only. Result 0 yield stays
++// on the L0C mmad; result 1 yield is rewritten to the fixpipe.
++// CHECK-LABEL: func.func @remain_in_l0c_partial_normalized_replaces_non_l0c_yield
++// CHECK: %[[FOR:.*]]:4 = scf.for
++// CHECK:   %[[M0:.*]] = hivm.hir.mmadL1
++// CHECK:   %[[F0:.*]] = hivm.hir.fixpipe {{.*}} ins(%[[M0]]
++// CHECK:   %[[A0:.*]] = hivm.hir.vabs ins(%[[F0]]
++// CHECK:   %[[M1:.*]] = hivm.hir.mmadL1
++// CHECK:   %[[F1:.*]] = hivm.hir.fixpipe {{.*}} ins(%[[M1]]
++// CHECK:   %[[A1:.*]] = hivm.hir.vabs ins(%[[F1]]
++// CHECK:   scf.yield %[[M0]], %[[F1]], %[[A0]], %[[A1]]
++  func.func @remain_in_l0c_partial_normalized_replaces_non_l0c_yield(
++      %A: tensor<64x64xf16>, %B: tensor<64x64xf16>,
++      %C0: tensor<64x64xf32>, %C1: tensor<64x64xf32>)
++      -> (tensor<64x64xf32>, tensor<64x64xf32>, tensor<64x64xf32>, tensor<64x64xf32>) {
++    %c0 = arith.constant 0 : index
++    %c2 = arith.constant 2 : index
++    %c1 = arith.constant 1 : index
++    %c64 = arith.constant 64 : index
++    %true = arith.constant true
++    %vec0 = tensor.empty() : tensor<64x64xf32>
++    %vec1 = tensor.empty() : tensor<64x64xf32>
++    %res:4 = scf.for %i = %c0 to %c2 step %c1
++        iter_args(%acc0 = %C0, %acc1 = %C1, %v0 = %vec0, %v1 = %vec1)
++        -> (tensor<64x64xf32>, tensor<64x64xf32>, tensor<64x64xf32>, tensor<64x64xf32>) {
++      %m0 = hivm.hir.mmadL1 {already_set_real_mkn, hivm.remain_in_l0c}
++          ins(%A, %B, %true, %c64, %c64, %c64
++              : tensor<64x64xf16>, tensor<64x64xf16>, i1, index, index, index)
++          outs(%acc0 : tensor<64x64xf32>) -> tensor<64x64xf32>
++      %a0 = hivm.hir.vabs ins(%m0 : tensor<64x64xf32>)
++          outs(%v0 : tensor<64x64xf32>) -> tensor<64x64xf32>
++      %m1 = hivm.hir.mmadL1 {already_set_real_mkn}
++          ins(%A, %B, %true, %c64, %c64, %c64
++              : tensor<64x64xf16>, tensor<64x64xf16>, i1, index, index, index)
++          outs(%acc1 : tensor<64x64xf32>) -> tensor<64x64xf32>
++      %a1 = hivm.hir.vabs ins(%m1 : tensor<64x64xf32>)
++          outs(%v1 : tensor<64x64xf32>) -> tensor<64x64xf32>
++      scf.yield %m0, %m1, %a0, %a1 : tensor<64x64xf32>, tensor<64x64xf32>, tensor<64x64xf32>, tensor<64x64xf32>
++    } {normalized_in_L0C = [0 : i32]}
++    return %res#0, %res#1, %res#2, %res#3 : tensor<64x64xf32>, tensor<64x64xf32>, tensor<64x64xf32>, tensor<64x64xf32>
++  }
++}
++
++// -----
++
++module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
++
++// Test 6: Nested scf.for. The inner mmad is marked remain_in_l0c; the inner
++// loop itself has no L0C attributes. The mmad result is both yielded (inner
++// iter_arg / outer remain_in_l0c result) and consumed by a Vector op.
++// InsertFixpipe must emit a fixpipe for vln but leave the inner yield on the
++// raw L0C mmad result.
++// CHECK-LABEL: func.func @nested_for_remain_in_l0c_mmad_yield_not_replaced
++// CHECK: scf.for
++// CHECK:   %[[INNER:.*]]:2 = scf.for
++// CHECK:     %[[MMAD:.*]] = hivm.hir.mmadL1
++// CHECK:     %[[FIX:.*]] = hivm.hir.fixpipe {{.*}} ins(%[[MMAD]]
++// CHECK:     %[[LN:.*]] = hivm.hir.vln ins(%[[FIX]]
++// CHECK:     scf.yield %[[MMAD]], %[[LN]]
++  func.func @nested_for_remain_in_l0c_mmad_yield_not_replaced(
++      %A: tensor<64x64xf16>, %B: tensor<64x64xf16>,
++      %C0: tensor<64x64xf32>, %C1: tensor<64x64xf32>)
++      -> tensor<64x64xf32> {
++    %c0 = arith.constant 0 : index
++    %c2 = arith.constant 2 : index
++    %c1 = arith.constant 1 : index
++    %c64 = arith.constant 64 : index
++    %true = arith.constant true
++    %vec_init = tensor.empty() : tensor<64x64xf32>
++    %res:3 = scf.for %i = %c0 to %c2 step %c1
++        iter_args(%acc0 = %C0, %acc1 = %C1, %vec = %vec_init)
++        -> (tensor<64x64xf32>, tensor<64x64xf32>, tensor<64x64xf32>) {
++      %inner:2 = scf.for %j = %c0 to %c2 step %c1
++          iter_args(%innerAcc = %acc1, %innerVec = %vec)
++          -> (tensor<64x64xf32>, tensor<64x64xf32>) {
++        %mmad = hivm.hir.mmadL1 {already_set_real_mkn, hivm.remain_in_l0c}
++            ins(%A, %B, %true, %c64, %c64, %c64
++                : tensor<64x64xf16>, tensor<64x64xf16>, i1, index, index, index)
++            outs(%innerAcc : tensor<64x64xf32>) -> tensor<64x64xf32>
++        %ln = hivm.hir.vln ins(%mmad : tensor<64x64xf32>)
++            outs(%innerVec : tensor<64x64xf32>) -> tensor<64x64xf32>
++        scf.yield %mmad, %ln : tensor<64x64xf32>, tensor<64x64xf32>
++      }
++      scf.yield %acc0, %inner#0, %inner#1 : tensor<64x64xf32>, tensor<64x64xf32>, tensor<64x64xf32>
++    } {normalized_in_L0C = [0 : i32, 1 : i32]}
++    return %res#2 : tensor<64x64xf32>
++  }
++}
+diff --git a/bishengir/test/Dialect/HIVM/inline-fixpipe-enable-fixpipe-nz2nz.mlir b/bishengir/test/Dialect/HIVM/inline-fixpipe-enable-fixpipe-nz2nz.mlir
+index f21b54fd9..2a1f7777e 100644
+--- a/bishengir/test/Dialect/HIVM/inline-fixpipe-enable-fixpipe-nz2nz.mlir
++++ b/bishengir/test/Dialect/HIVM/inline-fixpipe-enable-fixpipe-nz2nz.mlir
+@@ -1,5 +1,4 @@
+ // RUN: bishengir-opt -hivm-insert-fixpipe -hivm-inline-fixpipe %s -split-input-file -verify-diagnostics | FileCheck %s
+-// REQUIRES: regbase
+ 
+ // On reg-based A5 targets, mmadL1->mmadL1 inserts fixpipe directly to L1
+ // (fractal NZ shape) instead of the local NZ2ND path.
+diff --git a/bishengir/test/Dialect/HIVM/inline-fixpipe.mlir b/bishengir/test/Dialect/HIVM/inline-fixpipe.mlir
+index 0c1aac669..bbf9be511 100644
+--- a/bishengir/test/Dialect/HIVM/inline-fixpipe.mlir
++++ b/bishengir/test/Dialect/HIVM/inline-fixpipe.mlir
+@@ -229,7 +229,6 @@ func.func @matmul_kernel(%arg0: i64 {hacc.arg_type = #hacc.arg_type<ffts_base_ad
+ // -----
+ module attributes {hacc.target = #hacc.target<"Ascend910B1">} {
+ // CHECK-LABEL: func.func @mm_01
+-module {
+   func.func @mm_01(%arg0: i64 {hacc.arg_type = #hacc.arg_type<ffts_base_address>}, %arg1: memref<?xi8> {hacc.arg_type = #hacc.arg_type<workspace>}, %arg2: memref<?xf16> {tt.divisibility = 16 : i32}, %arg3: memref<?xf16> {tt.divisibility = 16 : i32}, %arg4: memref<?xf16> {tt.divisibility = 16 : i32}, %arg5: memref<?xf32> {tt.divisibility = 16 : i32}, %arg6: i32, %arg7: i32, %arg8: i32) attributes {WorkspaceArgIdx = 0 : i64, func_dyn_memref_args = dense<[false, true, true, true, true, true, false, false, false]> : vector<9xi1>, global_kernel = "local", hacc.entry, hacc.function_kind = #hacc.function_kind<DEVICE>, mix_mode = "mix"} {
+     %true = arith.constant true
+     %c16_i32 = arith.constant 16 : i32
+@@ -282,7 +281,6 @@ module {
+   }
+ }
+ 
+-}
+ // -----
+ module attributes {hacc.target = #hacc.target<"Ascend910B1">} {
+ // CHECK-LABEL: func.func @_attn_fwd
+diff --git a/bishengir/test/Dialect/HIVM/insert-fixpipe-for-scf-if-mmad.mlir b/bishengir/test/Dialect/HIVM/insert-fixpipe-for-scf-if-mmad.mlir
+index 79d38b4e6..e912c66ab 100644
+--- a/bishengir/test/Dialect/HIVM/insert-fixpipe-for-scf-if-mmad.mlir
++++ b/bishengir/test/Dialect/HIVM/insert-fixpipe-for-scf-if-mmad.mlir
+@@ -31,17 +31,17 @@ func.func @single_fixpipe_after_scf_if(
+   %res = scf.if %cond -> (tensor<128x128xf32>) {
+     %memspacecast = memref.memory_space_cast %alloc : memref<128x128xf32, #hivm.address_space<cc>> to memref<128x128xf32>
+     %acc = bufferization.to_tensor %memspacecast restrict writable : memref<128x128xf32>
+-    %mmad = hivm.hir.mmadL1 {already_set_real_mkn}
++    %mmad = hivm.hir.mmadL1 {already_set_real_mkn, hivm.remain_in_l0c, normalized_in_L0C}
+         ins(%a, %b, %false, %c128, %c128, %c128 : tensor<128x128xf16>, tensor<128x128xf16>, i1, index, index, index)
+         outs(%acc : tensor<128x128xf32>) -> tensor<128x128xf32>
+     scf.yield %mmad : tensor<128x128xf32>
+   } else {
+     %init = tensor.empty() : tensor<128x128xf32>
+-    %mmad = hivm.hir.mmadL1 {already_set_real_mkn}
++    %mmad = hivm.hir.mmadL1 {already_set_real_mkn, hivm.remain_in_l0c, normalized_in_L0C}
+         ins(%a, %b, %true, %c128, %c128, %c128 : tensor<128x128xf16>, tensor<128x128xf16>, i1, index, index, index)
+         outs(%init : tensor<128x128xf32>) -> tensor<128x128xf32>
+     scf.yield %mmad : tensor<128x128xf32>
+-  }
++  } {normalized_in_L0C = [0 : i32]}
+   hivm.hir.store ins(%res : tensor<128x128xf32>) outs(%arg3 : memref<128x128xf32>) atomic = <add>
+   annotation.mark %res keys = ["bind_buffer"] values = [%alloc : memref<128x128xf32, #hivm.address_space<cc>>] : tensor<128x128xf32>
+   return
+diff --git a/bishengir/test/Dialect/HIVM/insert-fixpipe-mix-if-normalized-mmad.mlir b/bishengir/test/Dialect/HIVM/insert-fixpipe-mix-if-normalized-mmad.mlir
+new file mode 100644
+index 000000000..ea02443a6
+--- /dev/null
++++ b/bishengir/test/Dialect/HIVM/insert-fixpipe-mix-if-normalized-mmad.mlir
+@@ -0,0 +1,55 @@
++// RUN: bishengir-opt -hivm-insert-fixpipe %s | FileCheck %s
++
++// Distilled from chunk_oja_bwd_kernel_dA: Cube mmad with normalized_in_L0C
++// (no remain_in_l0c) is yielded through a mix scf.if whose else path is
++// Vector (vsel / vbrc). getInsertPointOutOfIf must not hoist past the if
++// just because isResultInL0C is true from normalized_in_L0C; fixpipe
++// belongs after the mmad so the merged if-result is never treated as L0C.
++module attributes {hacc.target = #hacc.target<"Ascend910B3">} {
++// CHECK-LABEL: func.func @mmad_normalized_mix_if_fixpipe_inside
++// CHECK: %[[IF:.*]] = scf.if
++// CHECK: %[[MMAD:.*]] = hivm.hir.mmadL1 {{.*}}fixpipe_for_result_already_inserted = true, normalized_in_L0C
++// CHECK: %[[FIX:.*]] = hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>} ins(%[[MMAD]]
++// CHECK: scf.yield %[[FIX]]
++// CHECK: } else {
++// CHECK-NOT: hivm.hir.fixpipe
++// CHECK: tensor.extract_slice %[[IF]]
++// CHECK: hivm.hir.store
++func.func @mmad_normalized_mix_if_fixpipe_inside(
++    %cond: i1, %eq: i1,
++    %a: tensor<16x64xf32>,
++    %b: tensor<64x16xf32>,
++    %mask: tensor<16x16xi1>,
++    %out: memref<?x?xf32, strided<[256, 1], offset: ?>>) {
++  %true = arith.constant true
++  %c16 = arith.constant 16 : index
++  %c64 = arith.constant 64 : index
++  %cst = arith.constant 0.000000e+00 : f32
++  %empty = tensor.empty() : tensor<16x16xf32>
++  %zero = hivm.hir.vbrc ins(%cst : f32) outs(%empty : tensor<16x16xf32>)
++      -> tensor<16x16xf32>
++  %res = scf.if %cond -> (tensor<16x16xf32>) {
++    %acc = tensor.empty() : tensor<16x16xf32>
++    %mmad = hivm.hir.mmadL1 {already_set_real_mkn, normalized_in_L0C}
++        ins(%a, %b, %true, %c16, %c64, %c16
++            : tensor<16x64xf32>, tensor<64x16xf32>, i1, index, index, index)
++        outs(%acc : tensor<16x16xf32>) -> tensor<16x16xf32>
++    scf.yield %mmad : tensor<16x16xf32>
++  } else {
++    %inner = scf.if %eq -> (tensor<16x16xf32>) {
++      %sel = hivm.hir.vsel ins(%mask, %zero, %cst
++          : tensor<16x16xi1>, tensor<16x16xf32>, f32)
++          outs(%empty : tensor<16x16xf32>) -> tensor<16x16xf32>
++      scf.yield %sel : tensor<16x16xf32>
++    } else {
++      scf.yield %zero : tensor<16x16xf32>
++    }
++    scf.yield %inner : tensor<16x16xf32>
++  }
++  %slice = tensor.extract_slice %res[0, 0] [%c16, %c16] [1, 1]
++      : tensor<16x16xf32> to tensor<?x?xf32>
++  hivm.hir.store ins(%slice : tensor<?x?xf32>)
++      outs(%out : memref<?x?xf32, strided<[256, 1], offset: ?>>)
++  return
++}
++}

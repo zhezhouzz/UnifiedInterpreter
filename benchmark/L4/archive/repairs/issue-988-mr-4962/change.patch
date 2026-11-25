@@ -1,0 +1,1151 @@
+diff --git a/bishengir/include/bishengir/Dialect/HIVM/IR/Capability/Cube/Mmad/MmadCapabilityQuery.h b/bishengir/include/bishengir/Dialect/HIVM/IR/Capability/Cube/Mmad/MmadCapabilityQuery.h
+index fa60a18ea..cc1dc451b 100644
+--- a/bishengir/include/bishengir/Dialect/HIVM/IR/Capability/Cube/Mmad/MmadCapabilityQuery.h
++++ b/bishengir/include/bishengir/Dialect/HIVM/IR/Capability/Cube/Mmad/MmadCapabilityQuery.h
+@@ -94,6 +94,64 @@ inline bool isNativeMmadMxTarget(Operation *anchor) {
+           .build());
+ }
+ 
++// Mixed-precision MMAD needs the dav-920r1 `mad` overloads, so only that
++// architecture can accept A and B with distinct element types.
++inline bool supportsHeteroMmadL1(Operation *anchor) {
++  auto architecture = mmadArchitecture(anchor);
++  return architecture &&
++         *architecture == bishengir::npu::NPUArchitectureKind::kDav920R1;
++}
++
++// The dav-920r1 pair table: f16/bf16 x fp8-e4m3, f16/bf16 x int8, the two
++// mixed fp8 orders, and the packed 4-bit pairs (f16/bf16/int8) x int4. The
++// Dav_920R1 profile still carries the Dav920R1AnyMmad
++// AnyValue catch-all, so until it gains precise rows, this table is the single
++// source of truth for mixed-precision mmadL1: op verification and
++// library-symbol naming must both call it.
++inline bool isNativeHeteroMmadL1(Operation *anchor, Type aElementType,
++                                 Type bElementType) {
++  if (!supportsHeteroMmadL1(anchor))
++    return false;
++  Type f16 = Float16Type::get(anchor->getContext());
++  Type bf16 = BFloat16Type::get(anchor->getContext());
++  Type f8e4 = Float8E4M3FNType::get(anchor->getContext());
++  Type f8e5 = Float8E5M2Type::get(anchor->getContext());
++  Type i8 = IntegerType::get(anchor->getContext(), 8);
++  Type i4 = IntegerType::get(anchor->getContext(), 4);
++  bool aF16Like = aElementType == f16 || aElementType == bf16;
++  return (aF16Like && (bElementType == f8e4 || bElementType == i8)) ||
++         (aElementType == f8e4 && bElementType == f8e5) ||
++         (aElementType == f8e5 && bElementType == f8e4) ||
++         ((aF16Like || aElementType == i8) && bElementType == i4);
++}
++
++// Packed 4-bit MMAD needs the dav-920r1 `mad_*s4` overloads. It is an
++// independent capability from mixed-precision MMAD; the architecture lists
++// merely coincide today.
++inline bool supportsPackedS4MmadL1(Operation *anchor) {
++  auto architecture = mmadArchitecture(anchor);
++  return architecture &&
++         *architecture == bishengir::npu::NPUArchitectureKind::kDav920R1;
++}
++
++// s4 weights ride in a packed 4-bit int4b_t buffer:
++// f16/bf16 x s4 -> f32 and s8 x s4 -> i32. Shares the pair-table caveat above.
++inline bool isNativePackedS4MmadL1(Operation *anchor, Type aElementType,
++                                   Type bElementType, Type cElementType) {
++  if (!supportsPackedS4MmadL1(anchor))
++    return false;
++  Type f16 = Float16Type::get(anchor->getContext());
++  Type bf16 = BFloat16Type::get(anchor->getContext());
++  Type i8 = IntegerType::get(anchor->getContext(), 8);
++  Type i4 = IntegerType::get(anchor->getContext(), 4);
++  bool aF16Like = aElementType == f16 || aElementType == bf16;
++  return bElementType == i4 &&
++         ((aF16Like &&
++           cElementType == Float32Type::get(anchor->getContext())) ||
++          (aElementType == i8 &&
++           cElementType == IntegerType::get(anchor->getContext(), 32)));
++}
++
+ } // namespace hivm
+ } // namespace mlir
+ 
+diff --git a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMMacroOps.td b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMMacroOps.td
+index 4a025842d..f0978aeb9 100644
+--- a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMMacroOps.td
++++ b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMMacroOps.td
+@@ -159,7 +159,6 @@ class HIVM_L1MmadOp<string mnemonic, list<Trait> traits = []> :
+   HIVM_MacroOp<mnemonic, !listconcat(
+     [HIVMLocalMatmulLikeOpTraits,
+      HIVMUnitFlagEnabledInterface,
+-     AllElementTypesMatch<["a", "b"]>,
+     ], traits)> {
+   let arguments = !con(
+     HIVM_LocalMmadLikeOperands.mmadCommonAB,
+@@ -271,6 +270,7 @@ def MmadL1Op : HIVM_L1MmadOp<"mmadL1", [
+ def BatchMmadL1Op : HIVM_L1MmadOp<"batchMmadL1", [
+   NoMaxRankTrait,
+   DeclareOpInterfaceMethods<OpLayoutInterface, ["getOperandsTargetFractalLayout"]>,
++  AllElementTypesMatch<["a", "b"]>,
+ ]> {
+   let summary = [{
+     Batch Matrix Multiply and Add Op with inputs from L1 memory hierarchy.
+diff --git a/bishengir/lib/Dialect/HIVM/IR/HIVMMacroOps.cpp b/bishengir/lib/Dialect/HIVM/IR/HIVMMacroOps.cpp
+index ef37d44d9..aaf91d42a 100644
+--- a/bishengir/lib/Dialect/HIVM/IR/HIVMMacroOps.cpp
++++ b/bishengir/lib/Dialect/HIVM/IR/HIVMMacroOps.cpp
+@@ -16,6 +16,7 @@
+ //===----------------------------------------------------------------------===//
+ 
+ #include "bishengir/Dialect/HACC/Utils/Utils.h"
++#include "bishengir/Dialect/HIVM/IR/Capability/Cube/Mmad/MmadCapabilityQuery.h"
+ #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+ #include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
+ #include "bishengir/Dialect/HIVM/Interfaces/FlattenInterface.h"
+@@ -31,6 +32,7 @@
+ #include "mlir/Dialect/Utils/StaticValueUtils.h"
+ #include "mlir/IR/Attributes.h"
+ #include "mlir/IR/BuiltinAttributes.h"
++#include "mlir/IR/BuiltinTypes.h"
+ #include "mlir/IR/DialectImplementation.h"
+ #include "mlir/IR/Matchers.h"
+ #include "mlir/IR/Operation.h"
+@@ -636,6 +638,39 @@ LogicalResult MmadL1Op::verify() {
+                          << numSyncRelatedArgs << " " << syncRelatedArgs;
+   }
+ 
++  // Mixed-precision MMAD takes A and B with distinct element types. The
++  // supported target and pair table are owned by MmadL1CapabilityQuery; every
++  // other target keeps the historical "A and B must have the same element
++  // type" contract.
++  auto elemA = getElementTypeOrSelf(getA().getType());
++  auto elemB = getElementTypeOrSelf(getB().getType());
++  if (elemA != elemB) {
++    if (!supportsHeteroMmadL1(getOperation()))
++      return emitOpError() << "MMAD with heterogeneous A/B element types "
++                           << elemA << " x " << elemB
++                           << " is only supported on Ascend960 series.";
++    if (!isNativeHeteroMmadL1(getOperation(), elemA, elemB))
++      return emitOpError() << "unsupported heterogeneous A/B element types "
++                           << elemA << " x " << elemB
++                           << " for MMAD on Ascend960 series.";
++  }
++
++  // Packed 4-bit (s4) MMAD is expressed with enable_I4 and a packed int4 B
++  // buffer: bf16/f16 x s4 accumulate into f32, while s8 x s4 accumulates
++  // into i32. The supported target and element-type rules are owned by
++  // MmadL1CapabilityQuery as well.
++  if (getEnable_I4().has_value()) {
++    if (!supportsPackedS4MmadL1(getOperation()))
++      return emitOpError()
++             << "MMAD with enable_I4 is only supported on Ascend960 series.";
++
++    auto elemC = getElementTypeOrSelf(getC().getType());
++    if (!isNativePackedS4MmadL1(getOperation(), elemA, elemB, elemC))
++      return emitOpError() << "unsupported s4 MMAD element types " << elemA
++                           << " x " << elemB << " -> " << elemC
++                           << " on Ascend960 series.";
++  }
++
+   return success();
+ }
+ namespace mlir {
+diff --git a/bishengir/lib/Dialect/HIVM/IR/LibraryFunctionOpInterface/LibraryFunctionOpInterfaceImpl.cpp b/bishengir/lib/Dialect/HIVM/IR/LibraryFunctionOpInterface/LibraryFunctionOpInterfaceImpl.cpp
+index 281bf401c..4e7e523f3 100644
+--- a/bishengir/lib/Dialect/HIVM/IR/LibraryFunctionOpInterface/LibraryFunctionOpInterfaceImpl.cpp
++++ b/bishengir/lib/Dialect/HIVM/IR/LibraryFunctionOpInterface/LibraryFunctionOpInterfaceImpl.cpp
+@@ -16,6 +16,7 @@
+ //===----------------------------------------------------------------------===//
+ 
+ #include "bishengir/Dialect/HACC/Utils/Utils.h"
++#include "bishengir/Dialect/HIVM/IR/Capability/Cube/Mmad/MmadCapabilityQuery.h"
+ #include "bishengir/Dialect/HIVM/IR/Capability/DMA/CubeLoad/CubeLoadCapabilityQuery.h"
+ #include "bishengir/Dialect/HIVM/IR/CustomOp/DistributedTransformUtils.h"
+ #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+@@ -1222,12 +1223,34 @@ std::string NoMaxRankExternalModel<MmadL1Op>::getOpLibraryCallName(
+     Operation *op, std::optional<bool> isOpsAligned) const {
+   auto concreteOp = cast<MmadL1Op>(op);
+   auto baseCallName = concreteOp.getOpName().str();
+-  auto srcTypeName =
+-      getTypeName(concreteOp.getLoc(),
+-                  getElementTypeOrSelf(concreteOp.getDpsInputs()[0].getType()));
++  auto elemAType = getElementTypeOrSelf(concreteOp.getDpsInputs()[0].getType());
++  auto elemBType = getElementTypeOrSelf(concreteOp.getDpsInputs()[1].getType());
+   auto dstTypeName =
+       getTypeName(concreteOp.getLoc(),
+                   getElementTypeOrSelf(concreteOp.getDpsInits()[0].getType()));
++  // Mixed-precision MMAD carries both element types in the symbol, following
++  // the mma_tile_<a>_<b>_to_<dst> convention used by the template library.
++  // The template token of the packed 4-bit type is `int4b_t`, matching the
++  // B-side registration type of the s4 tiles; the generic integer naming
++  // ("int4_t") is reserved for the vcast symbol family.
++  auto typeToken = [&](Type elemType) {
++    auto intType = dyn_cast<IntegerType>(elemType);
++    return (intType && intType.getWidth() == 4)
++               ? "int4b_t"
++               : getTypeName(concreteOp.getLoc(), elemType);
++  };
++  std::string srcTypeNames = typeToken(elemAType);
++  if (elemAType != elemBType) {
++    // Heterogeneous and packed 4-bit symbols only exist in the dav-920r1
++    // template library; MmadL1Op::verify rejects them elsewhere, so this
++    // assert is a backstop for op instances that bypass verification.
++    auto dstElemType =
++        getElementTypeOrSelf(concreteOp.getDpsInits()[0].getType());
++    assert((isNativeHeteroMmadL1(op, elemAType, elemBType) ||
++            isNativePackedS4MmadL1(op, elemAType, elemBType, dstElemType)) &&
++           "heterogeneous mmadL1 is only supported on Ascend960 series");
++    srcTypeNames += "_" + typeToken(elemBType);
++  }
+   auto transposeA = concreteOp.getATranspose();
+   auto transposeB = concreteOp.getBTranspose();
+   auto enableHF32 = concreteOp.getEnable_HF32();
+@@ -1245,17 +1268,24 @@ std::string NoMaxRankExternalModel<MmadL1Op>::getOpLibraryCallName(
+ 
+   if (enableI4.has_value()) {
+     assert(!transposeA.has_value() && "i4 mmad doesn't support transpose A");
+-    transName = transName + "_i4";
++    // The mad_*s4 overloads are dav-920r1-only; MmadL1Op::verify rejects them
++    // elsewhere, so this assert is a backstop. The tile symbol itself is the
++    // plain heterogeneous mma_tile_<a>_<b>_to_<dst>; the enable_I4 flag no
++    // longer leaks into the name.
++    assert(isNativePackedS4MmadL1(
++               op, elemAType, elemBType,
++               getElementTypeOrSelf(concreteOp.getDpsInits()[0].getType())) &&
++           "mmadL1 with enable_I4 is only supported on Ascend960 series");
+   }
+   if (concreteOp.getPerChannelBias()) {
+     // TODO: change biasTypeName for int4 case
+     auto biasTypeName = getTypeName(
+         concreteOp.getLoc(),
+         getElementTypeOrSelf(concreteOp.getPerChannelBias().getType()));
+-    return baseCallName + "_with_" + biasTypeName + "_bias_" + srcTypeName +
++    return baseCallName + "_with_" + biasTypeName + "_bias_" + srcTypeNames +
+            "_to_" + dstTypeName + transName;
+   } else {
+-    return baseCallName + "_" + srcTypeName + "_to_" + dstTypeName + transName;
++    return baseCallName + "_" + srcTypeNames + "_to_" + dstTypeName + transName;
+   }
+ }
+ 
+diff --git a/bishengir/lib/Template/lib/RegBase/Cube/LocalMmad.cpp b/bishengir/lib/Template/lib/RegBase/Cube/LocalMmad.cpp
+index 1db402501..209207d4d 100644
+--- a/bishengir/lib/Template/lib/RegBase/Cube/LocalMmad.cpp
++++ b/bishengir/lib/Template/lib/RegBase/Cube/LocalMmad.cpp
+@@ -16,6 +16,7 @@
+ #define CATLASS_ARCH_A5_ENABLED
+ #endif
+ 
++#include "ArchDefs.h"
+ #include "Synchronization/SyncUtils.h"
+ #include "ascendc_bisheng/ascendc_bisheng.hpp"
+ #include "catlass/catlass.hpp"
+@@ -212,15 +213,24 @@ L1Mmad(__cc__ ElementACC *l0C, __cbuf__ ElementA *l1A, __cbuf__ ElementB *l1B,
+           l1AMTE1MTE2EventId);
+     }
+ 
+-    // Locate the current tile on L0B
+-    auto l0BTile =
+-        l0BTensor[pingPongId * L0B_PINGPONG_BUF_SIZE / sizeof(ElementB)];
++    // A packed 4-bit B stores two logical K elements per storage byte; the
++    // storage-side K is half of the logical K.
++    constexpr bool isPackedS4B =
++        AscendCBisheng::IsSameType<ElementB, int4b_t>::value;
++    const uint32_t bKActual = isPackedS4B ? (kL0Actual / 2) : kL0Actual;
++    // Offset in storage bytes: LocalTensor<int4b_t>::operator[] would halve
++    // the offset because it addresses packed half-byte elements.
++    AscendCBisheng::LocalTensor<ElementB> l0BTile{};
++    l0BTile.address_ = l0BTensor.address_;
++    l0BTile.address_.bufferAddr +=
++        pingPongId * L0B_PINGPONG_BUF_SIZE / sizeof(ElementB);
+     auto layoutBInL0 =
+-        tla::MakeLayout<ElementB, LayoutTagL0B>(kL0Actual, actualN);
++        tla::MakeLayout<ElementB, LayoutTagL0B>(bKActual, actualN);
+     auto tensorL0B = tla::MakeTensor(l0BTile, layoutBInL0, Arch::PositionL0B{});
+     // Locate the current tile of matrix B on L1
+-    auto tensorTileL1B = GetTile(tensorL1B, tla::MakeCoord(kL0Idx * l0K, 0),
+-                                 tla::MakeShape(kL0Actual, actualN));
++    auto tensorTileL1B =
++        GetTile(tensorL1B, tla::MakeCoord(kL0Idx * l0K / (isPackedS4B ? 2 : 1), 0),
++                tla::MakeShape(bKActual, actualN));
+ 
+     if (kL0Idx == 0 && l1BMTE2MTE1EventId != -1) {
+       AscendCBisheng::WaitFlag<AscendCBisheng::HardEvent::MTE2_MTE1>(
+@@ -518,12 +528,16 @@ __aicore__ __attribute__((always_inline)) void batch_mma_tile_core(
+       unit_flag_mode, mb->strides[1]);
+ }
+ 
++// B_TYPE defaults to SRC_TYPE so the A == B instantiations keep their original
++// spelling; heterogeneous MMAD passes the distinct B storage type explicitly.
++// A packed 4-bit B (int4b_t) selects the dedicated mad_*s4 intrinsic and the
++// half-K storage addressing in L1Mmad.
+ template <typename SRC_TYPE, typename DST_TYPE, typename BIAS_TYPE, bool TA,
+-          bool TB, bool HF32>
++          bool TB, bool HF32, typename B_TYPE = SRC_TYPE>
+ __aicore__ __attribute__((always_inline)) void
+ mma_tile_core(memref_t<__cbuf__ SRC_TYPE, 4> *ma,
+-              memref_t<__cbuf__ SRC_TYPE, 4> *mb, bool init, int64_t m,
+-              int64_t k, int64_t n, memref_t<__cc__ DST_TYPE, 4> *mc,
++              memref_t<__cbuf__ B_TYPE, 4> *mb, bool init, int64_t m, int64_t k,
++              int64_t n, memref_t<__cc__ DST_TYPE, 4> *mc,
+               memref_t<int32_t, 0> *ping_pong_signal,
+               int64_t mmad_l1_wait_l1a_event, int64_t mmad_l1_wait_l1b_event,
+               int64_t l1a_wait_mmad_l1_event, int64_t l1b_wait_mmad_l1_event,
+@@ -566,36 +580,35 @@ mma_tile_core(memref_t<__cbuf__ SRC_TYPE, 4> *ma,
+     }
+   }
+ 
+-  Catlass::Gemm::L1Mmad<SRC_TYPE, SRC_TYPE, BIAS_TYPE, DST_TYPE, TA, TB, HF32>(
+-      mc->aligned + mc->offset, // l0C
+-      ma->aligned + ma->offset, // l1A
+-      mb->aligned + mb->offset, // l1B
+-      nullptr,                  // l1Bias
+-      l1M,                      // l1M
+-      l1K,                      // l1K
+-      l1N,                      // l1N
+-      actualM,                  // actualM
+-      actualK,                  // actualK
+-      actualN,                  // actualN
+-      ping_pong_signal,         // ping_pong_signal
+-      mmad_l1_wait_l1a_event,   // l1AMTE2MTE1EventId
+-      l1a_wait_mmad_l1_event,   // l1AMTE1MTE2EventId
+-      mmad_l1_wait_l1b_event,   // l1BMTE2MTE1EventId
+-      l1b_wait_mmad_l1_event,   // l1BMTE1MTE2EventId
+-      init,                     // isL1FirstK
+-      true,                     // isL1LastK
+-      unit_flag_mode,           // unit_flag_mode
+-      false,                    // hasBias
+-      0                         // l1BOuterStride
++  Catlass::Gemm::L1Mmad<SRC_TYPE, B_TYPE, BIAS_TYPE, DST_TYPE, TA, TB,
++                        HF32>(mc->aligned + mc->offset, // l0C
++                              ma->aligned + ma->offset, // l1A
++                              mb->aligned + mb->offset, // l1B
++                              nullptr,                  // l1Bias
++                              l1M,                      // l1M
++                              l1K,                      // l1K
++                              l1N,                      // l1N
++                              actualM,                  // actualM
++                              actualK,                  // actualK
++                              actualN,                  // actualN
++                              ping_pong_signal,         // ping_pong_signal
++                              mmad_l1_wait_l1a_event,   // l1AMTE2MTE1EventId
++                              l1a_wait_mmad_l1_event,   // l1AMTE1MTE2EventId
++                              mmad_l1_wait_l1b_event,   // l1BMTE2MTE1EventId
++                              l1b_wait_mmad_l1_event,   // l1BMTE1MTE2EventId
++                              init,                     // isL1FirstK
++                              true,                     // isL1LastK
++                              unit_flag_mode,           // unit_flag_mode
++                              false                     // hasBias
+   );
+ }
+ 
+ template <typename SRC_TYPE, typename DST_TYPE, typename BIAS_TYPE, bool TA,
+-          bool TB, bool HF32>
++          bool TB, bool HF32, typename B_TYPE = SRC_TYPE>
+ __aicore__ __attribute__((always_inline)) void
+ mma_tile_bias(memref_t<__cbuf__ SRC_TYPE, 4> *ma,
+-              memref_t<__cbuf__ SRC_TYPE, 4> *mb, bool init, int64_t m,
+-              int64_t k, int64_t n, memref_t<__cbuf__ BIAS_TYPE, 4> *bias,
++              memref_t<__cbuf__ B_TYPE, 4> *mb, bool init, int64_t m, int64_t k,
++              int64_t n, memref_t<__cbuf__ BIAS_TYPE, 4> *bias,
+               memref_t<__cc__ DST_TYPE, 4> *mc,
+               memref_t<int32_t, 0> *ping_pong_signal,
+               int64_t mmad_l1_wait_l1a_event, int64_t mmad_l1_wait_l1b_event,
+@@ -639,27 +652,26 @@ mma_tile_bias(memref_t<__cbuf__ SRC_TYPE, 4> *ma,
+     }
+   }
+ 
+-  Catlass::Gemm::L1Mmad<SRC_TYPE, SRC_TYPE, BIAS_TYPE, DST_TYPE, TA, TB, HF32>(
+-      mc->aligned + mc->offset,     // l0C
+-      ma->aligned + ma->offset,     // l1A
+-      mb->aligned + mb->offset,     // l1B
+-      bias->aligned + bias->offset, // l1Bias
+-      l1M,                          // l1M
+-      l1K,                          // l1K
+-      l1N,                          // l1N
+-      actualM,                      // actualM
+-      actualK,                      // actualK
+-      actualN,                      // actualN
+-      ping_pong_signal,             // ping_pong_signal
+-      mmad_l1_wait_l1a_event,       // l1AMTE2MTE1EventId
+-      l1a_wait_mmad_l1_event,       // l1AMTE1MTE2EventId
+-      mmad_l1_wait_l1b_event,       // l1BMTE2MTE1EventId
+-      l1b_wait_mmad_l1_event,       // l1BMTE1MTE2EventId
+-      init,                         // isL1FirstK
+-      true,                         // isL1LastK
+-      unit_flag_mode,               // unit_flag_mode
+-      true,                         // hasBias
+-      0                             // l1BOuterStride
++  Catlass::Gemm::L1Mmad<SRC_TYPE, B_TYPE, BIAS_TYPE, DST_TYPE, TA, TB,
++                        HF32>(mc->aligned + mc->offset,     // l0C
++                              ma->aligned + ma->offset,     // l1A
++                              mb->aligned + mb->offset,     // l1B
++                              bias->aligned + bias->offset, // l1Bias
++                              l1M,                          // l1M
++                              l1K,                          // l1K
++                              l1N,                          // l1N
++                              actualM,                      // actualM
++                              actualK,                      // actualK
++                              actualN,                      // actualN
++                              ping_pong_signal,             // ping_pong_signal
++                              mmad_l1_wait_l1a_event,       // l1AMTE2MTE1EventId
++                              l1a_wait_mmad_l1_event,       // l1AMTE1MTE2EventId
++                              mmad_l1_wait_l1b_event,       // l1BMTE2MTE1EventId
++                              l1b_wait_mmad_l1_event,       // l1BMTE1MTE2EventId
++                              init,                         // isL1FirstK
++                              true,                         // isL1LastK
++                              unit_flag_mode,               // unit_flag_mode
++                              true                          // hasBias
+   );
+ }
+ 
+@@ -1257,4 +1269,120 @@ REGISTER_MMA_TILE_BIAS_HF32(cbuf, cc, 4, float, float, float);
+ REGISTER_MMA_TILE_BIAS_TA_HF32(cbuf, cc, 4, float, float, float);
+ REGISTER_MMA_TILE_BIAS_TB_HF32(cbuf, cc, 4, float, float, float);
+ REGISTER_MMA_TILE_BIAS_TA_TB_HF32(cbuf, cc, 4, float, float, float);
++
++#if BISHENG_TPL_920R1
++// Heterogeneous A/B MMAD entry points.  The two L1 operands have distinct
++// storage types, so the symbol carries both: mma_tile_<a>_<b>_to_<dst>.  The B
++// storage type is passed as the trailing template argument of mma_tile_core /
++// mma_tile_bias.
++#define DECLARE_MMA_TILE_HETERO(src_scope, dst_scope, dim, a_type, b_type,     \
++                                dst_type, bias_type)                           \
++  __aicore__ __attribute__((always_inline)) void                               \
++      _mlir_ciface_mma_tile_##a_type##_##b_type##_to_##dst_type(               \
++          memref_t<__##src_scope##__ a_type, dim> *src0,                       \
++          memref_t<__##src_scope##__ b_type, dim> *src1, bool init, int64_t m, \
++          int64_t k, int64_t n, memref_t<__##dst_scope##__ dst_type, 4> *dst,  \
++          memref_t<int32_t, 0> *ping_pong_signal,                              \
++          int64_t mmad_l1_wait_l1a_event, int64_t mmad_l1_wait_l1b_event,      \
++          int64_t l1a_wait_mmad_l1_event, int64_t l1b_wait_mmad_l1_event,      \
++          int64_t kloop_db_cond, int64_t back_pipe_m_pipe_mte1_db_event0,      \
++          int64_t back_pipe_m_pipe_mte1_db_event1, UNIT_FLAG unit_flag_mode,   \
++          int64_t unit_flag_group_id)
++
++#define REGISTER_MMA_TILE_HETERO(src_scope, dst_scope, dim, a_type, b_type,    \
++                                 dst_type, bias_type)                          \
++  DECLARE_MMA_TILE_HETERO(src_scope, dst_scope, dim, a_type, b_type, dst_type, \
++                          bias_type) {                                         \
++    mma_tile_core<a_type, dst_type, bias_type, false, false, false, b_type>(   \
++        src0, src1, init, m, k, n, dst, ping_pong_signal,                      \
++        mmad_l1_wait_l1a_event, mmad_l1_wait_l1b_event,                        \
++        l1a_wait_mmad_l1_event, l1b_wait_mmad_l1_event, kloop_db_cond,         \
++        back_pipe_m_pipe_mte1_db_event0, back_pipe_m_pipe_mte1_db_event1,      \
++        unit_flag_mode, unit_flag_group_id);                                   \
++  }
++
++#define DECLARE_MMA_TILE_HETERO_BIAS(src_scope, dst_scope, dim, a_type,                  \
++                                     b_type, dst_type, bias_type)                        \
++  __aicore__ __attribute__((always_inline)) void                                         \
++      _mlir_ciface_mma_tile_with_##bias_type##_bias_##a_type##_##b_type##_to_##dst_type( \
++          memref_t<__##src_scope##__ a_type, dim> *src0,                                 \
++          memref_t<__##src_scope##__ b_type, dim> *src1, bool init, int64_t m,           \
++          int64_t k, int64_t n,                                                          \
++          memref_t<__##src_scope##__ bias_type, dim> *bias,                              \
++          memref_t<__##dst_scope##__ dst_type, 4> *dst,                                  \
++          memref_t<int32_t, 0> *ping_pong_signal,                                        \
++          int64_t mmad_l1_wait_l1a_event, int64_t mmad_l1_wait_l1b_event,                \
++          int64_t l1a_wait_mmad_l1_event, int64_t l1b_wait_mmad_l1_event,                \
++          int64_t kloop_db_cond, int64_t back_pipe_m_pipe_mte1_db_event0,                \
++          int64_t back_pipe_m_pipe_mte1_db_event1, UNIT_FLAG unit_flag_mode,             \
++          int64_t unit_flag_group_id)
++
++#define REGISTER_MMA_TILE_HETERO_BIAS(src_scope, dst_scope, dim, a_type,       \
++                                      b_type, dst_type, bias_type)             \
++  DECLARE_MMA_TILE_HETERO_BIAS(src_scope, dst_scope, dim, a_type, b_type,      \
++                               dst_type, bias_type) {                          \
++    mma_tile_bias<a_type, dst_type, bias_type, false, false, false, b_type>(   \
++        src0, src1, init, m, k, n, bias, dst, ping_pong_signal,                \
++        mmad_l1_wait_l1a_event, mmad_l1_wait_l1b_event,                        \
++        l1a_wait_mmad_l1_event, l1b_wait_mmad_l1_event, kloop_db_cond,         \
++        back_pipe_m_pipe_mte1_db_event0, back_pipe_m_pipe_mte1_db_event1,      \
++        unit_flag_mode, unit_flag_group_id);                                   \
++  }
++
++// Mixed-precision MMAD forms exposed by cce_aicore_intrinsics.h on dav-920r1.
++REGISTER_MMA_TILE_HETERO(cbuf, cc, 4, bfloat16_t, float8_e4m3_t, float, float);
++REGISTER_MMA_TILE_HETERO(cbuf, cc, 4, half, float8_e4m3_t, float, float);
++REGISTER_MMA_TILE_HETERO(cbuf, cc, 4, bfloat16_t, int8_t, float, float);
++REGISTER_MMA_TILE_HETERO(cbuf, cc, 4, half, int8_t, float, float);
++REGISTER_MMA_TILE_HETERO(cbuf, cc, 4, float8_e4m3_t, float8_e5m2_t, float,
++                         float);
++REGISTER_MMA_TILE_HETERO(cbuf, cc, 4, float8_e5m2_t, float8_e4m3_t, float,
++                         float);
++
++REGISTER_MMA_TILE_HETERO_BIAS(cbuf, cc, 4, bfloat16_t, float8_e4m3_t, float,
++                              float);
++REGISTER_MMA_TILE_HETERO_BIAS(cbuf, cc, 4, half, float8_e4m3_t, float, float);
++REGISTER_MMA_TILE_HETERO_BIAS(cbuf, cc, 4, bfloat16_t, int8_t, float, float);
++REGISTER_MMA_TILE_HETERO_BIAS(cbuf, cc, 4, half, int8_t, float, float);
++REGISTER_MMA_TILE_HETERO_BIAS(cbuf, cc, 4, float8_e4m3_t, float8_e5m2_t, float,
++                              float);
++REGISTER_MMA_TILE_HETERO_BIAS(cbuf, cc, 4, float8_e5m2_t, float8_e4m3_t, float,
++                              float);
++
++// Packed 4-bit (s4) MMAD entry points exposed by dav-920r1. A is a normal
++// element (bf16/f16/int8) while B is a packed 4-bit int4b_t buffer. The
++// trailing template argument selects the dedicated
++// mad_bf16s4/mad_f16s4/mad_s8s4 intrinsic in the device layer; the symbol
++// follows the plain mma_tile_<a>_<b>_to_<dst> convention.
++#define DECLARE_MMA_TILE_S4(src_scope, dst_scope, dim, a_type, b_type,         \
++                            dst_type, bias_type)                               \
++  __aicore__ __attribute__((always_inline)) void                               \
++      _mlir_ciface_mma_tile_##a_type##_##b_type##_to_##dst_type(               \
++          memref_t<__##src_scope##__ a_type, dim> *src0,                       \
++          memref_t<__##src_scope##__ b_type, dim> *src1, bool init, int64_t m, \
++          int64_t k, int64_t n, memref_t<__##dst_scope##__ dst_type, 4> *dst,  \
++          memref_t<int32_t, 0> *ping_pong_signal,                              \
++          int64_t mmad_l1_wait_l1a_event, int64_t mmad_l1_wait_l1b_event,      \
++          int64_t l1a_wait_mmad_l1_event, int64_t l1b_wait_mmad_l1_event,      \
++          int64_t kloop_db_cond, int64_t back_pipe_m_pipe_mte1_db_event0,      \
++          int64_t back_pipe_m_pipe_mte1_db_event1, UNIT_FLAG unit_flag_mode,   \
++          int64_t unit_flag_group_id)
++
++#define REGISTER_MMA_TILE_S4(src_scope, dst_scope, dim, a_type, b_type,        \
++                             dst_type, bias_type)                              \
++  DECLARE_MMA_TILE_S4(src_scope, dst_scope, dim, a_type, b_type, dst_type,     \
++                      bias_type) {                                             \
++    mma_tile_core<a_type, dst_type, bias_type, false, false, false, b_type>(   \
++        src0, src1, init, m, k, n, dst, ping_pong_signal,                      \
++        mmad_l1_wait_l1a_event, mmad_l1_wait_l1b_event,                        \
++        l1a_wait_mmad_l1_event, l1b_wait_mmad_l1_event,                        \
++        kloop_db_cond, back_pipe_m_pipe_mte1_db_event0,                        \
++        back_pipe_m_pipe_mte1_db_event1, unit_flag_mode,                       \
++        unit_flag_group_id);                                                   \
++  }
++
++REGISTER_MMA_TILE_S4(cbuf, cc, 4, bfloat16_t, int4b_t, float, float);
++REGISTER_MMA_TILE_S4(cbuf, cc, 4, half, int4b_t, float, float);
++REGISTER_MMA_TILE_S4(cbuf, cc, 4, int8_t, int4b_t, int32_t, int32_t);
++#endif
+ }
+diff --git a/bishengir/lib/Template/lib/RegBase/Cube/include/ascendc_bisheng/utils/kernel_operator_mm_impl.h b/bishengir/lib/Template/lib/RegBase/Cube/include/ascendc_bisheng/utils/kernel_operator_mm_impl.h
+index ce4bd8f39..7d98101f9 100644
+--- a/bishengir/lib/Template/lib/RegBase/Cube/include/ascendc_bisheng/utils/kernel_operator_mm_impl.h
++++ b/bishengir/lib/Template/lib/RegBase/Cube/include/ascendc_bisheng/utils/kernel_operator_mm_impl.h
+@@ -132,9 +132,10 @@ __aicore__ inline void LoadData2DL12L0ACal(__ca__ T *dst, __cbuf__ T *src, const
+ template <typename T>
+ __aicore__ inline void LoadData2DL12L0BCal(__cb__ T *dst, __cbuf__ T *src, const LoadData2DParamsV2 &loadDataParam)
+ {
+-    static_assert(SupportType<T, uint8_t, int8_t, hifloat8_t, fp8_e5m2_t, fp8_e4m3fn_t, half, bfloat16_t,
++    // int4b_t (packed 4-bit) B tiles share the byte-granular B8 copy path.
++    static_assert(SupportType<T, uint8_t, int8_t, int4b_t, hifloat8_t, fp8_e5m2_t, fp8_e4m3fn_t, half, bfloat16_t,
+                 float, int32_t, uint32_t>(),
+-        "LoadData 2dv2 only support uint8_t, int8_t, hifloat8_t, fp8_e5m2_t, fp8_e4m3fn_t, \
++        "LoadData 2dv2 only support uint8_t, int8_t, int4b_t, hifloat8_t, fp8_e5m2_t, fp8_e4m3fn_t, \
+          half, bfloat16_t, float, int32_t, uint32_t on current device!");
+     if ASCEND_IS_AIC {
+         if (loadDataParam.ifTranspose) {
+@@ -549,13 +550,34 @@ __aicore__ inline void MmadCal(
+ }
+ #elif defined(__NPU_ARCH__) && (__NPU_ARCH__ == 9201)
+ // On A6, LocalMmadMx.cpp emits mad_mx for explicitly scaled operations.
++// Packed 4-bit (s4) MMAD is dispatched on the operand tuple like the upstream
++// dav-920r1 template: B is an int4b_t buffer and the dedicated mad_*s4
++// intrinsic is chosen from the DstT/Src0T/Src1T combination.
+ template <typename DstT, typename Src0T, typename Src1T>
+ __aicore__ inline void MmadCal(__cc__ DstT *c, __ca__ Src0T *a, __cb__ Src1T *b,
+                                const MmadParams &mmadParams) {
+   if ASCEND_IS_AIC {
+     bool cmatrixInitVal = mmadParams.cmatrixInitVal && (!mmadParams.isBias);
+-    mad(c, a, b, mmadParams.m, mmadParams.k, mmadParams.n, mmadParams.unitFlag,
+-        mmadParams.disableGemv, mmadParams.cmatrixSource, cmatrixInitVal);
++    if constexpr (SupportType<Tuple<DstT, Src0T, Src1T>,
++                              Tuple<float, half, int4b_t>>()) {
++      mad_f16s4(c, a, (__cb__ void *)b, mmadParams.m, mmadParams.k,
++                mmadParams.n, mmadParams.unitFlag, mmadParams.disableGemv,
++                mmadParams.cmatrixSource, cmatrixInitVal);
++    } else if constexpr (SupportType<Tuple<DstT, Src0T, Src1T>,
++                                     Tuple<float, bfloat16_t, int4b_t>>()) {
++      mad_bf16s4(c, a, (__cb__ void *)b, mmadParams.m, mmadParams.k,
++                 mmadParams.n, mmadParams.unitFlag, mmadParams.disableGemv,
++                 mmadParams.cmatrixSource, cmatrixInitVal);
++    } else if constexpr (SupportType<Tuple<DstT, Src0T, Src1T>,
++                                     Tuple<int32_t, int8_t, int4b_t>>()) {
++      mad_s8s4(c, (__ca__ int8_t *)a, (__cb__ void *)b, mmadParams.m,
++               mmadParams.k, mmadParams.n, mmadParams.unitFlag,
++               mmadParams.disableGemv, mmadParams.cmatrixSource,
++               cmatrixInitVal);
++    } else {
++      mad(c, a, b, mmadParams.m, mmadParams.k, mmadParams.n, mmadParams.unitFlag,
++          mmadParams.disableGemv, mmadParams.cmatrixSource, cmatrixInitVal);
++    }
+   }
+ }
+ 
+@@ -573,9 +595,26 @@ __aicore__ inline void MmadCal(__cc__ DstT *c, __ca__ Src0T *a, __cb__ Src1T *b,
+     // Xd packs the bias table address above the 32-bit L0C address.
+     uint64_t xd =
+         ((uint64_t)c) & 0xffffffffULL | ((bias & 0xffffffffULL) << 32);
+-    mad((__cc__ DstT *)xd, a, b, mmadParams.m, mmadParams.k, mmadParams.n,
+-        mmadParams.unitFlag, mmadParams.disableGemv, cmatrixSource,
+-        cmatrixInitVal);
++    if constexpr (SupportType<Tuple<DstT, Src0T, Src1T>,
++                              Tuple<float, half, int4b_t>>()) {
++      mad_f16s4((__cc__ DstT *)xd, a, (__cb__ void *)b, mmadParams.m,
++                mmadParams.k, mmadParams.n, mmadParams.unitFlag,
++                mmadParams.disableGemv, cmatrixSource, cmatrixInitVal);
++    } else if constexpr (SupportType<Tuple<DstT, Src0T, Src1T>,
++                                     Tuple<float, bfloat16_t, int4b_t>>()) {
++      mad_bf16s4((__cc__ DstT *)xd, a, (__cb__ void *)b, mmadParams.m,
++                 mmadParams.k, mmadParams.n, mmadParams.unitFlag,
++                 mmadParams.disableGemv, cmatrixSource, cmatrixInitVal);
++    } else if constexpr (SupportType<Tuple<DstT, Src0T, Src1T>,
++                                     Tuple<int32_t, int8_t, int4b_t>>()) {
++      mad_s8s4((__cc__ DstT *)xd, (__ca__ int8_t *)a, (__cb__ void *)b,
++               mmadParams.m, mmadParams.k, mmadParams.n, mmadParams.unitFlag,
++               mmadParams.disableGemv, cmatrixSource, cmatrixInitVal);
++    } else {
++      mad((__cc__ DstT *)xd, a, b, mmadParams.m, mmadParams.k, mmadParams.n,
++          mmadParams.unitFlag, mmadParams.disableGemv, cmatrixSource,
++          cmatrixInitVal);
++    }
+ #endif
+   }
+ }
+diff --git a/bishengir/lib/Template/lib/RegBase/Cube/include/catlass/gemm/tile/copy_l1_to_l0b_a5.hpp b/bishengir/lib/Template/lib/RegBase/Cube/include/catlass/gemm/tile/copy_l1_to_l0b_a5.hpp
+index fdd7f5a95..acbf6db27 100644
+--- a/bishengir/lib/Template/lib/RegBase/Cube/include/catlass/gemm/tile/copy_l1_to_l0b_a5.hpp
++++ b/bishengir/lib/Template/lib/RegBase/Cube/include/catlass/gemm/tile/copy_l1_to_l0b_a5.hpp
+@@ -12,6 +12,7 @@
+ #ifndef CATLASS_GEMM_TILE_COPY_L1_TO_L0B_A5_HPP
+ #define CATLASS_GEMM_TILE_COPY_L1_TO_L0B_A5_HPP
+ 
++#include "ascendc_bisheng/utils/kernel_utils_constants.h"
+ #include "ascendc_bisheng/utils/std/is_one_of.h"
+ #include "catlass/arch/arch.hpp"
+ #include "catlass/catlass.hpp"
+@@ -28,8 +29,8 @@ struct TileCopyTla<
+     tla::Tensor<AscendCBisheng::LocalTensor<ElementSrc>, LayoutSrc, CoordSrc, AscendCBisheng::TPosition::A1>,
+     tla::Tensor<AscendCBisheng::LocalTensor<ElementDst>, LayoutDst, CoordDst, AscendCBisheng::TPosition::B2>,
+     std::enable_if_t<
+-        !AscendCBisheng::Std::is_one_of_v<ElementSrc, int8_t, float8_e4m3_t, float8_e5m2_t> &&
+-        !AscendCBisheng::Std::is_one_of_v<ElementDst, int8_t, float8_e4m3_t, float8_e5m2_t> &&
++        !AscendCBisheng::Std::is_one_of_v<ElementSrc, int8_t, int4b_t, float8_e4m3_t, float8_e5m2_t> &&
++        !AscendCBisheng::Std::is_one_of_v<ElementDst, int8_t, int4b_t, float8_e4m3_t, float8_e5m2_t> &&
+         tla::detail::iszN<ElementSrc, LayoutSrc>::value && tla::detail::isnZ<ElementDst, LayoutDst>::value>> {
+     static constexpr uint32_t ELE_NUM_PER_C0 = BYTE_PER_C0 / sizeof(ElementSrc);
+     static constexpr uint32_t ELE_NUM_PER_FRACTAL = BYTE_PER_FRACTAL / sizeof(ElementSrc);
+@@ -43,8 +44,8 @@ struct TileCopyTla<
+     CATLASS_DEVICE void operator()(TensorDst const &dstTensor, TensorSrc const &srcTensor)
+     {
+         static_assert(
+-            !AscendCBisheng::Std::is_one_of_v<typename TensorSrc::Element, int8_t, float8_e4m3_t, float8_e5m2_t> &&
+-            !AscendCBisheng::Std::is_one_of_v<typename TensorDst::Element, int8_t, float8_e4m3_t, float8_e5m2_t> &&
++            !AscendCBisheng::Std::is_one_of_v<typename TensorSrc::Element, int8_t, int4b_t, float8_e4m3_t, float8_e5m2_t> &&
++            !AscendCBisheng::Std::is_one_of_v<typename TensorDst::Element, int8_t, int4b_t, float8_e4m3_t, float8_e5m2_t> &&
+             tla::detail::iszN<typename TensorSrc::Element, typename TensorSrc::Layout>::value
+                 && tla::detail::isnZ<typename TensorDst::Element, typename TensorDst::Layout>::value
+                 && TensorSrc::position == AscendCBisheng::TPosition::A1 && TensorDst::position == AscendCBisheng::TPosition::B2,
+@@ -74,8 +75,8 @@ struct TileCopyTla<
+     CATLASS_DEVICE void operator()(TensorDst const &dstTensor, TensorSrc const &srcTensor, uint32_t l0Batch)
+     {
+         static_assert(
+-            !AscendCBisheng::Std::is_one_of_v<typename TensorSrc::Element, int8_t, float8_e4m3_t, float8_e5m2_t> &&
+-            !AscendCBisheng::Std::is_one_of_v<typename TensorDst::Element, int8_t, float8_e4m3_t, float8_e5m2_t> &&
++            !AscendCBisheng::Std::is_one_of_v<typename TensorSrc::Element, int8_t, int4b_t, float8_e4m3_t, float8_e5m2_t> &&
++            !AscendCBisheng::Std::is_one_of_v<typename TensorDst::Element, int8_t, int4b_t, float8_e4m3_t, float8_e5m2_t> &&
+             tla::detail::iszN<typename TensorSrc::Element, typename TensorSrc::Layout>::value
+                 && tla::detail::isnZ<typename TensorDst::Element, typename TensorDst::Layout>::value
+                 && TensorSrc::position == AscendCBisheng::TPosition::A1 && TensorDst::position == AscendCBisheng::TPosition::B2,
+@@ -113,8 +114,8 @@ struct TileCopyTla<
+     tla::Tensor<AscendCBisheng::LocalTensor<ElementSrc>, LayoutSrc, CoordSrc, AscendCBisheng::TPosition::A1>,
+     tla::Tensor<AscendCBisheng::LocalTensor<ElementDst>, LayoutDst, CoordDst, AscendCBisheng::TPosition::B2>,
+     std::enable_if_t<
+-        AscendCBisheng::Std::is_one_of_v<ElementSrc, int8_t, float8_e4m3_t, float8_e5m2_t> &&
+-        AscendCBisheng::Std::is_one_of_v<ElementDst, int8_t, float8_e4m3_t, float8_e5m2_t> &&
++        AscendCBisheng::Std::is_one_of_v<ElementSrc, int8_t, int4b_t, float8_e4m3_t, float8_e5m2_t> &&
++        AscendCBisheng::Std::is_one_of_v<ElementDst, int8_t, int4b_t, float8_e4m3_t, float8_e5m2_t> &&
+         tla::detail::iszN<ElementSrc, LayoutSrc>::value && tla::detail::isnZ<ElementDst, LayoutDst>::value>> {
+     static constexpr uint32_t ELE_NUM_PER_C0 = BYTE_PER_C0 / sizeof(ElementSrc);
+     static constexpr uint32_t ELE_NUM_PER_FRACTAL = BYTE_PER_FRACTAL / sizeof(ElementSrc);
+@@ -124,12 +125,26 @@ struct TileCopyTla<
+     CATLASS_DEVICE
+     TileCopyTla() {};
+ 
++    // Byte-granular view of the tile storage. A packed 4-bit int4b_t tile is
++    // addressed in storage bytes (two values per byte) throughout the B8 copy
++    // path, so element access must not go through
++    // LocalTensor<int4b_t>::operator[], which halves offsets for half-byte
++    // element indexing.
++    template <class TensorT>
++    static AscendCBisheng::LocalTensor<int8_t> byteView(const TensorT &tensor)
++    {
++        AscendCBisheng::LocalTensor<int8_t> view{
++            static_cast<AscendCBisheng::TPosition>(tensor.data().GetPosition()), 0, 0};
++        view.address_ = tensor.data().address_;
++        return view;
++    }
++
+     template <class TensorDst, class TensorSrc>
+     CATLASS_DEVICE void operator()(TensorDst const &dstTensor, TensorSrc const &srcTensor)
+     {
+         static_assert(
+-            AscendCBisheng::Std::is_one_of_v<typename TensorSrc::Element, int8_t, float8_e4m3_t, float8_e5m2_t> &&
+-            AscendCBisheng::Std::is_one_of_v<typename TensorDst::Element, int8_t, float8_e4m3_t, float8_e5m2_t> &&
++            AscendCBisheng::Std::is_one_of_v<typename TensorSrc::Element, int8_t, int4b_t, float8_e4m3_t, float8_e5m2_t> &&
++            AscendCBisheng::Std::is_one_of_v<typename TensorDst::Element, int8_t, int4b_t, float8_e4m3_t, float8_e5m2_t> &&
+             tla::detail::iszN<typename TensorSrc::Element, typename TensorSrc::Layout>::value
+                 && tla::detail::isnZ<typename TensorDst::Element, typename TensorDst::Layout>::value
+                 && TensorSrc::position == AscendCBisheng::TPosition::A1 && TensorDst::position == AscendCBisheng::TPosition::B2,
+@@ -153,7 +168,7 @@ struct TileCopyTla<
+             loadDataParams.ifTranspose = true;
+ 
+             auto dstOffset = dstTensor.layout()(dstTensor.coord());
+-            AscendCBisheng::LoadData(dstTensor.data()[dstOffset], srcTensor.data(), loadDataParams);
++            AscendCBisheng::LoadData(byteView(dstTensor)[dstOffset], byteView(srcTensor), loadDataParams);
+         } else {
+             for (uint32_t kIdx = 0; kIdx < L0K / ELE_NUM_PER_C0; kIdx++) {
+                 loadDataParams.mStartPosition = CeilDiv<C0_NUM_PER_FRACTAL>(tla::get<0>(srcCoord)) + kIdx * 2;
+@@ -166,7 +181,7 @@ struct TileCopyTla<
+ 
+                 auto dstOffset = dstTensor.layout()(dstTensor.coord());
+                 AscendCBisheng::LoadData(
+-                    dstTensor.data()[dstOffset + kIdx * L0N * ELE_NUM_PER_C0], srcTensor.data(), loadDataParams
++                    byteView(dstTensor)[dstOffset + kIdx * L0N * ELE_NUM_PER_C0], byteView(srcTensor), loadDataParams
+                 );
+             }
+         }
+@@ -176,8 +191,8 @@ struct TileCopyTla<
+     CATLASS_DEVICE void operator()(TensorDst const &dstTensor, TensorSrc const &srcTensor, uint32_t l0Batch)
+     {
+         static_assert(
+-            AscendCBisheng::Std::is_one_of_v<typename TensorSrc::Element, int8_t, float8_e4m3_t, float8_e5m2_t> &&
+-            AscendCBisheng::Std::is_one_of_v<typename TensorDst::Element, int8_t, float8_e4m3_t, float8_e5m2_t> &&
++            AscendCBisheng::Std::is_one_of_v<typename TensorSrc::Element, int8_t, int4b_t, float8_e4m3_t, float8_e5m2_t> &&
++            AscendCBisheng::Std::is_one_of_v<typename TensorDst::Element, int8_t, int4b_t, float8_e4m3_t, float8_e5m2_t> &&
+             tla::detail::iszN<typename TensorSrc::Element, typename TensorSrc::Layout>::value
+                 && tla::detail::isnZ<typename TensorDst::Element, typename TensorDst::Layout>::value
+                 && TensorSrc::position == AscendCBisheng::TPosition::A1 && TensorDst::position == AscendCBisheng::TPosition::B2,
+@@ -203,7 +218,7 @@ struct TileCopyTla<
+ 
+             for (uint32_t l0BatchIdx = 0; l0BatchIdx < l0Batch; l0BatchIdx++) {
+                 AscendCBisheng::LoadData(
+-                    dstTensor.data()[l0BatchIdx * L0N * L0K], srcTensor.data()[l0BatchIdx * L1N * L1K], loadDataParams
++                    byteView(dstTensor)[l0BatchIdx * L0N * L0K], byteView(srcTensor)[l0BatchIdx * L1N * L1K], loadDataParams
+                 );
+             }
+         } else {
+@@ -217,8 +232,8 @@ struct TileCopyTla<
+             for (uint32_t l0BatchIdx = 0; l0BatchIdx < l0Batch; l0BatchIdx++) {
+                 for (uint32_t kIdx = 0; kIdx < L0K / ELE_NUM_PER_C0; kIdx++) {
+                     AscendCBisheng::LoadData(
+-                        dstTensor.data()[l0BatchIdx * L0N * L0K + kIdx * L0N * ELE_NUM_PER_C0],
+-                        srcTensor.data()[l0BatchIdx * L1N * L1K + kIdx * ELE_NUM_PER_FRACTAL * 2], loadDataParams
++                        byteView(dstTensor)[l0BatchIdx * L0N * L0K + kIdx * L0N * ELE_NUM_PER_C0],
++                        byteView(srcTensor)[l0BatchIdx * L1N * L1K + kIdx * ELE_NUM_PER_FRACTAL * 2], loadDataParams
+                     );
+                 }
+             }
+diff --git a/bishengir/lib/Template/lib/RegBase/Cube/include/catlass/gemm/tile/tile_mmad.hpp b/bishengir/lib/Template/lib/RegBase/Cube/include/catlass/gemm/tile/tile_mmad.hpp
+index 4c8482645..3510bc53a 100644
+--- a/bishengir/lib/Template/lib/RegBase/Cube/include/catlass/gemm/tile/tile_mmad.hpp
++++ b/bishengir/lib/Template/lib/RegBase/Cube/include/catlass/gemm/tile/tile_mmad.hpp
+@@ -116,28 +116,24 @@ template <
+     /// Element for A matrix operand
+     class ElementA,
+     /// LayoutTag for A matrix operand in L1
+-    class LayoutTagL1A
+->
++    class LayoutTagL1A>
+ struct TileMmadTla {
+-    // Methods
+-
+-    CATLASS_DEVICE
+-    TileMmadTla() {}
+-
+-    template <class TensorC, class TensorA, class TensorB>
+-    CATLASS_DEVICE
+-    void operator()(TensorC const &l0CTensor,
+-         TensorA const &l0ATensor,
+-         TensorB const &l0BTensor,
+-         uint32_t m, uint32_t n, uint32_t k,
+-         bool initC = true, uint8_t unitFlag = 0)
+-    {
+-        AscendCBisheng::MmadParams mmadParams;
+-        mmadParams.m = m;
+-        mmadParams.n = n;
+-        mmadParams.k = k;
+-        mmadParams.unitFlag = unitFlag;
+-        mmadParams.cmatrixInitVal = initC;
++  // Methods
++
++  CATLASS_DEVICE
++  TileMmadTla() {}
++
++  template <class TensorC, class TensorA, class TensorB>
++  CATLASS_DEVICE void
++  operator()(TensorC const &l0CTensor, TensorA const &l0ATensor,
++             TensorB const &l0BTensor, uint32_t m, uint32_t n, uint32_t k,
++             bool initC = true, uint8_t unitFlag = 0) {
++    AscendCBisheng::MmadParams mmadParams;
++    mmadParams.m = m;
++    mmadParams.n = n;
++    mmadParams.k = k;
++    mmadParams.unitFlag = unitFlag;
++    mmadParams.cmatrixInitVal = initC;
+ #if defined(CATLASS_ARCH_A2_ENABLED)
+         if constexpr (std::is_same_v<ElementA, float> && std::is_same_v<LayoutTagL1A, layout::nZ>) {
+             mmadParams.kDirectionAlign = true;
+@@ -147,16 +143,14 @@ struct TileMmadTla {
+         mmadParams.disableGemv = true;
+ #endif
+ 
+-        AscendCBisheng::Mmad(l0CTensor.data(),
+-                      l0ATensor.data(),
+-                      l0BTensor.data(),
+-                      mmadParams);
++        AscendCBisheng::Mmad(l0CTensor.data(), l0ATensor.data(),
++                             l0BTensor.data(), mmadParams);
+ 
+         const uint32_t PIPE_M_BARRIER_THRESHOLD = 10;
+         if ((m / C0_NUM_PER_FRACTAL) * (n / C0_NUM_PER_FRACTAL) < PIPE_M_BARRIER_THRESHOLD) {
+             AscendCBisheng::PipeBarrier<PIPE_M>();
+         }
+-    }
++  }
+ 
+     template <class TensorC, class TensorA, class TensorB, class TensorBias>
+     CATLASS_DEVICE
+diff --git a/bishengir/test/Conversion/HIVMToStandard/RegBase/mmadl1-hetero.mlir b/bishengir/test/Conversion/HIVMToStandard/RegBase/mmadl1-hetero.mlir
+new file mode 100644
+index 000000000..37caa71b7
+--- /dev/null
++++ b/bishengir/test/Conversion/HIVMToStandard/RegBase/mmadl1-hetero.mlir
+@@ -0,0 +1,197 @@
++// RUN: bishengir-opt %s -hacc-append-device-spec=target=Ascend960 -convert-hivm-to-std -split-input-file | FileCheck %s
++
++// Mixed-precision mmadL1 on Ascend960: the emitted library symbol carries both
++// the A and the B element type, mirroring the mma_tile_<a>_<b>_to_<dst>
++// entry points registered by the template library on dav-920r1.
++module attributes {hacc.target = #hacc.target<"Ascend960">} {
++  // CHECK-LABEL: func.func @test_mmadL1_bf16_e4m3
++  // CHECK: call @mma_tile_bfloat16_t_float8_e4m3_t_to_float(
++  // CHECK-NOT: hivm.hir.mmadL1
++  func.func @test_mmadL1_bf16_e4m3() {
++    %ma = memref.alloc() : memref<256x128xbf16>
++    %mb = memref.alloc() : memref<128x256xf8E4M3FN>
++    %mc = memref.alloc() : memref<256x256xf32>
++    %init = arith.constant 1 : i1
++    %c256 = arith.constant 256 : index
++    %c128 = arith.constant 128 : index
++    hivm.hir.mmadL1 ins(%ma, %mb, %init, %c256, %c128, %c256 :
++                          memref<256x128xbf16>, memref<128x256xf8E4M3FN>,
++                          i1, index, index, index)
++                    outs(%mc : memref<256x256xf32>)
++    return
++  }
++
++  // CHECK-LABEL: func.func @test_mmadL1_f16_e4m3
++  // CHECK: call @mma_tile_half_float8_e4m3_t_to_float(
++  // CHECK-NOT: hivm.hir.mmadL1
++  func.func @test_mmadL1_f16_e4m3() {
++    %ma = memref.alloc() : memref<256x128xf16>
++    %mb = memref.alloc() : memref<128x256xf8E4M3FN>
++    %mc = memref.alloc() : memref<256x256xf32>
++    %init = arith.constant 1 : i1
++    %c256 = arith.constant 256 : index
++    %c128 = arith.constant 128 : index
++    hivm.hir.mmadL1 ins(%ma, %mb, %init, %c256, %c128, %c256 :
++                          memref<256x128xf16>, memref<128x256xf8E4M3FN>,
++                          i1, index, index, index)
++                    outs(%mc : memref<256x256xf32>)
++    return
++  }
++
++  // CHECK-LABEL: func.func @test_mmadL1_bf16_i8
++  // CHECK: call @mma_tile_bfloat16_t_int8_t_to_float(
++  // CHECK-NOT: hivm.hir.mmadL1
++  func.func @test_mmadL1_bf16_i8() {
++    %ma = memref.alloc() : memref<256x128xbf16>
++    %mb = memref.alloc() : memref<128x256xi8>
++    %mc = memref.alloc() : memref<256x256xf32>
++    %init = arith.constant 1 : i1
++    %c256 = arith.constant 256 : index
++    %c128 = arith.constant 128 : index
++    hivm.hir.mmadL1 ins(%ma, %mb, %init, %c256, %c128, %c256 :
++                          memref<256x128xbf16>, memref<128x256xi8>,
++                          i1, index, index, index)
++                    outs(%mc : memref<256x256xf32>)
++    return
++  }
++
++  // CHECK-LABEL: func.func @test_mmadL1_f16_i8
++  // CHECK: call @mma_tile_half_int8_t_to_float(
++  // CHECK-NOT: hivm.hir.mmadL1
++  func.func @test_mmadL1_f16_i8() {
++    %ma = memref.alloc() : memref<256x128xf16>
++    %mb = memref.alloc() : memref<128x256xi8>
++    %mc = memref.alloc() : memref<256x256xf32>
++    %init = arith.constant 1 : i1
++    %c256 = arith.constant 256 : index
++    %c128 = arith.constant 128 : index
++    hivm.hir.mmadL1 ins(%ma, %mb, %init, %c256, %c128, %c256 :
++                          memref<256x128xf16>, memref<128x256xi8>,
++                          i1, index, index, index)
++                    outs(%mc : memref<256x256xf32>)
++    return
++  }
++
++  // CHECK-LABEL: func.func @test_mmadL1_e4m3_e5m2
++  // CHECK: call @mma_tile_float8_e4m3_t_float8_e5m2_t_to_float(
++  // CHECK-NOT: hivm.hir.mmadL1
++  func.func @test_mmadL1_e4m3_e5m2() {
++    %ma = memref.alloc() : memref<256x128xf8E4M3FN>
++    %mb = memref.alloc() : memref<128x256xf8E5M2>
++    %mc = memref.alloc() : memref<256x256xf32>
++    %init = arith.constant 1 : i1
++    %c256 = arith.constant 256 : index
++    %c128 = arith.constant 128 : index
++    hivm.hir.mmadL1 ins(%ma, %mb, %init, %c256, %c128, %c256 :
++                          memref<256x128xf8E4M3FN>, memref<128x256xf8E5M2>,
++                          i1, index, index, index)
++                    outs(%mc : memref<256x256xf32>)
++    return
++  }
++
++  // CHECK-LABEL: func.func @test_mmadL1_e5m2_e4m3
++  // CHECK: call @mma_tile_float8_e5m2_t_float8_e4m3_t_to_float(
++  // CHECK-NOT: hivm.hir.mmadL1
++  func.func @test_mmadL1_e5m2_e4m3() {
++    %ma = memref.alloc() : memref<256x128xf8E5M2>
++    %mb = memref.alloc() : memref<128x256xf8E4M3FN>
++    %mc = memref.alloc() : memref<256x256xf32>
++    %init = arith.constant 1 : i1
++    %c256 = arith.constant 256 : index
++    %c128 = arith.constant 128 : index
++    hivm.hir.mmadL1 ins(%ma, %mb, %init, %c256, %c128, %c256 :
++                          memref<256x128xf8E5M2>, memref<128x256xf8E4M3FN>,
++                          i1, index, index, index)
++                    outs(%mc : memref<256x256xf32>)
++    return
++  }
++
++  // CHECK-LABEL: func.func @test_mmadL1_bf16_e4m3_with_bias
++  // CHECK: call @mma_tile_with_float_bias_bfloat16_t_float8_e4m3_t_to_float(
++  // CHECK-NOT: hivm.hir.mmadL1
++  func.func @test_mmadL1_bf16_e4m3_with_bias() {
++    %ma = memref.alloc() : memref<256x128xbf16>
++    %mb = memref.alloc() : memref<128x256xf8E4M3FN>
++    %mc = memref.alloc() : memref<256x256xf32>
++    %bias = memref.alloc() : memref<256xf32>
++    %init = arith.constant 1 : i1
++    %c256 = arith.constant 256 : index
++    %c128 = arith.constant 128 : index
++    hivm.hir.mmadL1 ins(%ma, %mb, %init, %c256, %c128, %c256, %bias :
++                          memref<256x128xbf16>, memref<128x256xf8E4M3FN>,
++                          i1, index, index, index, memref<256xf32>)
++                    outs(%mc : memref<256x256xf32>)
++    return
++  }
++
++  // Same element type on both sides keeps the historical single-element-type
++  // symbol, so the existing ABI stays untouched.
++  // CHECK-LABEL: func.func @test_mmadL1_homo_unchanged
++  // CHECK: call @mma_tile_bfloat16_t_to_float(
++  // CHECK-NOT: call @mma_tile_bfloat16_t_bfloat16_t_to_float
++  func.func @test_mmadL1_homo_unchanged() {
++    %ma = memref.alloc() : memref<256x128xbf16>
++    %mb = memref.alloc() : memref<128x256xbf16>
++    %mc = memref.alloc() : memref<256x256xf32>
++    %init = arith.constant 1 : i1
++    %c256 = arith.constant 256 : index
++    %c128 = arith.constant 128 : index
++    hivm.hir.mmadL1 ins(%ma, %mb, %init, %c256, %c128, %c256 :
++                          memref<256x128xbf16>, memref<128x256xbf16>,
++                          i1, index, index, index)
++                    outs(%mc : memref<256x256xf32>)
++    return
++  }
++
++  // Packed 4-bit weight (s4) MMAD: A stays a normal element, B is a packed
++  // int4b_t buffer and enable_I4 selects the dedicated mad_*s4 intrinsic.
++  // The library symbol follows the plain mma_tile_<a>_<b>_to_<dst> naming.
++  // CHECK-LABEL: func.func @test_mmadL1_bf16_s4
++  // CHECK: call @mma_tile_bfloat16_t_int4b_t_to_float(
++  // CHECK-NOT: hivm.hir.mmadL1
++  func.func @test_mmadL1_bf16_s4() {
++    %ma = memref.alloc() : memref<256x128xbf16>
++    %mb = memref.alloc() : memref<128x256xi4>
++    %mc = memref.alloc() : memref<256x256xf32>
++    %init = arith.constant 1 : i1
++    %c256 = arith.constant 256 : index
++    %c128 = arith.constant 128 : index
++    hivm.hir.mmadL1 {enable_I4}
++        ins(%ma, %mb, %init, %c256, %c128, %c256 :
++            memref<256x128xbf16>, memref<128x256xi4>, i1, index, index, index)
++        outs(%mc : memref<256x256xf32>)
++    return
++  }
++
++  // CHECK-LABEL: func.func @test_mmadL1_f16_s4
++  // CHECK: call @mma_tile_half_int4b_t_to_float(
++  func.func @test_mmadL1_f16_s4() {
++    %ma = memref.alloc() : memref<256x128xf16>
++    %mb = memref.alloc() : memref<128x256xi4>
++    %mc = memref.alloc() : memref<256x256xf32>
++    %init = arith.constant 1 : i1
++    %c256 = arith.constant 256 : index
++    %c128 = arith.constant 128 : index
++    hivm.hir.mmadL1 {enable_I4}
++        ins(%ma, %mb, %init, %c256, %c128, %c256 :
++            memref<256x128xf16>, memref<128x256xi4>, i1, index, index, index)
++        outs(%mc : memref<256x256xf32>)
++    return
++  }
++
++  // CHECK-LABEL: func.func @test_mmadL1_s8_s4
++  // CHECK: call @mma_tile_int8_t_int4b_t_to_int32_t(
++  func.func @test_mmadL1_s8_s4() {
++    %ma = memref.alloc() : memref<256x128xi8>
++    %mb = memref.alloc() : memref<128x256xi4>
++    %mc = memref.alloc() : memref<256x256xi32>
++    %init = arith.constant 1 : i1
++    %c256 = arith.constant 256 : index
++    %c128 = arith.constant 128 : index
++    hivm.hir.mmadL1 {enable_I4}
++        ins(%ma, %mb, %init, %c256, %c128, %c256 :
++            memref<256x128xi8>, memref<128x256xi4>, i1, index, index, index)
++        outs(%mc : memref<256x256xi32>)
++    return
++  }
++}
+diff --git a/bishengir/test/Dialect/HIVM/IR/invalid.mlir b/bishengir/test/Dialect/HIVM/IR/invalid.mlir
+index 454c385da..d857a5628 100644
+--- a/bishengir/test/Dialect/HIVM/IR/invalid.mlir
++++ b/bishengir/test/Dialect/HIVM/IR/invalid.mlir
+@@ -773,20 +773,38 @@ func.func @test_fixpipe_f16_tensor_src_rejected() {
+ 
+ // -----
+ 
+-// Matrix A and B must use the same element type.
++// Matrix A and B must use the same element type unless the target provides a
++// matching mixed-precision `mad` overload.
+ func.func @test_mmad_l1_mismatched_input_types() {
+   %a = memref.alloc() : memref<16x16xf32>
+   %b = memref.alloc() : memref<16x16xf16>
+   %c = memref.alloc() : memref<16x16xf32>
+   %true = arith.constant true
+   %c16 = arith.constant 16 : index
+-  // expected-error@+1 {{'hivm.hir.mmadL1' op failed to verify that all of {a, b} have same element type}}
++  // expected-error@+1 {{'hivm.hir.mmadL1' op MMAD with heterogeneous A/B element types 'f32' x 'f16' is only supported on Ascend960 series.}}
+   hivm.hir.mmadL1 ins(%a, %b, %true, %c16, %c16, %c16 : memref<16x16xf32>, memref<16x16xf16>, i1, index, index, index) outs(%c : memref<16x16xf32>)
+   return
+ }
+ 
+ // -----
+ 
++// Even on Ascend960 only the A/B element-type pairs that have a matching `mad`
++// overload in cce_aicore_intrinsics.h are accepted; f32 x f16 is not one.
++module attributes {hacc.target = #hacc.target<"Ascend960">} {
++  func.func @test_mmad_l1_unsupported_hetero_types() {
++    %a = memref.alloc() : memref<16x16xf32>
++    %b = memref.alloc() : memref<16x16xf16>
++    %c = memref.alloc() : memref<16x16xf32>
++    %true = arith.constant true
++    %c16 = arith.constant 16 : index
++    // expected-error@+1 {{'hivm.hir.mmadL1' op unsupported heterogeneous A/B element types 'f32' x 'f16' for MMAD on Ascend960 series.}}
++    hivm.hir.mmadL1 ins(%a, %b, %true, %c16, %c16, %c16 : memref<16x16xf32>, memref<16x16xf16>, i1, index, index, index) outs(%c : memref<16x16xf32>)
++    return
++  }
++}
++
++// -----
++
+ // Matrix C is an accumulator and must use f32 or i32 elements.
+ func.func @test_mmad_l1_f16_accumulator() {
+   %a = memref.alloc() : memref<16x16xf16>
+diff --git a/bishengir/test/Dialect/HIVM/IR/ops.mlir b/bishengir/test/Dialect/HIVM/IR/ops.mlir
+index b1d11da20..39df3bb3e 100644
+--- a/bishengir/test/Dialect/HIVM/IR/ops.mlir
++++ b/bishengir/test/Dialect/HIVM/IR/ops.mlir
+@@ -97,6 +97,84 @@ func.func @test_mmadL1() {
+   return
+ }
+ 
++// -----
++// CHECK-LABEL: test_mmadL1_hetero_types_a6
++// Ascend960 accepts the mixed-precision A/B element-type pairs for which
++// cce_aicore_intrinsics.h provides a matching `mad` overload.
++module attributes {hacc.target = #hacc.target<"Ascend960">} {
++  func.func @test_mmadL1_hetero_types_a6() {
++    %mc = memref.alloc() : memref<256x256xf32>
++    %c256 = arith.constant 256 : index
++    %c128 = arith.constant 128 : index
++    %init = arith.constant 1 : i1
++
++    %ma_bf16 = memref.alloc() : memref<256x128xbf16>
++    %ma_f16 = memref.alloc() : memref<256x128xf16>
++    %mb_e4m3 = memref.alloc() : memref<128x256xf8E4M3FN>
++    %mb_e5m2 = memref.alloc() : memref<128x256xf8E5M2>
++    %mb_i8 = memref.alloc() : memref<128x256xi8>
++    %ma_e4m3 = memref.alloc() : memref<256x128xf8E4M3FN>
++    %ma_e5m2 = memref.alloc() : memref<256x128xf8E5M2>
++
++    hivm.hir.mmadL1 ins(%ma_bf16, %mb_e4m3, %init, %c256, %c128, %c256 :
++                          memref<256x128xbf16>, memref<128x256xf8E4M3FN>, i1, index, index, index)
++                    outs(%mc : memref<256x256xf32>)
++    hivm.hir.mmadL1 ins(%ma_f16, %mb_e4m3, %init, %c256, %c128, %c256 :
++                          memref<256x128xf16>, memref<128x256xf8E4M3FN>, i1, index, index, index)
++                    outs(%mc : memref<256x256xf32>)
++    hivm.hir.mmadL1 ins(%ma_bf16, %mb_i8, %init, %c256, %c128, %c256 :
++                          memref<256x128xbf16>, memref<128x256xi8>, i1, index, index, index)
++                    outs(%mc : memref<256x256xf32>)
++    hivm.hir.mmadL1 ins(%ma_f16, %mb_i8, %init, %c256, %c128, %c256 :
++                          memref<256x128xf16>, memref<128x256xi8>, i1, index, index, index)
++                    outs(%mc : memref<256x256xf32>)
++    hivm.hir.mmadL1 ins(%ma_e4m3, %mb_e5m2, %init, %c256, %c128, %c256 :
++                          memref<256x128xf8E4M3FN>, memref<128x256xf8E5M2>, i1, index, index, index)
++                    outs(%mc : memref<256x256xf32>)
++    hivm.hir.mmadL1 ins(%ma_e5m2, %mb_e4m3, %init, %c256, %c128, %c256 :
++                          memref<256x128xf8E5M2>, memref<128x256xf8E4M3FN>, i1, index, index, index)
++                    outs(%mc : memref<256x256xf32>)
++
++    // Packed 4-bit (s4) B buffer: bf16/f16 x s4 -> f32 and s8 x s4 -> i32.
++    %mb_i4 = memref.alloc() : memref<128x256xi4>
++    %ma_s8 = memref.alloc() : memref<256x128xi8>
++    %mc_s32 = memref.alloc() : memref<256x256xi32>
++    hivm.hir.mmadL1 ins(%ma_bf16, %mb_i4, %init, %c256, %c128, %c256 :
++                          memref<256x128xbf16>, memref<128x256xi4>, i1, index, index, index)
++                    outs(%mc : memref<256x256xf32>)
++    hivm.hir.mmadL1 ins(%ma_f16, %mb_i4, %init, %c256, %c128, %c256 :
++                          memref<256x128xf16>, memref<128x256xi4>, i1, index, index, index)
++                    outs(%mc : memref<256x256xf32>)
++    hivm.hir.mmadL1 {enable_I4}
++        ins(%ma_s8, %mb_i4, %init, %c256, %c128, %c256 :
++            memref<256x128xi8>, memref<128x256xi4>, i1, index, index, index)
++        outs(%mc_s32 : memref<256x256xi32>)
++    return
++  }
++}
++
++// -----
++// CHECK-LABEL: test_mmadL1_hetero_types_a6_tensor
++// Same element-type pairs through the tensor (DPS) form, with a bias operand.
++module attributes {hacc.target = #hacc.target<"Ascend960">} {
++  func.func @test_mmadL1_hetero_types_a6_tensor() {
++    %ma = tensor.empty() : tensor<256x128xbf16>
++    %mb = tensor.empty() : tensor<128x256xf8E4M3FN>
++    %mc = tensor.empty() : tensor<256x256xf32>
++    %bias = tensor.empty() : tensor<256xf32>
++    %c256 = arith.constant 256 : index
++    %c128 = arith.constant 128 : index
++    %init = arith.constant 1 : i1
++    %res = hivm.hir.mmadL1
++        ins(%ma, %mb, %init, %c256, %c128, %c256, %bias :
++            tensor<256x128xbf16>, tensor<128x256xf8E4M3FN>, i1, index, index,
++            index, tensor<256xf32>)
++        outs(%mc : tensor<256x256xf32>) -> tensor<256x256xf32>
++    "some_use"(%res) : (tensor<256x256xf32>) -> ()
++    return
++  }
++}
++
+ // -----
+ // CHECK-LABEL: test_mmadL1_with_k_init
+ func.func @test_mmadL1_with_k_init() {
+diff --git a/third-party/llvm-project b/third-party/llvm-project
+index 89964933a..57b2ed73d 160000
+--- a/third-party/llvm-project
++++ b/third-party/llvm-project
+@@ -1 +1 @@
+-Subproject commit 89964933a2bf8bdb93831de22cbf5b6fc99c54f7
++Subproject commit 57b2ed73d65a8f4dbf2f20dfaeaf718b5ec0a17d

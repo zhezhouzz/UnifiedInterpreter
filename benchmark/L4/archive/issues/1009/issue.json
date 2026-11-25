@@ -1,0 +1,8 @@
+{
+  "title": "[Bug]: A5 SIMT debug metadata loses source files and variable locations",
+  "iid": 1009,
+  "updated_at": "2026-11-20T03:23:56.493+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1009",
+  "linked_mrs": []
+}

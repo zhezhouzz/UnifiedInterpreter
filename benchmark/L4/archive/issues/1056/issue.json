@@ -1,0 +1,8 @@
+{
+  "title": "[Bug]: PropgateReshape stride 计算错误",
+  "iid": 1056,
+  "updated_at": "2026-11-23T19:55:25.463+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1056",
+  "linked_mrs": []
+}

@@ -1,0 +1,20 @@
+{
+  "id": "issue-input/994",
+  "tier": "L3",
+  "category": "issue-input",
+  "source_ref": "https://gitcode.com/Ascend/AscendNPU-IR/blob/1a7475c243df15835183248c94d1b367b94c96fd/bishengir/test/Dialect/HIVM/insert-fixpipe-accumulation-while-no-outer-fixpipe.mlir",
+  "chip_profile": "Ascend910B1",
+  "core_ratio": null,
+  "compile_argv": [
+    "bishengir-opt",
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2"
+  ],
+  "entry_functions": [
+    "test_mmad_accumulation_while_no_outer_fixpipe"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "split_index": 0
+}

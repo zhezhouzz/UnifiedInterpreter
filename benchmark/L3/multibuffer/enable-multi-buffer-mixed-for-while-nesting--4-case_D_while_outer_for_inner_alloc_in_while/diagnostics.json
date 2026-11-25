@@ -1,0 +1,8 @@
+[
+  {
+    "function": "case_D_while_outer_for_inner_alloc_in_while",
+    "location": "loc(\"<stdin>\":13:10)",
+    "op": "scf.while",
+    "reason": "missing Core interpretation"
+  }
+]

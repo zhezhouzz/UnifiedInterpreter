@@ -1,0 +1,8 @@
+{
+  "title": "[Feature]: enable A5 BF16 vmula vmadd vsqz",
+  "iid": 1038,
+  "updated_at": "2026-11-21T16:12:54.590+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1038",
+  "linked_mrs": []
+}

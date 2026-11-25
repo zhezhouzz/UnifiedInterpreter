@@ -1,0 +1,80 @@
+{
+  "kernel": {
+    "params": [
+      {
+        "id": 0,
+        "type": "memref<32xf32, #hivm.address_space<gm>>"
+      },
+      {
+        "id": 1,
+        "type": "memref<32xf32, #hivm.address_space<gm>>"
+      }
+    ],
+    "body": [
+      {
+        "cmd": "setflag",
+        "p": "MTE2",
+        "q": "V",
+        "event": 0,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "set_pipe": "#hivm.pipe<PIPE_MTE2>",
+          "static_event_id": "#hivm.event<EVENT_ID0>",
+          "wait_pipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "setflag",
+        "p": "MTE2",
+        "q": "V",
+        "event": 0,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "set_pipe": "#hivm.pipe<PIPE_MTE2>",
+          "static_event_id": "#hivm.event<EVENT_ID0>",
+          "wait_pipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "waitflag",
+        "p": "MTE2",
+        "q": "V",
+        "event": 0,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "set_pipe": "#hivm.pipe<PIPE_MTE2>",
+          "static_event_id": "#hivm.event<EVENT_ID0>",
+          "wait_pipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "waitflag",
+        "p": "MTE2",
+        "q": "V",
+        "event": 0,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "set_pipe": "#hivm.pipe<PIPE_MTE2>",
+          "static_event_id": "#hivm.event<EVENT_ID0>",
+          "wait_pipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "return",
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {}
+      }
+    ],
+    "core_kind": null
+  }
+}

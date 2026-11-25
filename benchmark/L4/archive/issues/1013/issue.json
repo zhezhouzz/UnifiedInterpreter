@@ -1,0 +1,8 @@
+{
+  "title": "[Bug] HIVM v2 cross-core GSS asserts on scalar GM loads with ambiguous core types",
+  "iid": 1013,
+  "updated_at": "2026-11-20T10:59:40.059+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1013",
+  "linked_mrs": []
+}

@@ -1,0 +1,20 @@
+{
+  "id": "repair-regression/issue-1008-mr-5285",
+  "tier": "L3",
+  "category": "repair-regression",
+  "source_ref": "https://gitcode.com/Ascend/AscendNPU-IR/blob/1b11119553df3c52166fbcada24e1ec0e73bf2f5/bishengir/test/Dialect/HFusion/hfusion-adapt-triton-kernel.mlir",
+  "chip_profile": null,
+  "core_ratio": "0:1",
+  "compile_argv": [
+    "bishengir-opt",
+    "-adapt-triton-kernel"
+  ],
+  "entry_functions": [
+    "matmul_mix_aiv_with_bind_sub_block_tag"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "split_index": 9,
+  "upstream_path": "bishengir/test/Dialect/HFusion/hfusion-adapt-triton-kernel.mlir"
+}

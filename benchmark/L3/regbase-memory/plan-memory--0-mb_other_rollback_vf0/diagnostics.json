@@ -1,0 +1,68 @@
+[
+  {
+    "function": "mb_other_rollback_vf0",
+    "location": "loc(\"<stdin>\":5:10)",
+    "op": "vector.constant_mask",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "mb_other_rollback_vf0",
+    "location": "loc(\"<stdin>\":8:10)",
+    "op": "vector.transfer_read",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "mb_other_rollback_vf0",
+    "location": "loc(\"<stdin>\":9:5)",
+    "op": "vector.transfer_write",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "mb_other_rollback_vf2",
+    "location": "loc(\"<stdin>\":18:10)",
+    "op": "vector.constant_mask",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "mb_other_rollback_vf2",
+    "location": "loc(\"<stdin>\":21:10)",
+    "op": "vector.transfer_read",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "mb_other_rollback_vf2",
+    "location": "loc(\"<stdin>\":22:5)",
+    "op": "vector.transfer_write",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "mb_other_rollback_level0_retry",
+    "location": "loc(\"<stdin>\":27:5)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "mb_other_rollback_level0_retry",
+    "location": "loc(\"<stdin>\":33:5)",
+    "op": "func.call",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "mb_other_rollback_level0_retry",
+    "location": "loc(\"<stdin>\":35:5)",
+    "op": "func.call",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "mb_other_rollback_level0_retry",
+    "location": "loc(\"<stdin>\":37:5)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "mb_other_rollback_level0_retry",
+    "location": "loc(\"<stdin>\":39:5)",
+    "op": "func.call",
+    "reason": "missing Core interpretation"
+  }
+]

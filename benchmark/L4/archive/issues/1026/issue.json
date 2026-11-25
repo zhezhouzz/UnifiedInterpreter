@@ -1,0 +1,10 @@
+{
+  "title": "[Bug][HIVM] Invalid Fractal reshape for sliced matmul inputs (GEN-1749)",
+  "iid": 1026,
+  "updated_at": "2026-11-20T16:51:57.001+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1026",
+  "linked_mrs": [
+    "5303"
+  ]
+}

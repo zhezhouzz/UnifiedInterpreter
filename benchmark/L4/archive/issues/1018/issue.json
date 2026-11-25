@@ -1,0 +1,11 @@
+{
+  "title": "[Bug][A6] Reverse vector cumsum exhausts memory during CANN device compilation",
+  "iid": 1018,
+  "updated_at": "2026-11-20T15:13:00.134+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1018",
+  "linked_mrs": [
+    "5332"
+  ],
+  "attachment_commit": "a153a0fea2b4cf5e3cbb6caa83f4548d4c18e335"
+}

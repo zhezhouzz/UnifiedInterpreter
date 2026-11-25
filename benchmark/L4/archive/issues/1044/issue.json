@@ -1,0 +1,8 @@
+{
+  "title": "[Bug]: stride_align 1d failed in triton-ascend suite in test_index_select.py test",
+  "iid": 1044,
+  "updated_at": "2026-11-22T23:50:46.123+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1044",
+  "linked_mrs": []
+}

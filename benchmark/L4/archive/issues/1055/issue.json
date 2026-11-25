@@ -1,0 +1,8 @@
+{
+  "title": "[Performance]: Rotate multibuffer slot with actual execution, not the loop itself",
+  "iid": 1055,
+  "updated_at": "2026-11-23T19:05:21.400+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1055",
+  "linked_mrs": []
+}

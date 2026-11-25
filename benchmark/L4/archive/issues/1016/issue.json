@@ -1,0 +1,11 @@
+{
+  "title": "[Bug][A6] Oversubscribed Triton grids skip logical programs after the first wave",
+  "iid": 1016,
+  "updated_at": "2026-11-20T15:12:27.340+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1016",
+  "linked_mrs": [
+    "5330"
+  ],
+  "attachment_commit": "e92e0083d7d026ef4a0104a8dd4025932560af0f"
+}

@@ -1,0 +1,18 @@
+{
+  "issue": null,
+  "mr": "3007",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/3007",
+  "commit": "4241780cc10028c6502c32de14cc102e26f94544",
+  "parent": "dcb04bb773917ececadcd39b5c70ab839b0e4a66",
+  "title": "[AscendNPU IR][CV][InsertFixpipe] feat: not to replace l0c use",
+  "tests": [
+    "bishengir/test/Dialect/HIVM/Regbase/inline-fixpipe-enable-fixpipe-nz2nz.mlir",
+    "bishengir/test/Dialect/HIVM/Regbase/inline-fixpipe.mlir",
+    "bishengir/test/Dialect/HIVM/dont-insert-fixpipe-for-scf-for-mmad-l0c.mlir",
+    "bishengir/test/Dialect/HIVM/inline-fixpipe-enable-fixpipe-nz2nz.mlir",
+    "bishengir/test/Dialect/HIVM/inline-fixpipe.mlir",
+    "bishengir/test/Dialect/HIVM/insert-fixpipe-for-scf-if-mmad.mlir",
+    "bishengir/test/Dialect/HIVM/insert-fixpipe-mix-if-normalized-mmad.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

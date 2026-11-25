@@ -1,0 +1,26 @@
+{
+  "issue": null,
+  "mr": "3491",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/3491",
+  "commit": "f7bde36669ab16b5f88441d612c576b7e7a15f11",
+  "parent": "7c64c1ba2c4a982261da5fec39294a4ec60d071b",
+  "title": "[HFusion] fix: wrap atomic return snapshots in sync-block lock",
+  "tests": [
+    "bishengir/test/Conversion/HIVMToStandard/HIVMToStandard/convert-hivm-to-standard.mlir",
+    "bishengir/test/Conversion/HIVMToStandard/RegBase/convert-hivm-to-standard.mlir",
+    "bishengir/test/Dialect/HFusion/FlattenOps/hfusion-flatten-atomic-xchg-allow-flatten.mlir",
+    "bishengir/test/Dialect/HFusion/regbase/Normalize/hfusion-decompose-atomic-return-sync.mlir",
+    "bishengir/test/Dialect/HFusion/regbase/Normalize/hfusion-normalize-atomic-ops.mlir",
+    "bishengir/test/Dialect/HFusion/regbase/Normalize/hfusion-normalize-atomic-tensor-input.mlir",
+    "bishengir/test/Dialect/HIVM/hivm-op-decompose.mlir",
+    "bishengir/test/Dialect/HIVM/lower-create-sync-block-lock.mlir",
+    "bishengir/test/Dialect/HIVM/mark-sync-block-lock-with-subblock.mlir",
+    "bishengir/test/Dialect/HIVM/regbase/Normalize/hivm-normalize-atomic-ops.mlir",
+    "bishengir/test/Dialect/HIVM/regbase/Normalize/hivm-normalize-atomic-tensor-input.mlir",
+    "bishengir/test/Dialect/HIVM/sync-block-hoisting.mlir",
+    "bishengir/test/Dialect/HIVM/sync-block-lock-unordered.mlir",
+    "bishengir/test/Dialect/Triton/lower-remaining-tensor-dialect.mlir",
+    "bishengir/test/Dialect/Triton/rewrite-slice-op-to-memory-ops.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

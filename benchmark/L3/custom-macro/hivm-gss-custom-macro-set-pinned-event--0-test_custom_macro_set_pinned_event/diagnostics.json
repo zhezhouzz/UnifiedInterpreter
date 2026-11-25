@@ -1,0 +1,8 @@
+[
+  {
+    "function": "test_custom_macro_set_pinned_event",
+    "location": "loc(\"<stdin>\":11:5)",
+    "op": "hivm.hir.custom_macro",
+    "reason": "missing Core interpretation"
+  }
+]

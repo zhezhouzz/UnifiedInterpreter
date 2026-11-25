@@ -1,0 +1,982 @@
+// RUN: bishengir-opt %s --canonicalize --hivm-combine-optimized-convert-layout --split-input-file | FileCheck %s
+
+// CHECK-LABEL: func.func @fold_direct_load_to_nchw2nc1hwc0(
+// CHECK-NOT: hivm.hir.load
+// CHECK-NOT: hivm.hir.convert_layout
+// CHECK: %[[DST:.*]] = memref.alloc() : memref<1x2x8x8x16xf16>
+// CHECK: hivm.hir.nchw2nc1hwc0
+// CHECK-SAME: {groups = 2 : i64}
+// CHECK-SAME: ins(%{{.*}} : memref<1x30x8x8xf16, strided<[1920, 64, 8, 1]>>)
+// CHECK-SAME: outs(%[[DST]] : memref<1x2x8x8x16xf16>)
+// CHECK: %[[RESULT:.*]] = bufferization.to_tensor %[[DST]] restrict writable
+// CHECK: return %[[RESULT]] : tensor<1x2x8x8x16xf16>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  func.func @fold_direct_load_to_nchw2nc1hwc0(
+      %src: memref<1x30x8x8xf16, strided<[1920, 64, 8, 1]>>) -> tensor<1x2x8x8x16xf16> {
+    %alloc = memref.alloc() : memref<1x30x8x8xf16>
+    hivm.hir.load
+        ins(%src : memref<1x30x8x8xf16, strided<[1920, 64, 8, 1]>>)
+        outs(%alloc : memref<1x30x8x8xf16>)
+    %input = bufferization.to_tensor %alloc restrict writable
+        : memref<1x30x8x8xf16>
+    %converted = hivm.hir.convert_layout %input
+        output_shape [1, 2, 8, 8, 16]
+        {convolution_groups = 2 : i64,
+         dstLayout = #hivm.data_layout<NC1HWC0>,
+         srcLayout = #hivm.data_layout<NCHW>}
+        : (tensor<1x30x8x8xf16>) -> tensor<1x2x8x8x16xf16>
+    return %converted : tensor<1x2x8x8x16xf16>
+  }
+}
+
+// -----
+
+// CHECK-LABEL: func.func @fold_direct_load_to_nchw2c1hwnc0(
+// CHECK-NOT: hivm.hir.load
+// CHECK-NOT: hivm.hir.convert_layout
+// CHECK: %[[DST:.*]] = memref.alloc() : memref<1x3x3x32x16xf16>
+// CHECK: hivm.hir.nchw2c1hwnc0
+// CHECK-SAME: {groups = 2 : i64}
+// CHECK-SAME: ins(%{{.*}} : memref<30x15x3x3xf16, strided<[135, 9, 3, 1]>>)
+// CHECK-SAME: outs(%[[DST]] : memref<1x3x3x32x16xf16>)
+// CHECK: %[[RESULT:.*]] = bufferization.to_tensor %[[DST]] restrict writable
+// CHECK: return %[[RESULT]] : tensor<1x3x3x32x16xf16>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  func.func @fold_direct_load_to_nchw2c1hwnc0(
+      %src: memref<30x15x3x3xf16, strided<[135, 9, 3, 1]>>) -> tensor<1x3x3x32x16xf16> {
+    %alloc = memref.alloc() : memref<30x15x3x3xf16>
+    hivm.hir.load
+        ins(%src : memref<30x15x3x3xf16, strided<[135, 9, 3, 1]>>)
+        outs(%alloc : memref<30x15x3x3xf16>)
+    %weight = bufferization.to_tensor %alloc restrict writable
+        : memref<30x15x3x3xf16>
+    %converted = hivm.hir.convert_layout %weight
+        output_shape [1, 3, 3, 32, 16]
+        {convolution_groups = 2 : i64,
+         dstLayout = #hivm.data_layout<C1HWNC0>,
+         srcLayout = #hivm.data_layout<NCHW>}
+        : (tensor<30x15x3x3xf16>) -> tensor<1x3x3x32x16xf16>
+    return %converted : tensor<1x3x3x32x16xf16>
+  }
+}
+
+// -----
+
+// CHECK:   func.func @fold_one_use_subview(%[[VAL_0:.*]]: memref<16x16xf16, strided<[?, 1], offset: ?>>, %[[VAL_1:.*]]: memref<16x16xf16, strided<[?, 1], offset:
+// CHECK: %[[VAL_4:.*]] = memref.subview %[[VAL_0]][0, 0] {{\[}}%{{.*}}, 16] [1, 1] : memref<16x16xf16, strided<[?, 1], offset: ?>> to memref<?x16xf16, strided<[?, 1], offset: ?>>
+// CHECK: %[[VAL_6:.*]] = memref.alloc() : memref<1x1x16x16xf16>
+// CHECK: %[[VAL_7:.*]] = memref.subview %[[VAL_6]][0, 0, 0, 0] [1, %{{.*}}, 16, 16] [1, 1, 1, 1] : memref<1x1x16x16xf16> to memref<1x?x16x16xf16, strided<[256, 256, 16, 1]>>
+// CHECK: hivm.hir.nd2nz {dst_continuous} ins(%[[VAL_4]] : memref<?x16xf16, strided<[?, 1], offset: ?>>) outs(%[[VAL_7]] : memref<1x?x16x16xf16, strided<[256, 256, 16, 1]>>)
+// CHECK: %[[VAL_8:.*]] = bufferization.to_tensor %[[VAL_6]] restrict writable : memref<1x1x16x16xf16>
+// CHECK: return %[[VAL_8]] : tensor<1x1x16x16xf16>
+func.func @fold_one_use_subview(%arg0: memref<16x16xf16, strided<[?, 1], offset: ?>>, %arg1: memref<16x16xf16, strided<[?, 1], offset: ?>>, %arg2: index, %arg3: i1) -> tensor<1x1x16x16xf16> {
+  %c0 = arith.constant 0 : index
+  %cst = arith.constant 0.000000e+00 : f16
+  %alloc = memref.alloc() : memref<16x16xf16>
+  %subview = memref.subview %arg0[0, 0] [%arg2, 16] [1, 1] : memref<16x16xf16, strided<[?, 1], offset: ?>> to memref<?x16xf16, strided<[?, 1], offset: ?>>
+  %subview_0 = memref.subview %alloc[0, 0] [%arg2, 16] [1, 1] : memref<16x16xf16> to memref<?x16xf16, strided<[16, 1]>>
+  hivm.hir.load ins(%subview : memref<?x16xf16, strided<[?, 1], offset: ?>>) outs(%subview_0 : memref<?x16xf16, strided<[16, 1]>>) pad_mode = <PadValue> pad_value = %cst : f16 left_padding_num = %c0 : index init_out_buffer = true init_condition = %arg3 : i1
+  %0 = bufferization.to_tensor %alloc restrict writable : memref<16x16xf16>
+  %1 = hivm.hir.convert_layout %0 output_shape [1, 1, 16, 16] {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>, srcLayout = #hivm.data_layout<ND, transpose = false>} : (tensor<16x16xf16>) -> tensor<1x1x16x16xf16>
+  return %1 : tensor<1x1x16x16xf16>
+}
+
+// -----
+
+// CHECK-LABEL: func.func @fold_convert_fixpipe
+// CHECK-SAME: %[[DSTR:.*]]: memref<128x256xf16
+// CHECK-NOT: hivm.hir.convert_layout
+// CHECK: hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>, pre_quant = #hivm.fixpipe_pre_quant_mode<F322F16>} ins(%{{.*}} : tensor<16x8x16x16xf32>) outs(%[[DSTR]] : memref<128x256xf16
+func.func @fold_convert_fixpipe(%dst: memref<128x256xf16, strided<[1024, 1], offset: ?>>) {
+  %mmad_out = arith.constant dense<0.0> : tensor<16x8x16x16xf32>
+  %conv = hivm.hir.convert_layout %mmad_out output_shape [128, 256] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>} : (tensor<16x8x16x16xf32>) -> tensor<128x256xf32>
+  hivm.hir.fixpipe {pre_quant = #hivm.fixpipe_pre_quant_mode<F322F16>, dma_mode = #hivm.dma_mode<nz2nd>} ins(%conv : tensor<128x256xf32>) outs(%dst : memref<128x256xf16, strided<[1024, 1], offset: ?>>)
+  return
+}
+
+// -----
+
+// CHECK-LABEL: func.func @fold_convert_extract_slice_fixpipe
+// CHECK-SAME: %[[DSTR:.*]]: memref<128x256xf16
+// CHECK-SAME: %[[S0:.*]]: index, %[[S1:.*]]: index
+// CHECK-NOT: hivm.hir.convert_layout
+// CHECK: %[[FR_SLICE:.*]] = tensor.extract_slice %{{.*}}[0, 0, 0, 0] {{\[}}%{{.*}}, %{{.*}}, 16, 16] [1, 1, 1, 1] : tensor<16x8x16x16xf32> to tensor<?x?x16x16xf32>
+// CHECK: hivm.hir.fixpipe {{.*}} ins(%[[FR_SLICE]] : tensor<?x?x16x16xf32>)
+func.func @fold_convert_extract_slice_fixpipe(%dst: memref<128x256xf16, strided<[1024, 1], offset: ?>>, %s0: index, %s1: index) {
+  %c0 = arith.constant 0 : index
+  %mmad_out = arith.constant dense<0.0> : tensor<16x8x16x16xf32>
+  %conv = hivm.hir.convert_layout %mmad_out output_shape [128, 256] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>} : (tensor<16x8x16x16xf32>) -> tensor<128x256xf32>
+  %slice = tensor.extract_slice %conv[0, 0] [%s0, %s1] [1, 1] : tensor<128x256xf32> to tensor<?x?xf32>
+  %subview = memref.subview %dst[0, 0] [%s0, %s1] [1, 1] : memref<128x256xf16, strided<[1024, 1], offset: ?>> to memref<?x?xf16, strided<[1024, 1], offset: ?>>
+  hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>, pre_quant = #hivm.fixpipe_pre_quant_mode<F322F16>} ins(%slice : tensor<?x?xf32>) outs(%subview : memref<?x?xf16, strided<[1024, 1], offset: ?>>)
+  return
+}
+
+// -----
+
+
+// CHECK: func.func @fold_two_use_split(%[[VAL_0:.*]]: memref<16x256xbf16, strided<[?, 1], offset: ?>>,
+// CHECK-DAG: %[[VAL_5:.*]] = memref.alloc() : memref<16x256xbf16>
+// CHECK-DAG: %[[VAL_6:.*]] = memref.subview %[[VAL_0]][0, 0] {{\[}}%{{.*}}, 256] [1, 1] : memref<16x256xbf16, strided<[?, 1], offset: ?>> to memref<?x256xbf16, strided<[?, 1], offset: ?>>
+// CHECK: %[[VAL_7:.*]] = memref.subview %[[VAL_5]][0, 0] {{\[}}%{{.*}}, 256] [1, 1] : memref<16x256xbf16> to memref<?x256xbf16, strided<[256, 1]>>
+
+// Create a new container to store the nd2nz with fractal layout
+// CHECK: %[[VAL_9:.*]] = memref.alloc() : memref<16x1x16x16xbf16>
+// CHECK: %[[VAL_10:.*]] = memref.subview %[[VAL_9]][0, 0, 0, 0] [16, %{{.*}}, 16, 16] [1, 1, 1, 1] : memref<16x1x16x16xbf16> to memref<16x?x16x16xbf16, strided<[256, 256, 16, 1]>>
+// CHECK: hivm.hir.nd2nz {dst_continuous} ins(%[[VAL_6]] : memref<?x256xbf16, strided<[?, 1], offset: ?>>) outs(%[[VAL_10]] : memref<16x?x16x16xbf16, strided<[256, 256, 16, 1]>>)
+
+// Convert both AIV path (VTranspose) and AIC path (nd2nz, load) to tensor
+// CHECK-DAG: %[[VAL_11:.*]] = bufferization.to_tensor %[[VAL_9]] restrict writable : memref<16x1x16x16xbf16>
+// CHECK-DAG: %[[VAL_12:.*]] = bufferization.to_tensor %[[VAL_5]] restrict writable : memref<16x256xbf16>
+// CHECK: %[[VAL_14:.*]] = hivm.hir.vtranspose ins(%[[VAL_12]] : tensor<16x256xbf16>) outs(%{{.*}} : tensor<256x16xbf16>) permutation = [1, 0] -> tensor<256x16xbf16>
+// CHECK: %[[VAL_15:.*]] = hivm.hir.convert_layout %[[VAL_14]] output_shape [2, 16, 16, 8]
+// CHECK-SAME: (tensor<256x16xbf16>) -> tensor<2x16x16x8xbf16>
+// CHECK: return %[[VAL_11]], %[[VAL_15]] : tensor<16x1x16x16xbf16>, tensor<2x16x16x8xbf16>
+func.func @fold_two_use_split(%arg0: memref<16x256xbf16, strided<[?, 1], offset: ?>>, %arg1: index, %arg2: i1) -> (tensor<16x1x16x16xbf16>, tensor<2x16x16x8xbf16>) {
+  %c0 = arith.constant 0 : index
+  %cst = arith.constant 0.000000e+00 : bf16
+  %alloc = memref.alloc() : memref<16x256xbf16>
+  %subview = memref.subview %arg0[0, 0] [%arg1, 256] [1, 1] : memref<16x256xbf16, strided<[?, 1], offset: ?>> to memref<?x256xbf16, strided<[?, 1], offset: ?>>
+  %subview_0 = memref.subview %alloc[0, 0] [%arg1, 256] [1, 1] : memref<16x256xbf16> to memref<?x256xbf16, strided<[256, 1]>>
+  hivm.hir.load ins(%subview : memref<?x256xbf16, strided<[?, 1], offset: ?>>) outs(%subview_0 : memref<?x256xbf16, strided<[256, 1]>>) pad_mode = <PadValue> pad_value = %cst : bf16 left_padding_num = %c0 : index init_out_buffer = true init_condition = %arg2 : i1
+  %0 = bufferization.to_tensor %alloc restrict writable : memref<16x256xbf16>
+  %1 = hivm.hir.convert_layout %0 output_shape [16, 1, 16, 16] {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>, srcLayout = #hivm.data_layout<ND>} : (tensor<16x256xbf16>) -> tensor<16x1x16x16xbf16>
+  %2 = tensor.empty() : tensor<256x16xbf16>
+  %3 = hivm.hir.vtranspose ins(%0 : tensor<16x256xbf16>) outs(%2 : tensor<256x16xbf16>) permutation = [1, 0] -> tensor<256x16xbf16>
+  %4 = hivm.hir.convert_layout %3 output_shape [2, 16, 16, 8] {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 8]>, srcLayout = #hivm.data_layout<ND>} : (tensor<256x16xbf16>) -> tensor<2x16x16x8xbf16>
+  return %1, %4 : tensor<16x1x16x16xbf16>, tensor<2x16x16x8xbf16>
+}
+
+// -----
+
+// CHECK-LABEL: func.func @fold_subview_annotation_mark
+// CHECK-NOT: hivm.hir.load
+// CHECK: %[[FRACTAL_ALLOC:.*]] = memref.alloc() : memref<1x1x16x16xf16>
+// CHECK: hivm.hir.nd2nz {dst_continuous} ins(
+// CHECK: %[[NEW_TENSOR:.*]] = bufferization.to_tensor %[[FRACTAL_ALLOC]] restrict writable
+// CHECK: annotation.mark %[[NEW_TENSOR]] {dot_pad_only_k} : tensor<1x1x16x16xf16>
+func.func @fold_subview_annotation_mark(%arg0: memref<16x16xf16, strided<[?, 1], offset: ?>>, %arg1: index) -> tensor<1x1x16x16xf16> {
+  %alloc = memref.alloc() : memref<16x16xf16>
+  %subview_in = memref.subview %arg0[0, 0] [%arg1, 16] [1, 1] : memref<16x16xf16, strided<[?, 1], offset: ?>> to memref<?x16xf16, strided<[?, 1], offset: ?>>
+  %subview_out = memref.subview %alloc[0, 0] [%arg1, 16] [1, 1] : memref<16x16xf16> to memref<?x16xf16, strided<[16, 1]>>
+  hivm.hir.load ins(%subview_in : memref<?x16xf16, strided<[?, 1], offset: ?>>) outs(%subview_out : memref<?x16xf16, strided<[16, 1]>>)
+  %0 = bufferization.to_tensor %alloc restrict writable : memref<16x16xf16>
+  %1 = hivm.hir.convert_layout %0 output_shape [1, 1, 16, 16] {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>, srcLayout = #hivm.data_layout<ND>} : (tensor<16x16xf16>) -> tensor<1x1x16x16xf16>
+  annotation.mark %0 {dot_pad_only_k} : tensor<16x16xf16>
+  return %1 : tensor<1x1x16x16xf16>
+}
+
+// -----
+
+// CHECK-LABEL: func.func @fold_direct_load_annotation_mark
+// CHECK-NOT: hivm.hir.load
+// CHECK: %[[FRACTAL_ALLOC:.*]] = memref.alloc() : memref<1x1x16x16xf16>
+// CHECK: hivm.hir.nd2nz {dst_continuous} ins(
+// CHECK: %[[NEW_TENSOR:.*]] = bufferization.to_tensor %[[FRACTAL_ALLOC]] restrict writable
+// CHECK: annotation.mark %[[NEW_TENSOR]] {dot_pad_only_k} : tensor<1x1x16x16xf16>
+func.func @fold_direct_load_annotation_mark(%arg0: memref<16x16xf16, strided<[?, 1], offset: ?>>) -> tensor<1x1x16x16xf16> {
+  %alloc = memref.alloc() : memref<16x16xf16>
+  hivm.hir.load ins(%arg0 : memref<16x16xf16, strided<[?, 1], offset: ?>>) outs(%alloc : memref<16x16xf16>)
+  %0 = bufferization.to_tensor %alloc restrict writable : memref<16x16xf16>
+  %1 = hivm.hir.convert_layout %0 output_shape [1, 1, 16, 16] {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>, srcLayout = #hivm.data_layout<ND>} : (tensor<16x16xf16>) -> tensor<1x1x16x16xf16>
+  annotation.mark %0 {dot_pad_only_k} : tensor<16x16xf16>
+  return %1 : tensor<1x1x16x16xf16>
+}
+
+// -----
+
+// CHECK-LABEL: func.func @fold_tensor_load_convert_layout
+// CHECK-NOT: hivm.hir.load
+// CHECK-NOT: hivm.hir.convert_layout
+// CHECK: %[[EMPTY:.*]] = tensor.empty() : tensor<8x4x16x8xf32>
+// CHECK: %[[RES:.*]] = hivm.hir.nd2nz {dst_continuous} ins(%{{.*}} : tensor<64x64xf32>) outs(%[[EMPTY]] : tensor<8x4x16x8xf32>) -> tensor<8x4x16x8xf32>
+// CHECK: return %[[RES]] : tensor<8x4x16x8xf32>
+func.func @fold_tensor_load_convert_layout(%src: tensor<64x64xf32>, %l1_init: tensor<64x64xf32>) -> tensor<8x4x16x8xf32> {
+  %load = hivm.hir.load ins(%src : tensor<64x64xf32>) outs(%l1_init : tensor<64x64xf32>) {"hivm.inserted-load"} core_type = <CUBE> -> tensor<64x64xf32>
+  %conv = hivm.hir.convert_layout %load output_shape [8, 4, 16, 8] {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 8]>, srcLayout = #hivm.data_layout<ND>} : (tensor<64x64xf32>) -> tensor<8x4x16x8xf32>
+  return %conv : tensor<8x4x16x8xf32>
+}
+
+// -----
+
+// Regression for the row-wise A operand gather shape from err-kernel.ttadapter:
+// the load writes %alloc through a subview inside the inner scf.for, while
+// to_tensor/convert_layout are outside that loop. Folding this convert_layout
+// after the nested load would create a tensor value inside the loop and use it
+// outside the loop.
+// CHECK-LABEL: func.func @do_not_fold_nested_row_load_from_case
+// CHECK: %[[ALLOC:.*]] = memref.alloc() : memref<64x32xf32>
+// CHECK: scf.for
+// CHECK: hivm.hir.load
+// CHECK-NOT: hivm.hir.nd2nz
+// CHECK: %[[A_TENSOR:.*]] = bufferization.to_tensor %[[ALLOC]] restrict writable : memref<64x32xf32>
+// CHECK: %[[A_FRACTAL:.*]] = hivm.hir.convert_layout %[[A_TENSOR]] output_shape [4, 4, 16, 8]
+// CHECK-SAME: (tensor<64x32xf32>) -> tensor<4x4x16x8xf32>
+// CHECK: hivm.hir.copy ins(%[[A_FRACTAL]] : tensor<4x4x16x8xf32>)
+func.func @do_not_fold_nested_row_load_from_case(%arg2: memref<?xf32>, %arg5: i32, %arg13: i32, %base_m: i32, %base_k: i32) {
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  %c64 = arith.constant 64 : index
+  %alloc = memref.alloc() : memref<64x32xf32>
+  scf.for %arg25 = %c0 to %c64 step %c1 {
+    %row_i32 = arith.index_cast %arg25 : index to i32
+    %row = arith.addi %base_m, %row_i32 : i32
+    %wrapped_row = arith.remsi %row, %arg5 : i32
+    %row_offset_i32 = arith.muli %wrapped_row, %arg13 : i32
+    %row_offset = arith.index_cast %row_offset_i32 : i32 to index
+    %base_k_index = arith.index_cast %base_k : i32 to index
+    %src_offset = arith.addi %row_offset, %base_k_index : index
+    %reinterpret_cast = memref.reinterpret_cast %arg2 to offset: [%src_offset], sizes: [1, 32], strides: [32, 1] : memref<?xf32> to memref<1x32xf32, strided<[32, 1], offset: ?>>
+    %subview = memref.subview %alloc[%arg25, 0] [1, 32] [1, 1] : memref<64x32xf32> to memref<1x32xf32, strided<[32, 1], offset: ?>>
+    hivm.hir.load ins(%reinterpret_cast : memref<1x32xf32, strided<[32, 1], offset: ?>>) outs(%subview : memref<1x32xf32, strided<[32, 1], offset: ?>>) left_padding_num = %c0 : index core_type = <VECTOR>
+  } {ExtractedLoadOrStore, hivm.parallel_loop}
+  %a_tensor = bufferization.to_tensor %alloc restrict writable : memref<64x32xf32>
+  %a_fractal = hivm.hir.convert_layout %a_tensor output_shape [4, 4, 16, 8] {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 8]>, not_to_propagate_up = true, srcLayout = #hivm.data_layout<ND>} : (tensor<64x32xf32>) -> tensor<4x4x16x8xf32>
+  %cbuf = memref.alloc() : memref<4x4x16x8xf32, #hivm.address_space<cbuf>>
+  hivm.hir.copy ins(%a_fractal : tensor<4x4x16x8xf32>) outs(%cbuf : memref<4x4x16x8xf32, #hivm.address_space<cbuf>>) {"hivm.inserted-copy"}
+  return
+}
+
+// -----
+
+// CHECK-LABEL: func.func @fold_tensor_load_scalea
+// CHECK: hivm.hir.load_scale ins(%[[SRC:.*]] : tensor<208x2xi8>) outs(%{{.*}} : tensor<13x1x16x2xi8>) -> tensor<13x1x16x2xi8>
+// CHECK-NOT: hivm.hir.convert_layout
+func.func @fold_tensor_load_scalea(%src: tensor<208x2xi8>) -> tensor<13x1x16x2xi8> {
+  %empty = tensor.empty() : tensor<208x2xi8>
+  %loaded = hivm.hir.load ins(%src : tensor<208x2xi8>) outs(%empty : tensor<208x2xi8>) -> tensor<208x2xi8>
+  %fractal = hivm.hir.convert_layout %loaded output_shape [13, 1, 16, 2]
+      {dstLayout = #hivm.data_layout<SCALEA_zZ, fractalSizes = [16, 2]>,
+       srcLayout = #hivm.data_layout<SCALEA_ND>}
+      : (tensor<208x2xi8>) -> tensor<13x1x16x2xi8>
+  return %fractal : tensor<13x1x16x2xi8>
+}
+
+// -----
+
+// CHECK-LABEL: func.func @fold_tensor_load_scaleb
+// CHECK: hivm.hir.load_scale ins(%[[SRC:.*]] : tensor<224x2xi8>) outs(%{{.*}} : tensor<14x1x16x2xi8>) -> tensor<14x1x16x2xi8>
+// CHECK-NOT: is_transposed
+// CHECK-NOT: hivm.hir.convert_layout
+func.func @fold_tensor_load_scaleb(%src: tensor<224x2xi8>) -> tensor<14x1x16x2xi8> {
+  %empty = tensor.empty() : tensor<224x2xi8>
+  %loaded = hivm.hir.load ins(%src : tensor<224x2xi8>) outs(%empty : tensor<224x2xi8>) -> tensor<224x2xi8>
+  %fractal = hivm.hir.convert_layout %loaded output_shape [14, 1, 16, 2]
+      {dstLayout = #hivm.data_layout<SCALEB_nN, fractalSizes = [16, 2]>,
+       srcLayout = #hivm.data_layout<SCALEB_DN>}
+      : (tensor<224x2xi8>) -> tensor<14x1x16x2xi8>
+  return %fractal : tensor<14x1x16x2xi8>
+}
+
+// -----
+
+// CHECK-LABEL: func.func @fold_memref_load_scalea
+// CHECK: hivm.hir.load_scale ins(%{{.*}} : memref<208x2xi8{{.*}}>) outs(%{{.*}} : memref<13x1x16x2xi8>)
+// CHECK: %[[T:.*]] = bufferization.to_tensor %{{.*}} restrict writable : memref<13x1x16x2xi8>
+// CHECK-NOT: hivm.hir.convert_layout
+// CHECK-NOT: hivm.hir.load ins
+// CHECK: return %[[T]] : tensor<13x1x16x2xi8>
+func.func @fold_memref_load_scalea(%gm: memref<208x2xi8, strided<[2, 1], offset: ?>>) -> tensor<13x1x16x2xi8> {
+  %alloc = memref.alloc() : memref<208x2xi8>
+  hivm.hir.load ins(%gm : memref<208x2xi8, strided<[2, 1], offset: ?>>) outs(%alloc : memref<208x2xi8>) eviction_policy = <EvictFirst> core_type = <CUBE>
+  %0 = bufferization.to_tensor %alloc restrict writable : memref<208x2xi8>
+  %1 = hivm.hir.convert_layout %0 output_shape [13, 1, 16, 2]
+      {dstLayout = #hivm.data_layout<SCALEA_zZ, fractalSizes = [16, 2]>,
+       srcLayout = #hivm.data_layout<SCALEA_ND>}
+      : (tensor<208x2xi8>) -> tensor<13x1x16x2xi8>
+  return %1 : tensor<13x1x16x2xi8>
+}
+
+// -----
+
+// CHECK-LABEL: func.func @fold_memref_load_scaleb
+// CHECK: hivm.hir.load_scale ins(%{{.*}} : memref<224x2xi8{{.*}}>) outs(%{{.*}} : memref<14x1x16x2xi8>)
+// CHECK-NOT: is_transposed
+// CHECK: %[[T:.*]] = bufferization.to_tensor %{{.*}} restrict writable : memref<14x1x16x2xi8>
+// CHECK-NOT: hivm.hir.convert_layout
+// CHECK-NOT: hivm.hir.load ins
+// CHECK: return %[[T]] : tensor<14x1x16x2xi8>
+func.func @fold_memref_load_scaleb(%gm: memref<224x2xi8, strided<[2, 1], offset: ?>>) -> tensor<14x1x16x2xi8> {
+  %alloc = memref.alloc() : memref<224x2xi8>
+  hivm.hir.load ins(%gm : memref<224x2xi8, strided<[2, 1], offset: ?>>) outs(%alloc : memref<224x2xi8>) eviction_policy = <EvictFirst> core_type = <CUBE>
+  %0 = bufferization.to_tensor %alloc restrict writable : memref<224x2xi8>
+  %1 = hivm.hir.convert_layout %0 output_shape [14, 1, 16, 2]
+      {dstLayout = #hivm.data_layout<SCALEB_nN, fractalSizes = [16, 2]>,
+       srcLayout = #hivm.data_layout<SCALEB_DN>}
+      : (tensor<224x2xi8>) -> tensor<14x1x16x2xi8>
+  return %1 : tensor<14x1x16x2xi8>
+}
+
+// -----
+
+// Non-unit last-dim stride: cannot statically verify continuity → do not fuse.
+// CHECK-LABEL: func.func @nofold_memref_load_scalea_noncontiguous
+// CHECK-NOT: hivm.hir.load_scale
+// CHECK: hivm.hir.load
+// CHECK: hivm.hir.convert_layout
+func.func @nofold_memref_load_scalea_noncontiguous(%gm: memref<208x2xi8, strided<[4, 2], offset: ?>>) -> tensor<13x1x16x2xi8> {
+  %alloc = memref.alloc() : memref<208x2xi8>
+  hivm.hir.load ins(%gm : memref<208x2xi8, strided<[4, 2], offset: ?>>) outs(%alloc : memref<208x2xi8>) eviction_policy = <EvictFirst> core_type = <CUBE>
+  %0 = bufferization.to_tensor %alloc restrict writable : memref<208x2xi8>
+  %1 = hivm.hir.convert_layout %0 output_shape [13, 1, 16, 2]
+      {dstLayout = #hivm.data_layout<SCALEA_zZ, fractalSizes = [16, 2]>,
+       srcLayout = #hivm.data_layout<SCALEA_ND>}
+      : (tensor<208x2xi8>) -> tensor<13x1x16x2xi8>
+  return %1 : tensor<13x1x16x2xi8>
+}
+
+// -----
+
+// Dynamic last-dim size: cannot verify divisible-by-2 → do not fuse.
+// CHECK-LABEL: func.func @nofold_memref_load_scalea_dynamic_lastdim
+// CHECK-NOT: hivm.hir.load_scale
+// CHECK: hivm.hir.load
+// CHECK: hivm.hir.convert_layout
+func.func @nofold_memref_load_scalea_dynamic_lastdim(%gm: memref<208x?xi8, strided<[?, 1], offset: ?>>, %n: index) -> tensor<13x?x16x2xi8> {
+  %alloc = memref.alloc(%n) : memref<208x?xi8>
+  hivm.hir.load ins(%gm : memref<208x?xi8, strided<[?, 1], offset: ?>>) outs(%alloc : memref<208x?xi8>) eviction_policy = <EvictFirst> core_type = <CUBE>
+  %0 = bufferization.to_tensor %alloc restrict writable : memref<208x?xi8>
+  %c13 = arith.constant 13 : index
+  %c16 = arith.constant 16 : index
+  %c2 = arith.constant 2 : index
+  %n_tiles = arith.ceildivsi %n, %c2 : index
+  %1 = hivm.hir.convert_layout %0 output_shape [%c13, %n_tiles, %c16, %c2]
+      {dstLayout = #hivm.data_layout<SCALEA_zZ, fractalSizes = [16, 2]>,
+       srcLayout = #hivm.data_layout<SCALEA_ND>}
+      : (tensor<208x?xi8>) -> tensor<13x?x16x2xi8>
+  return %1 : tensor<13x?x16x2xi8>
+}
+
+// -----
+
+// Odd last-dim size: not divisible by 2 → do not fuse; fall back to transpose.
+// CHECK-LABEL: func.func @nofold_tensor_load_scalea_odd_lastdim
+// CHECK-NOT: hivm.hir.load_scale
+// CHECK: hivm.hir.load
+// CHECK: hivm.hir.convert_layout
+func.func @nofold_tensor_load_scalea_odd_lastdim(%src: tensor<208x3xi8>) -> tensor<13x2x16x2xi8> {
+  %empty = tensor.empty() : tensor<208x3xi8>
+  %loaded = hivm.hir.load ins(%src : tensor<208x3xi8>) outs(%empty : tensor<208x3xi8>) -> tensor<208x3xi8>
+  %fractal = hivm.hir.convert_layout %loaded output_shape [13, 2, 16, 2]
+      {dstLayout = #hivm.data_layout<SCALEA_zZ, fractalSizes = [16, 2]>,
+       srcLayout = #hivm.data_layout<SCALEA_ND>}
+      : (tensor<208x3xi8>) -> tensor<13x2x16x2xi8>
+  return %fractal : tensor<13x2x16x2xi8>
+}
+
+// -----
+// Fractal→ND convert_layout before mmadL1: verify the convert+mmad pattern survives
+// CHECK-LABEL: func.func @fold_fractal_convert_before_mmad
+// CHECK: hivm.hir.convert_layout
+// CHECK: hivm.hir.mmadL1
+module {
+  func.func @fold_fractal_convert_before_mmad(%arg0: tensor<20x10x16x16xf16>, %arg1: tensor<320x80xf16>) -> tensor<160x80xf32> {
+    %c160 = arith.constant 160 : index
+    %c320 = arith.constant 320 : index
+    %c80 = arith.constant 80 : index
+    %false = arith.constant false
+    %a_nd = hivm.hir.convert_layout %arg0 output_shape [160, 320] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>} : (tensor<20x10x16x16xf16>) -> tensor<160x320xf16>
+    %empty = tensor.empty() : tensor<160x80xf32>
+    %0 = hivm.hir.mmadL1 ins(%a_nd, %arg1, %false, %c160, %c320, %c80 : tensor<160x320xf16>, tensor<320x80xf16>, i1, index, index, index) outs(%empty : tensor<160x80xf32>) -> tensor<160x80xf32>
+    return %0 : tensor<160x80xf32>
+  }
+}
+
+// -----
+// Fractal→ND convert_layout for both A and B before mmadL1
+// CHECK-LABEL: func.func @fold_both_fractal_convert_before_mmad
+// CHECK: hivm.hir.convert_layout
+// CHECK: hivm.hir.convert_layout
+// CHECK: hivm.hir.mmadL1
+module {
+  func.func @fold_both_fractal_convert_before_mmad(%arg0: tensor<20x10x16x16xf16>, %arg1: tensor<5x20x16x16xf16>) -> tensor<160x80xf32> {
+    %c160 = arith.constant 160 : index
+    %c320 = arith.constant 320 : index
+    %c80 = arith.constant 80 : index
+    %false = arith.constant false
+    %a_nd = hivm.hir.convert_layout %arg0 output_shape [160, 320] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>} : (tensor<20x10x16x16xf16>) -> tensor<160x320xf16>
+    %b_nd = hivm.hir.convert_layout %arg1 output_shape [320, 80] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>} : (tensor<5x20x16x16xf16>) -> tensor<320x80xf16>
+    %empty = tensor.empty() : tensor<160x80xf32>
+    %0 = hivm.hir.mmadL1 ins(%a_nd, %b_nd, %false, %c160, %c320, %c80 : tensor<160x320xf16>, tensor<320x80xf16>, i1, index, index, index) outs(%empty : tensor<160x80xf32>) -> tensor<160x80xf32>
+    return %0 : tensor<160x80xf32>
+  }
+}
+
+// -----
+// Fold Fractal->ND convert_layout before an NZ2NZ (default mode) fixpipe.
+// The NZ2NZ fixpipe consumes fractal data directly, so the convert_layout is redundant.
+// CHECK-LABEL: func.func @test_nz2nz_fixpipe_fold_convert
+// CHECK-SAME: %[[DST:.*]]: memref<128x80xf16
+// CHECK-NOT: hivm.hir.convert_layout
+// CHECK: hivm.hir.fixpipe {{.*pre_quant = #hivm.fixpipe_pre_quant_mode<F322F16>.*}} ins(%{{.*}} : tensor<8x5x16x16xf32>) outs(%[[DST]] : memref<128x80xf16
+func.func @test_nz2nz_fixpipe_fold_convert(%dst: memref<128x80xf16, strided<[640, 1], offset: ?>>) {
+  %fractal = arith.constant dense<0.0> : tensor<8x5x16x16xf32>
+  %nd = hivm.hir.convert_layout %fractal output_shape [128, 80]
+      {dstLayout = #hivm.data_layout<ND>,
+       srcLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>}
+      : (tensor<8x5x16x16xf32>) -> tensor<128x80xf32>
+  hivm.hir.fixpipe {pre_quant = #hivm.fixpipe_pre_quant_mode<F322F16>} ins(%nd : tensor<128x80xf32>) outs(%dst : memref<128x80xf16, strided<[640, 1], offset: ?>>)
+  return
+}
+
+// -----
+// Fold the fixpipe edge when Fractal->ND convert_layout has another user.
+// Keep convert_layout for that other user.
+// CHECK-LABEL: func.func @test_nz2nz_fixpipe_fold_multi_use
+// CHECK: %[[FRACTAL:.*]] = arith.constant
+// CHECK: %[[ND:.*]] = hivm.hir.convert_layout %[[FRACTAL]]
+// CHECK: hivm.hir.fixpipe {{.*pre_quant = #hivm.fixpipe_pre_quant_mode<F322F16>.*}} ins(%[[FRACTAL]] : tensor<8x5x16x16xf32>)
+// CHECK: hivm.hir.fixpipe {{.*pre_quant = #hivm.fixpipe_pre_quant_mode<F322F16>.*}} ins(%[[FRACTAL]] : tensor<8x5x16x16xf32>)
+// CHECK: return %[[ND]] : tensor<128x80xf32>
+func.func @test_nz2nz_fixpipe_fold_multi_use(
+    %dst0: memref<128x80xf16, strided<[640, 1], offset: ?>>,
+    %dst1: memref<128x80xf16, strided<[640, 1], offset: ?>>)
+    -> tensor<128x80xf32> {
+  %fractal = arith.constant dense<0.0> : tensor<8x5x16x16xf32>
+  %nd = hivm.hir.convert_layout %fractal output_shape [128, 80]
+      {dstLayout = #hivm.data_layout<ND>,
+      srcLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>}
+      : (tensor<8x5x16x16xf32>) -> tensor<128x80xf32>
+  hivm.hir.fixpipe {pre_quant = #hivm.fixpipe_pre_quant_mode<F322F16>} ins(%nd : tensor<128x80xf32>)
+      outs(%dst0 : memref<128x80xf16, strided<[640, 1], offset: ?>>)
+  hivm.hir.fixpipe {pre_quant = #hivm.fixpipe_pre_quant_mode<F322F16>} ins(%nd : tensor<128x80xf32>)
+      outs(%dst1 : memref<128x80xf16, strided<[640, 1], offset: ?>>)
+  return %nd : tensor<128x80xf32>
+}
+
+// -----
+// Fold Fractal->ND convert_layout + extract_slice before an NZ2ND fixpipe.
+// Same as FoldConvertLayoutExtractSliceFixpipePattern with NZ2ND as the dma mode.
+// CHECK-LABEL: func.func @test_nz2nd_extract_slice_fixpipe_fold
+// CHECK-SAME: %[[DST:.*]]: memref<128x80xf16
+// CHECK-NOT: hivm.hir.convert_layout
+// CHECK: %[[FR_SLICE:.*]] = tensor.extract_slice %{{.*}}[0, 0, 0, 0] {{\[}}%{{.*}}, %{{.*}}, 16, 16] [1, 1, 1, 1] : tensor<8x5x16x16xf32> to tensor<?x?x16x16xf32>
+// CHECK: hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>, pre_quant = #hivm.fixpipe_pre_quant_mode<F322F16>} ins(%[[FR_SLICE]] : tensor<?x?x16x16xf32>)
+func.func @test_nz2nd_extract_slice_fixpipe_fold(%dst: memref<128x80xf16, strided<[640, 1], offset: ?>>, %s0: index, %s1: index) {
+  %fractal = arith.constant dense<0.0> : tensor<8x5x16x16xf32>
+  %nd = hivm.hir.convert_layout %fractal output_shape [128, 80]
+      {dstLayout = #hivm.data_layout<ND>,
+       srcLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>}
+      : (tensor<8x5x16x16xf32>) -> tensor<128x80xf32>
+  %slice = tensor.extract_slice %nd[0, 0] [%s0, %s1] [1, 1] : tensor<128x80xf32> to tensor<?x?xf32>
+  %subview = memref.subview %dst[0, 0] [%s0, %s1] [1, 1] : memref<128x80xf16, strided<[640, 1], offset: ?>> to memref<?x?xf16, strided<[640, 1], offset: ?>>
+  hivm.hir.fixpipe {pre_quant = #hivm.fixpipe_pre_quant_mode<F322F16>, dma_mode = #hivm.dma_mode<nz2nd>} ins(%slice : tensor<?x?xf32>) outs(%subview : memref<?x?xf16, strided<[640, 1], offset: ?>>)
+  return
+}
+
+// -----
+// ND->Fractal convert_layout of a K-padded vector result is routed through GM.
+// The K-pad chain (vbrc + subview + copy) is replaced by store + nd2nz with padding.
+// Covers the RouteVectorFractalizeViaGMPattern matching s_VC_kpad scenarios.
+// CHECK-LABEL: func.func @test_route_vector_fractalize_via_gm
+// CHECK: hivm.hir.store
+// CHECK: hivm.hir.nd2nz
+// CHECK-NOT: hivm.hir.convert_layout
+func.func @test_route_vector_fractalize_via_gm(%real_tensor: tensor<128x240xf16>) {
+  %c0 = arith.constant 0 : index
+  %cst = arith.constant 0.000000e+00 : f16
+  %alloc = memref.alloc() : memref<128x256xf16>
+  %real_memref = bufferization.to_memref %real_tensor : memref<128x240xf16>
+  hivm.hir.vbrc ins(%cst : f16) outs(%alloc : memref<128x256xf16>)
+  %subview = memref.subview %alloc[0, 0] [128, 240] [1, 1] : memref<128x256xf16> to memref<128x240xf16, strided<[256, 1]>>
+  hivm.hir.copy ins(%real_memref : memref<128x240xf16>) outs(%subview : memref<128x240xf16, strided<[256, 1]>>)
+  %padded_tensor = bufferization.to_tensor %alloc restrict writable : memref<128x256xf16>
+  %fractal = hivm.hir.convert_layout %padded_tensor output_shape [16, 8, 16, 16]
+      {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>,
+       srcLayout = #hivm.data_layout<ND>}
+      : (tensor<128x256xf16>) -> tensor<16x8x16x16xf16>
+  %l1_buf = memref.alloc() : memref<16x8x16x16xf16, #hivm.address_space<cbuf>>
+  hivm.hir.copy ins(%fractal : tensor<16x8x16x16xf16>) outs(%l1_buf : memref<16x8x16x16xf16, #hivm.address_space<cbuf>>) {"hivm.inserted-copy"}
+  return
+}
+
+// -----
+// Fold Fractal->ND convert_layout before an NZ2NZ fixpipe with f32 destination type.
+// Covers the f32 CC output -> NZ2NZ fixpipe -> f32 fractal GM pattern.
+// CHECK-LABEL: func.func @test_nz2nz_fixpipe_f32
+// CHECK-SAME: %[[DST:.*]]: memref<128x256xf32
+// CHECK-NOT: hivm.hir.convert_layout
+// CHECK: hivm.hir.fixpipe ins(%{{.*}} : tensor<16x8x16x16xf32>) outs(%[[DST]] : memref<128x256xf32
+func.func @test_nz2nz_fixpipe_f32(%dst: memref<128x256xf32, strided<[1024, 1], offset: ?>>) {
+  %fractal = arith.constant dense<0.0> : tensor<16x8x16x16xf32>
+  %nd = hivm.hir.convert_layout %fractal output_shape [128, 256]
+      {dstLayout = #hivm.data_layout<ND>,
+       srcLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>}
+      : (tensor<16x8x16x16xf32>) -> tensor<128x256xf32>
+  hivm.hir.fixpipe ins(%nd : tensor<128x256xf32>) outs(%dst : memref<128x256xf32, strided<[1024, 1], offset: ?>>)
+  return
+}
+
+// -----
+// s_C_int8: int8 NZ2NZ — Fractal→ND convert before nz2nz fixpipe with int8.
+// CHECK-LABEL: func.func @test_int8_nz2nz_fixpipe_fold
+// CHECK: hivm.hir.fixpipe
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9599">} {
+  func.func @test_int8_nz2nz_fixpipe_fold() {
+    %cc = memref.alloc() {alignment = 64 : i64} : memref<2x10x16x32xi32, #hivm.address_space<cc>>
+    %gm = memref.alloc() : memref<2x10x16x32xi8, #hivm.address_space<gm>>
+    %mmad_out = arith.constant dense<0> : tensor<2x10x16x32xi32>
+    %conv = hivm.hir.convert_layout %mmad_out output_shape [160, 64]
+        {dstLayout = #hivm.data_layout<ND>,
+         srcLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 32]>}
+        : (tensor<2x10x16x32xi32>) -> tensor<160x64xi32>
+    %strided = memref.cast %gm : memref<2x10x16x32xi8, #hivm.address_space<gm>>
+        to memref<2x10x16x32xi8, strided<[?, ?, ?, ?], offset: ?>, #hivm.address_space<gm>>
+    hivm.hir.fixpipe {pre_quant = #hivm.fixpipe_pre_quant_mode<S322I8>} ins(%conv : tensor<160x64xi32>) outs(%strided : memref<2x10x16x32xi8, strided<[?, ?, ?, ?], offset: ?>, #hivm.address_space<gm>>)
+    return
+  }
+}
+
+// s_mix_f32: NZ2NZ fixpipe with dual_dst — Fractal→ND convert folded for fixpipe with row split.
+// CHECK-LABEL: func.func @test_mix_f32_dual_dst_fixpipe
+// CHECK: hivm.hir.fixpipe
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9599">} {
+  func.func @test_mix_f32_dual_dst_fixpipe() {
+    %cc = memref.alloc() {alignment = 64 : i64} : memref<5x10x16x8xf32, #hivm.address_space<cc>>
+    %gm = memref.alloc() : memref<5x10x16x8xf32, #hivm.address_space<gm>>
+    %mmad_out = arith.constant dense<0.0> : tensor<5x10x16x8xf32>
+    %conv = hivm.hir.convert_layout %mmad_out output_shape [80, 160]
+        {dstLayout = #hivm.data_layout<ND>,
+         srcLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 8]>}
+        : (tensor<5x10x16x8xf32>) -> tensor<80x160xf32>
+    %strided = memref.cast %gm : memref<5x10x16x8xf32, #hivm.address_space<gm>>
+        to memref<5x10x16x8xf32, strided<[?, ?, ?, ?], offset: ?>, #hivm.address_space<gm>>
+    hivm.hir.fixpipe ins(%conv : tensor<80x160xf32>)
+        outs(%strided : memref<5x10x16x8xf32, strided<[?, ?, ?, ?], offset: ?>, #hivm.address_space<gm>>)
+        dual_dst_mode = <ROW_SPLIT>
+    return
+  }
+}
+
+// -----
+
+// Fold Fixpipe(NZ2NZ) + convert_layout(Fractal→Fractal) into a rank-4 Fixpipe.
+// CHECK-LABEL: func.func @fold_fixpipe_nz2nz_fractal_to_fractal
+// CHECK-NOT: hivm.hir.convert_layout
+// CHECK: %[[FIX:.*]] = hivm.hir.fixpipe {{.*}}-> tensor<2x1x16x8xf32>
+// CHECK: return %[[FIX]] : tensor<2x1x16x8xf32>
+func.func @fold_fixpipe_nz2nz_fractal_to_fractal(%src: tensor<16x16xf32>) -> tensor<2x1x16x8xf32> {
+  %dst = tensor.empty() : tensor<16x16xf32>
+  %fix = hivm.hir.fixpipe
+      ins(%src : tensor<16x16xf32>) outs(%dst : tensor<16x16xf32>)
+      -> tensor<16x16xf32>
+  %fr = hivm.hir.convert_layout %fix output_shape [2, 1, 16, 8]
+      {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 8]>,
+       srcLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 8]>}
+      : (tensor<16x16xf32>) -> tensor<2x1x16x8xf32>
+  return %fr : tensor<2x1x16x8xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func.func @keep_convert_from_block_argument(
+// CHECK: hivm.hir.convert_layout
+func.func @keep_convert_from_block_argument(%arg: memref<16x16xf16, #hivm.address_space<gm>>)
+    -> tensor<1x1x16x16xf16> {
+  %src = bufferization.to_tensor %arg restrict writable : memref<16x16xf16, #hivm.address_space<gm>>
+  %fr = hivm.hir.convert_layout %src output_shape [1, 1, 16, 16]
+    {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>,
+     srcLayout = #hivm.data_layout<ND, transpose = false>}
+    : (tensor<16x16xf16>) -> tensor<1x1x16x16xf16>
+  return %fr : tensor<1x1x16x16xf16>
+}
+
+// -----
+
+// Leftover ND→Fractal on an NZ2NZ Fixpipe is also folded into a rank-4 Fixpipe.
+// CHECK-LABEL: func.func @fold_fixpipe_nz2nz_nd_to_fractal
+// CHECK-NOT: hivm.hir.convert_layout
+// CHECK: %[[FIX:.*]] = hivm.hir.fixpipe {{.*}}-> tensor<2x1x16x8xf32>
+// CHECK: return %[[FIX]] : tensor<2x1x16x8xf32>
+func.func @fold_fixpipe_nz2nz_nd_to_fractal(%src: tensor<16x16xf32>) -> tensor<2x1x16x8xf32> {
+  %dst = tensor.empty() : tensor<16x16xf32>
+  %fix = hivm.hir.fixpipe
+      ins(%src : tensor<16x16xf32>) outs(%dst : tensor<16x16xf32>)
+      -> tensor<16x16xf32>
+  %fr = hivm.hir.convert_layout %fix output_shape [2, 1, 16, 8]
+      {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 8]>,
+       srcLayout = #hivm.data_layout<ND>}
+      : (tensor<16x16xf32>) -> tensor<2x1x16x8xf32>
+  return %fr : tensor<2x1x16x8xf32>
+}
+
+// -----
+
+// Channel-merge: NZ2NZ Fixpipe with S322I8 (i32 L0C → i8) + Fractal→Fractal
+// marker folds into a rank-4 i8 Fixpipe (Ascend950 A tile [16, 32]).
+// CHECK-LABEL: func.func @fold_channel_merge_fixpipe_nz2nz_i8
+// CHECK-NOT: hivm.hir.convert_layout
+// CHECK: %[[FIX:.*]] = hivm.hir.fixpipe {pre_quant = #hivm.fixpipe_pre_quant_mode<S322I8>}{{.*}}-> tensor<1x2x16x32xi8>
+// CHECK: return %[[FIX]] : tensor<1x2x16x32xi8>
+func.func @fold_channel_merge_fixpipe_nz2nz_i8(%src: tensor<32x32xi32>) -> tensor<1x2x16x32xi8> {
+  %dst = tensor.empty() : tensor<32x32xi8>
+  %fix = hivm.hir.fixpipe {pre_quant = #hivm.fixpipe_pre_quant_mode<S322I8>}
+      ins(%src : tensor<32x32xi32>) outs(%dst : tensor<32x32xi8>)
+      -> tensor<32x32xi8>
+  %fr = hivm.hir.convert_layout %fix output_shape [1, 2, 16, 32]
+      {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 32]>,
+       srcLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 32]>}
+      : (tensor<32x32xi8>) -> tensor<1x2x16x32xi8>
+  return %fr : tensor<1x2x16x32xi8>
+}
+
+// -----
+
+// Fold fixpipe(nz2nd) storing into an L1 ND buffer followed by
+// to_tensor + convert_layout(ND->Fractal): the fixpipe re-tiles inline with
+// nz2nz + channel_split (src fractal 16x16 -> dst fractal 16x8) and the
+// buffer is re-shaped to the fractal layout.
+// CHECK-LABEL: func.func @fold_fixpipe_store_convert_layout_channel_split
+// CHECK-SAME: %[[SRC:.*]]: tensor<4x4x16x16xf32>
+// CHECK-NOT: hivm.hir.convert_layout
+// CHECK: %[[ALLOC:.*]] = memref.alloc() : memref<8x4x16x8xf32, #hivm.address_space<cbuf>>
+// CHECK: %[[TENSOR:.*]] = bufferization.to_tensor %[[ALLOC]] restrict writable : memref{{.*}}
+// CHECK: hivm.hir.fixpipe {channel_split = true, "hivm.inserted-fixpipe"} ins(%[[SRC]] : tensor<4x4x16x16xf32>) outs(%[[ALLOC]] : memref{{.*}})
+// CHECK: return %[[TENSOR]] : tensor<8x4x16x8xf32>
+module attributes {hacc.target = #hacc.target<"Ascend910_9589">} {
+  func.func @fold_fixpipe_store_convert_layout_channel_split(%src: tensor<4x4x16x16xf32>) -> tensor<8x4x16x8xf32> {
+    %alloc = memref.alloc() : memref<64x64xf32, #hivm.address_space<cbuf>>
+    %cast = memref.memory_space_cast %alloc : memref<64x64xf32, #hivm.address_space<cbuf>> to memref<64x64xf32>
+    %nd = bufferization.to_tensor %cast restrict writable : memref<64x64xf32>
+    %fractal = hivm.hir.convert_layout %nd output_shape [8, 4, 16, 8] {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 8]>, srcLayout = #hivm.data_layout<ND>} : (tensor<64x64xf32>) -> tensor<8x4x16x8xf32>
+    hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>, "hivm.inserted-fixpipe"} ins(%src : tensor<4x4x16x16xf32>) outs(%cast : memref<64x64xf32>)
+    return %fractal : tensor<8x4x16x8xf32>
+  }
+}
+
+// -----
+// Same fold without a memory_space_cast and with matching fractal sizes:
+// plain nz2nz, no channel_split.
+// CHECK-LABEL: func.func @fold_fixpipe_store_convert_layout_same_fractal
+// CHECK-SAME: %[[SRC:.*]]: tensor<4x4x16x16xf32>
+// CHECK-NOT: hivm.hir.convert_layout
+// CHECK: %[[ALLOC:.*]] = memref.alloc() : memref<4x4x16x16xf32>
+// CHECK: %[[TENSOR:.*]] = bufferization.to_tensor %[[ALLOC]] restrict writable : memref<4x4x16x16xf32>
+// CHECK: hivm.hir.fixpipe ins(%[[SRC]] : tensor<4x4x16x16xf32>) outs(%[[ALLOC]] : memref<4x4x16x16xf32>)
+// CHECK: return %[[TENSOR]] : tensor<4x4x16x16xf32>
+func.func @fold_fixpipe_store_convert_layout_same_fractal(%src: tensor<4x4x16x16xf32>) -> tensor<4x4x16x16xf32> {
+  %alloc = memref.alloc() : memref<64x64xf32>
+  %nd = bufferization.to_tensor %alloc restrict writable : memref<64x64xf32>
+  %fractal = hivm.hir.convert_layout %nd output_shape [4, 4, 16, 16] {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>, srcLayout = #hivm.data_layout<ND>} : (tensor<64x64xf32>) -> tensor<4x4x16x16xf32>
+  hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>} ins(%src : tensor<4x4x16x16xf32>) outs(%alloc : memref<64x64xf32>)
+  return %fractal : tensor<4x4x16x16xf32>
+}
+
+// -----
+// No fold when the stored buffer is written by more than one fixpipe.
+// CHECK-LABEL: func.func @no_fold_fixpipe_store_multi_writer
+// CHECK: hivm.hir.convert_layout
+// CHECK: hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>
+// CHECK: hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>
+func.func @no_fold_fixpipe_store_multi_writer(%src: tensor<4x4x16x16xf32>) -> tensor<8x4x16x8xf32> {
+  %alloc = memref.alloc() : memref<64x64xf32>
+  %nd = bufferization.to_tensor %alloc restrict writable : memref<64x64xf32>
+  %fractal = hivm.hir.convert_layout %nd output_shape [8, 4, 16, 8] {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 8]>, srcLayout = #hivm.data_layout<ND>} : (tensor<64x64xf32>) -> tensor<8x4x16x8xf32>
+  hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>} ins(%src : tensor<4x4x16x16xf32>) outs(%alloc : memref<64x64xf32>)
+  hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>} ins(%src : tensor<4x4x16x16xf32>) outs(%alloc : memref<64x64xf32>)
+  return %fractal : tensor<8x4x16x8xf32>
+}
+
+// -----
+// No fold when the fixpipe storing the buffer is not in nz2nd mode.
+// CHECK-LABEL: func.func @no_fold_fixpipe_store_not_nz2nd
+// CHECK: hivm.hir.convert_layout
+// CHECK: hivm.hir.fixpipe ins
+func.func @no_fold_fixpipe_store_not_nz2nd(%src: tensor<4x4x16x16xf32>) -> tensor<8x4x16x8xf32> {
+  %alloc = memref.alloc() : memref<64x64xf32>
+  %nd = bufferization.to_tensor %alloc restrict writable : memref<64x64xf32>
+  %fractal = hivm.hir.convert_layout %nd output_shape [8, 4, 16, 8] {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 8]>, srcLayout = #hivm.data_layout<ND>} : (tensor<64x64xf32>) -> tensor<8x4x16x8xf32>
+  hivm.hir.fixpipe ins(%src : tensor<4x4x16x16xf32>) outs(%alloc : memref<64x64xf32>)
+  return %fractal : tensor<8x4x16x8xf32>
+}
+
+// -----
+// No fold when the ND tensor has users other than the convert_layout.
+// CHECK-LABEL: func.func @no_fold_fixpipe_store_tensor_multi_use
+// CHECK: hivm.hir.convert_layout
+// CHECK: hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>
+func.func @no_fold_fixpipe_store_tensor_multi_use(%src: tensor<4x4x16x16xf32>) -> (tensor<8x4x16x8xf32>, tensor<64x64xf32>) {
+  %alloc = memref.alloc() : memref<64x64xf32>
+  %nd = bufferization.to_tensor %alloc restrict writable : memref<64x64xf32>
+  %fractal = hivm.hir.convert_layout %nd output_shape [8, 4, 16, 8] {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 8]>, srcLayout = #hivm.data_layout<ND>} : (tensor<64x64xf32>) -> tensor<8x4x16x8xf32>
+  hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>} ins(%src : tensor<4x4x16x16xf32>) outs(%alloc : memref<64x64xf32>)
+  return %fractal, %nd : tensor<8x4x16x8xf32>, tensor<64x64xf32>
+}
+
+// -----
+
+// Fold Fractal->ND convert_layout into an NZ2NZ fixpipe on reg-based A5.
+// f32 dest enables channel_split on the folded fixpipe.
+// CHECK-LABEL: func.func @fold_convert_fixpipe_channel_split_regbase
+// CHECK-SAME: %[[DST:.*]]: memref<16x16xf32
+// CHECK-NOT: hivm.hir.convert_layout
+// CHECK: hivm.hir.fixpipe {channel_split = true} ins(%{{.*}} : tensor<2x1x16x8xf32>) outs(%[[DST]] : memref<16x16xf32
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  func.func @fold_convert_fixpipe_channel_split_regbase(%dst: memref<16x16xf32, strided<[16, 1], offset: ?>>) {
+    %fractal = arith.constant dense<0.0> : tensor<2x1x16x8xf32>
+    %nd = hivm.hir.convert_layout %fractal output_shape [16, 16]
+        {dstLayout = #hivm.data_layout<ND>,
+         srcLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 8]>}
+        : (tensor<2x1x16x8xf32>) -> tensor<16x16xf32>
+    hivm.hir.fixpipe ins(%nd : tensor<16x16xf32>) outs(%dst : memref<16x16xf32, strided<[16, 1], offset: ?>>)
+    return
+  }
+}
+
+// -----
+
+// Same fold on reg-based A5 with f16 dest: no channel_split.
+// CHECK-LABEL: func.func @fold_convert_fixpipe_no_channel_split_f16_regbase
+// CHECK-SAME: %[[DST:.*]]: memref<16x16xf16
+// CHECK-NOT: hivm.hir.convert_layout
+// CHECK-NOT: channel_split = true
+// CHECK: hivm.hir.fixpipe {{.*pre_quant = #hivm.fixpipe_pre_quant_mode<F322F16>.*}} ins(%{{.*}} : tensor<1x1x16x16xf32>) outs(%[[DST]] : memref<16x16xf16
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  func.func @fold_convert_fixpipe_no_channel_split_f16_regbase(%dst: memref<16x16xf16, strided<[16, 1], offset: ?>>) {
+    %fractal = arith.constant dense<0.0> : tensor<1x1x16x16xf32>
+    %nd = hivm.hir.convert_layout %fractal output_shape [16, 16]
+        {dstLayout = #hivm.data_layout<ND>,
+         srcLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>}
+        : (tensor<1x1x16x16xf32>) -> tensor<16x16xf32>
+    hivm.hir.fixpipe {pre_quant = #hivm.fixpipe_pre_quant_mode<F322F16>} ins(%nd : tensor<16x16xf32>) outs(%dst : memref<16x16xf16, strided<[16, 1], offset: ?>>)
+    return
+  }
+}
+
+// -----
+
+// Same fold with a [16,16]-packed fractal source: the inline channel
+// re-tiling must not be requested - the packed view has to be copied
+// verbatim (channel_split on a packed source delivers the channels
+// interleaved). Target-independent: 9579 keeps the re-tiling for the
+// narrow ([16,8]) source case above.
+// CHECK-LABEL: func.func @fold_convert_fixpipe_packed_fractal_no_channel_split
+// CHECK-SAME: %[[DST:.*]]: memref<16x16xf32
+// CHECK-NOT: hivm.hir.convert_layout
+// CHECK-NOT: channel_split = true
+// CHECK: hivm.hir.fixpipe ins(%{{.*}} : tensor<2x1x16x16xf32>) outs(%[[DST]] : memref<16x16xf32
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  func.func @fold_convert_fixpipe_packed_fractal_no_channel_split(%dst: memref<16x16xf32, strided<[16, 1], offset: ?>>) {
+    %fractal = arith.constant dense<0.0> : tensor<2x1x16x16xf32>
+    %nd = hivm.hir.convert_layout %fractal output_shape [16, 16]
+        {dstLayout = #hivm.data_layout<ND>,
+         srcLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>}
+        : (tensor<2x1x16x16xf32>) -> tensor<16x16xf32>
+    hivm.hir.fixpipe ins(%nd : tensor<16x16xf32>) outs(%dst : memref<16x16xf32, strided<[16, 1], offset: ?>>)
+    return
+  }
+}
+
+// -----
+
+// Reduced from chunk_kda_bwd_kernel_wy_dqkg_fused: fractal mmad ->
+// convert_layout{Fractal->ND f32} -> fixpipe F322F16 into fractal f16 that
+// feeds the next mmad. Channel-split must follow the fixpipe dest type (f16),
+// not the convert_layout result (f32).
+// CHECK-LABEL: func.func @fold_convert_fixpipe_f322f16_fractal_no_channel_split
+// CHECK-NOT: hivm.hir.convert_layout
+// CHECK: %[[MMAD0:.*]] = hivm.hir.mmadL1
+// CHECK: %[[FP:.*]] = hivm.hir.fixpipe
+// CHECK-NOT: channel_split = true
+// CHECK: ins(%[[MMAD0]] : tensor<4x4x16x16xf32>) outs(%{{.*}} : tensor<4x4x16x16xf16>) -> tensor<4x4x16x16xf16>
+// CHECK: hivm.hir.mmadL1 {{.*}}ins(%{{.*}}, %[[FP]]
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  func.func @fold_convert_fixpipe_f322f16_fractal_no_channel_split(
+      %a: tensor<4x4x16x16xf16>,
+      %b: tensor<4x4x16x16xf16>) -> tensor<4x4x16x16xf32> {
+    %true = arith.constant true
+    %c64 = arith.constant 64 : index
+    %empty0 = tensor.empty() : tensor<4x4x16x16xf32>
+    %mmad0 = hivm.hir.mmadL1 {already_set_real_mkn, b_transpose, fixpipe_for_result_already_inserted = true, normalized_in_L0C}
+        ins(%a, %b, %true, %c64, %c64, %c64 : tensor<4x4x16x16xf16>, tensor<4x4x16x16xf16>, i1, index, index, index)
+        outs(%empty0 : tensor<4x4x16x16xf32>) -> tensor<4x4x16x16xf32>
+    %nd = hivm.hir.convert_layout %mmad0 output_shape [64, 64]
+        {dstLayout = #hivm.data_layout<ND>,
+         srcLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>}
+        : (tensor<4x4x16x16xf32>) -> tensor<64x64xf32>
+    %fp_dst = tensor.empty() : tensor<4x4x16x16xf16>
+    %fp = hivm.hir.fixpipe {pre_quant = #hivm.fixpipe_pre_quant_mode<F322F16>}
+        ins(%nd : tensor<64x64xf32>) outs(%fp_dst : tensor<4x4x16x16xf16>)
+        -> tensor<4x4x16x16xf16>
+    %empty1 = tensor.empty() : tensor<4x4x16x16xf32>
+    %mmad1 = hivm.hir.mmadL1 {a_transpose, already_set_real_mkn, fixpipe_for_result_already_inserted = true, normalized_in_L0C}
+        ins(%a, %fp, %true, %c64, %c64, %c64 : tensor<4x4x16x16xf16>, tensor<4x4x16x16xf16>, i1, index, index, index)
+        outs(%empty1 : tensor<4x4x16x16xf32>) -> tensor<4x4x16x16xf32>
+    return %mmad1 : tensor<4x4x16x16xf32>
+  }
+}
+
+// -----
+
+// Intra-tile insert: nd2nz writes a memref alloc, then insert that into dest.
+// Dest stays a tensor until optimize-dps-op-with-yielded-insert-slice retargets
+// the alloc to dest's subview.
+// CHECK-LABEL: func.func @fold_subview_load_convert_into_insert
+// CHECK-NOT: hivm.hir.convert_layout
+// CHECK: %[[ALLOC:.*]] = memref.alloc() : memref<12x1x8x16xbf16>
+// CHECK: %[[SV:.*]] = memref.subview %[[ALLOC]][0, 0, 0, 0] [12, %{{.*}}, 8, 16] [1, 1, 1, 1] : memref<12x1x8x16xbf16> to memref<12x?x8x16xbf16, strided<[128, 128, 16, 1]>>
+// CHECK: hivm.hir.nd2nz {dst_continuous} ins(%{{.*}} : memref<?x192xbf16, strided<[?, 1], offset: ?>>) outs(%[[SV]] : memref<12x?x8x16xbf16, strided<[128, 128, 16, 1]>>)
+// CHECK: %[[T:.*]] = bufferization.to_tensor %[[ALLOC]]
+// CHECK: tensor.insert_slice %[[T]] into %{{.*}}[0, %{{.*}}, %{{.*}}, 0] [12, 1, 8, 16]
+func.func @fold_subview_load_convert_into_insert(
+    %gm: memref<8x192xbf16, strided<[?, 1], offset: ?>>,
+    %dest: tensor<12x2x16x16xbf16>, %m1: index, %a0: index,
+    %rows: index, %cond: i1) -> tensor<12x2x16x16xbf16> {
+  %c0 = arith.constant 0 : index
+  %cst = arith.constant 0.000000e+00 : bf16
+  %alloc = memref.alloc() : memref<8x192xbf16>
+  %sub_in = memref.subview %gm[0, 0] [%rows, 192] [1, 1]
+      : memref<8x192xbf16, strided<[?, 1], offset: ?>> to memref<?x192xbf16, strided<[?, 1], offset: ?>>
+  %sub_out = memref.subview %alloc[0, 0] [%rows, 192] [1, 1]
+      : memref<8x192xbf16> to memref<?x192xbf16, strided<[192, 1]>>
+  hivm.hir.load ins(%sub_in : memref<?x192xbf16, strided<[?, 1], offset: ?>>)
+      outs(%sub_out : memref<?x192xbf16, strided<[192, 1]>>)
+      pad_mode = <PadValue> pad_value = %cst : bf16 left_padding_num = %c0 : index
+      init_out_buffer = true init_condition = %cond : i1
+  %nd = bufferization.to_tensor %alloc restrict writable : memref<8x192xbf16>
+  %conv = hivm.hir.convert_layout %nd output_shape [12, 1, 8, 16]
+      {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>,
+       srcLayout = #hivm.data_layout<ND>}
+      : (tensor<8x192xbf16>) -> tensor<12x1x8x16xbf16>
+  %ins = tensor.insert_slice %conv into %dest[0, %m1, %a0, 0] [12, 1, 8, 16] [1, 1, 1, 1]
+      : tensor<12x1x8x16xbf16> into tensor<12x2x16x16xbf16>
+  return %ins : tensor<12x2x16x16xbf16>
+}
+
+// -----
+
+// Uninit L1 ND→Fractal convert folds to a cbuf empty.
+// CHECK-LABEL: func.func @fold_uninit_l1_convert_to_empty
+// CHECK: %[[EMPTY:.*]] = tensor.empty() {hivm.address_space = #hivm.address_space<cbuf>} : tensor<12x8x16x16xbf16>
+// CHECK: return %[[EMPTY]] : tensor<12x8x16x16xbf16>
+func.func @fold_uninit_l1_convert_to_empty() -> tensor<12x8x16x16xbf16> {
+  %alloc = memref.alloc() : memref<128x192xbf16, #hivm.address_space<cbuf>>
+  %cast = memref.memory_space_cast %alloc : memref<128x192xbf16, #hivm.address_space<cbuf>> to memref<128x192xbf16>
+  %nd = bufferization.to_tensor %cast restrict writable : memref<128x192xbf16>
+  %conv = hivm.hir.convert_layout %nd output_shape [12, 8, 16, 16]
+      {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>,
+       srcLayout = #hivm.data_layout<ND>}
+      : (tensor<128x192xbf16>) -> tensor<12x8x16x16xbf16>
+  return %conv : tensor<12x8x16x16xbf16>
+}
+
+// -----
+
+// UB source: keep `convert_layout`.
+// CHECK-LABEL: func.func @do_not_fold_uninit_ub_convert
+// CHECK: hivm.hir.convert_layout
+func.func @do_not_fold_uninit_ub_convert() -> tensor<12x8x16x16xbf16> {
+  %alloc = memref.alloc() : memref<128x192xbf16, #hivm.address_space<ub>>
+  %cast = memref.memory_space_cast %alloc : memref<128x192xbf16, #hivm.address_space<ub>> to memref<128x192xbf16>
+  %nd = bufferization.to_tensor %cast restrict writable : memref<128x192xbf16>
+  %conv = hivm.hir.convert_layout %nd output_shape [12, 8, 16, 16]
+      {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 16]>,
+       srcLayout = #hivm.data_layout<ND>}
+      : (tensor<128x192xbf16>) -> tensor<12x8x16x16xbf16>
+  return %conv : tensor<12x8x16x16xbf16>
+}
+
+// -----
+
+// Two inserted L1 stagings of the same tensor collapse into one.
+// CHECK-LABEL: func.func @parallel_path_fwd_kernel
+// CHECK: %[[ALLOC:.*]] = memref.alloc() : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+// CHECK: %[[VIEW:.*]] = bufferization.to_tensor %[[ALLOC]] restrict writable
+// CHECK: hivm.hir.copy ins(%{{.*}}) outs(%[[ALLOC]]
+// CHECK-NOT: memref.alloc
+// CHECK-NOT: hivm.hir.copy
+// CHECK: return %[[VIEW]], %[[VIEW]]
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  func.func @parallel_path_fwd_kernel(%src: tensor<8x4x16x16xf16>)
+      -> (tensor<8x4x16x16xf16>, tensor<8x4x16x16xf16>) {
+    %a = memref.alloc() : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+    %va = bufferization.to_tensor %a restrict writable : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+    hivm.hir.copy ins(%src : tensor<8x4x16x16xf16>)
+        outs(%a : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>) {"hivm.inserted-copy"}
+    %b = memref.alloc() : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+    %vb = bufferization.to_tensor %b restrict writable : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+    hivm.hir.copy ins(%src : tensor<8x4x16x16xf16>)
+        outs(%b : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>) {"hivm.inserted-copy"}
+    return %va, %vb : tensor<8x4x16x16xf16>, tensor<8x4x16x16xf16>
+  }
+}
+
+// -----
+
+// Distinct sources: keep both stagings.
+// CHECK-LABEL: func.func @keep_distinct_inserted_l1_staging
+// CHECK-COUNT-2: hivm.hir.copy
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  func.func @keep_distinct_inserted_l1_staging(%src0: tensor<8x4x16x16xf16>,
+      %src1: tensor<8x4x16x16xf16>)
+      -> (tensor<8x4x16x16xf16>, tensor<8x4x16x16xf16>) {
+    %a = memref.alloc() : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+    %va = bufferization.to_tensor %a restrict writable : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+    hivm.hir.copy ins(%src0 : tensor<8x4x16x16xf16>)
+        outs(%a : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>) {"hivm.inserted-copy"}
+    %b = memref.alloc() : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+    %vb = bufferization.to_tensor %b restrict writable : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+    hivm.hir.copy ins(%src1 : tensor<8x4x16x16xf16>)
+        outs(%b : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>) {"hivm.inserted-copy"}
+    return %va, %vb : tensor<8x4x16x16xf16>, tensor<8x4x16x16xf16>
+  }
+}
+
+// -----
+
+// A buffer-backed source can be rewritten in between: keep both stagings.
+// CHECK-LABEL: func.func @keep_buffer_backed_inserted_l1_staging
+// CHECK-COUNT-2: hivm.hir.copy
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  func.func @keep_buffer_backed_inserted_l1_staging(
+      %ub: memref<8x4x16x16xf16, #hivm.address_space<ub>>)
+      -> (tensor<8x4x16x16xf16>, tensor<8x4x16x16xf16>) {
+    %src = bufferization.to_tensor %ub restrict writable : memref<8x4x16x16xf16, #hivm.address_space<ub>>
+    %a = memref.alloc() : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+    %va = bufferization.to_tensor %a restrict writable : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+    hivm.hir.copy ins(%src : tensor<8x4x16x16xf16>)
+        outs(%a : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>) {"hivm.inserted-copy"}
+    %b = memref.alloc() : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+    %vb = bufferization.to_tensor %b restrict writable : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+    hivm.hir.copy ins(%src : tensor<8x4x16x16xf16>)
+        outs(%b : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>) {"hivm.inserted-copy"}
+    return %va, %vb : tensor<8x4x16x16xf16>, tensor<8x4x16x16xf16>
+  }
+}
+
+// -----
+
+// Copies the mix-CV inserter did not create are left alone.
+// CHECK-LABEL: func.func @keep_unmarked_l1_staging
+// CHECK-COUNT-2: hivm.hir.copy
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  func.func @keep_unmarked_l1_staging(%src: tensor<8x4x16x16xf16>)
+      -> (tensor<8x4x16x16xf16>, tensor<8x4x16x16xf16>) {
+    %a = memref.alloc() : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+    %va = bufferization.to_tensor %a restrict writable : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+    hivm.hir.copy ins(%src : tensor<8x4x16x16xf16>)
+        outs(%a : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>)
+    %b = memref.alloc() : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+    %vb = bufferization.to_tensor %b restrict writable : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+    hivm.hir.copy ins(%src : tensor<8x4x16x16xf16>)
+        outs(%b : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>)
+    return %va, %vb : tensor<8x4x16x16xf16>, tensor<8x4x16x16xf16>
+  }
+}
+
+// -----
+
+// src and dst may be the same SSA value; both operands must be updated.
+// CHECK-LABEL: func.func @fold_same_src_dst_fixpipe
+// CHECK: %[[OUT:.*]] = tensor.empty() : tensor<2x1x16x8xf32>
+// CHECK: hivm.hir.fixpipe ins(%arg0 : tensor<16x16xf32>) outs(%[[OUT]] : tensor<2x1x16x8xf32>)
+func.func @fold_same_src_dst_fixpipe(%src: tensor<16x16xf32>) -> tensor<2x1x16x8xf32> {
+  %fix = hivm.hir.fixpipe
+    ins(%src : tensor<16x16xf32>) outs(%src : tensor<16x16xf32>)
+    -> tensor<16x16xf32>
+  %fr = hivm.hir.convert_layout %fix output_shape [2, 1, 16, 8]
+    {dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 8]>,
+     srcLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 8]>}
+    : (tensor<16x16xf32>) -> tensor<2x1x16x8xf32>
+  return %fr : tensor<2x1x16x8xf32>
+}

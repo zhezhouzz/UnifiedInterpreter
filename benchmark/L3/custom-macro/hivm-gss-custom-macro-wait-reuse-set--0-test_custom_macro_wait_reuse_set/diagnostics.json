@@ -1,0 +1,8 @@
+[
+  {
+    "function": "test_custom_macro_wait_reuse_set",
+    "location": "loc(\"<stdin>\":12:5)",
+    "op": "hivm.hir.custom_macro",
+    "reason": "missing Core interpretation"
+  }
+]

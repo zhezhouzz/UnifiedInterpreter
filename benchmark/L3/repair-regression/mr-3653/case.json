@@ -1,0 +1,21 @@
+{
+  "id": "repair-regression/mr-3653",
+  "tier": "L3",
+  "category": "repair-regression",
+  "source_ref": "https://gitcode.com/Ascend/AscendNPU-IR/blob/15274471e01c6c8b742250cbedfdd0197cfc1611/bishengir/test/Dialect/HIVM/propagate-convert-layout.mlir",
+  "chip_profile": null,
+  "core_ratio": null,
+  "compile_argv": [
+    "bishengir-opt",
+    "--hivm-propagate-convert-layout=allow-agnostic-ops=true enable-elementwise-propagate=true",
+    "--canonicalize"
+  ],
+  "entry_functions": [
+    "propagate_up_from_for_result"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "split_index": 0,
+  "upstream_path": "bishengir/test/Dialect/HIVM/propagate-convert-layout.mlir"
+}

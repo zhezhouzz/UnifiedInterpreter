@@ -1,0 +1,8 @@
+{
+  "title": "[MemRef] FoldRedundantCopy 在 copy 目标为共享 allocation 的 subview 时丢弃中间更新",
+  "iid": 981,
+  "updated_at": "2026-11-18T11:47:28.288+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/981",
+  "linked_mrs": []
+}

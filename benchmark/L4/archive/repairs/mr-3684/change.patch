@@ -1,0 +1,303 @@
+diff --git a/bishengir/include/bishengir/Dialect/HIVM/Transforms/TightlyCoupledBufferUtils.h b/bishengir/include/bishengir/Dialect/HIVM/Transforms/TightlyCoupledBufferUtils.h
+index ca424e909..51fe6ecd1 100644
+--- a/bishengir/include/bishengir/Dialect/HIVM/Transforms/TightlyCoupledBufferUtils.h
++++ b/bishengir/include/bishengir/Dialect/HIVM/Transforms/TightlyCoupledBufferUtils.h
+@@ -15,7 +15,8 @@
+ //
+ //===----------------------------------------------------------------------===//
+ //
+-// Shared helpers for MarkTightlyCoupledBuffer / HoistTightlyCoupledAlloc.
++// Shared helpers for MarkTightlyCoupledBuffer / HoistTightlyCoupledAlloc /
++// SplitMixKernel tightly-coupled buffer handling.
+ //
+ //===----------------------------------------------------------------------===//
+ 
+@@ -59,6 +60,9 @@ Value getTightlyCoupledViewSource(Operation *op);
+ /// True when `v` is derived from `root` only through forwarding/view ops.
+ bool tracesToTightlyCoupledValue(Value v, Value root);
+ 
++/// True when `v` is a tightly coupled buffer, or a view/to_tensor of one.
++bool isTightlyCoupledValue(Value v);
++
+ } // namespace hivm
+ } // namespace mlir
+ 
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/CreatePreload.cpp b/bishengir/lib/Dialect/HIVM/Transforms/CreatePreload.cpp
+index 3002e0c67..81dbe93c0 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/CreatePreload.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/CreatePreload.cpp
+@@ -587,6 +587,10 @@ static void rewritePreloadLoop(scf::ForOp forOp,
+   // loop. The original loop still has one result per iteration argument, so
+   // walk the original arguments rather than the new results and supply a
+   // replacement for the dropped ones too.
++  //
++  // When a kept yield is itself a preload-local buffer, clone that buffer after
++  // the loop instead of rewiring users to the in-loop definition (which would
++  // not dominate post-loop uses once the unused yield is DCE'd).
+   SmallVector<Value> newRes;
+   newRes.reserve(forOp.getNumResults());
+   auto newResIt = newForOp->result_begin();
+@@ -599,7 +603,11 @@ static void rewritePreloadLoop(scf::ForOp forOp,
+     }
+     if (auto maybeLocalBuffer = getLocalBuffer(*newYieldIt);
+         maybeLocalBuffer.has_value()) {
+-      newRes.push_back(maybeLocalBuffer.value());
++      IRRewriter::InsertionGuard guard(rewriter);
++      rewriter.setInsertionPointAfter(newForOp);
++      hivm::PointerCastOp src = *maybeLocalBuffer;
++      newRes.push_back(rewriter.create<hivm::PointerCastOp>(
++          src.getLoc(), src.getType(), src.getAddrs()));
+     } else {
+       newRes.push_back(*newResIt);
+     }
+@@ -681,10 +689,10 @@ void CreatePreloadPass::runOnOperation() {
+     if (!parentForOp)
+       return;
+     auto parentFunc = parentForOp->getParentOfType<func::FuncOp>();
+-    bool allow = parentFunc && allowLoopShapeHeuristics(
+-                                   this->bypassShapeRegistry, parentFunc.getName(),
+-                                   this->enablePreload,
+-                                   this->workspaceMultiBufferNum);
++    bool allow =
++        parentFunc && allowLoopShapeHeuristics(
++                          this->bypassShapeRegistry, parentFunc.getName(),
++                          this->enablePreload, this->workspaceMultiBufferNum);
+     if (auto maxPreloadNumAttr = scopeOp->getAttrOfType<IntegerAttr>(
+             hivm::MaxPreloadNumAttr::name)) {
+       if (allow) {
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/SplitMixKernel.cpp b/bishengir/lib/Dialect/HIVM/Transforms/SplitMixKernel.cpp
+index ec23cd94b..1d6a4c65d 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/SplitMixKernel.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/SplitMixKernel.cpp
+@@ -21,6 +21,7 @@
+ #include "bishengir/Dialect/HIVM/IR/HIVMInterfaces.h"
+ #include "bishengir/Dialect/HIVM/Transforms/DistributedTransformUtils.h"
+ #include "bishengir/Dialect/HIVM/Transforms/Passes.h"
++#include "bishengir/Dialect/HIVM/Transforms/TightlyCoupledBufferUtils.h"
+ #include "bishengir/Dialect/HIVM/Utils/RegbaseUtils.h"
+ #include "bishengir/Dialect/HIVM/Utils/Utils.h"
+ #include "bishengir/Dialect/Scope/IR/Scope.h"
+@@ -222,6 +223,20 @@ static bool shouldKeepScalarResult(bool opIsPreserved, Value result) {
+   return opIsPreserved && !isa<ShapedType>(result.getType());
+ }
+ 
++/// Tightly coupled buffers are shared across cube and vector. A preserved cube
++/// preload scope still returns that buffer on AIV; replacing the result with
++/// tensor.empty leaves vector ops reading an uninitialized stub.
++static bool shouldKeepScopeResult(bool opIsPreserved, scope::ScopeOp scopeOp,
++                                  unsigned index) {
++  Value result = scopeOp.getResult(index);
++  if (shouldKeepScalarResult(opIsPreserved, result))
++    return true;
++  if (!opIsPreserved)
++    return false;
++  Value yielded = scopeOp.getBody()->getTerminator()->getOperand(index);
++  return isTightlyCoupledValue(yielded);
++}
++
+ static SmallVector<Value> getOutOperands(Operation *op, bool opIsPreserved) {
+   if (op->getResults().empty()) {
+     return {};
+@@ -351,11 +366,14 @@ static SmallVector<Value> getOutOperands(Operation *op, bool opIsPreserved) {
+   // For scope ops: derive replacement values from the terminator's operands.
+   // Values defined outside the scope are used directly; values defined inside
+   // are replaced with zero/empty stubs created immediately before the scope op.
++  // Preserved scopes keep scalar results and tightly coupled buffer results so
++  // AIV still consumes the cube-produced TCB instead of an empty stub.
+   if (auto scopeOp = dyn_cast<scope::ScopeOp>(op)) {
+     Operation *terminator = scopeOp.getBody()->getTerminator();
+     SmallVector<Value> outVals;
+     for (auto [index, result] : llvm::enumerate(scopeOp.getResults())) {
+-      if (result.use_empty() || shouldKeepScalarResult(opIsPreserved, result)) {
++      if (result.use_empty() ||
++          shouldKeepScopeResult(opIsPreserved, scopeOp, index)) {
+         // Sentinel: no replacement needed.
+         outVals.push_back(Value());
+         continue;
+@@ -436,8 +454,15 @@ LogicalResult replaceResultWithInitOperand(Operation *op,
+     OpResult res = op->getResult(i);
+     if (!outOperands[i]) {
+       // Null sentinel is only valid when the result needs no replacement.
+-      if (!res.use_empty() && !shouldKeepScalarResult(opIsPreserved, res))
+-        return failure();
++      if (!res.use_empty()) {
++        bool keep;
++        if (auto scopeOp = dyn_cast<scope::ScopeOp>(op))
++          keep = shouldKeepScopeResult(opIsPreserved, scopeOp, i);
++        else
++          keep = shouldKeepScalarResult(opIsPreserved, res);
++        if (!keep)
++          return failure();
++      }
+       continue;
+     }
+     res.replaceAllUsesWith(outOperands[i]);
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/TightlyCoupledBufferUtils.cpp b/bishengir/lib/Dialect/HIVM/Transforms/TightlyCoupledBufferUtils.cpp
+index ec272f711..90fa7f2ba 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/TightlyCoupledBufferUtils.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/TightlyCoupledBufferUtils.cpp
+@@ -119,3 +119,15 @@ bool mlir::hivm::tracesToTightlyCoupledValue(Value v, Value root) {
+   }
+   return false;
+ }
++
++bool mlir::hivm::isTightlyCoupledValue(Value v) {
++  while (v) {
++    if (getTightlyCoupledMark(v).has_value())
++      return true;
++    Operation *def = v.getDefiningOp();
++    if (!def)
++      return false;
++    v = getTightlyCoupledViewSource(def);
++  }
++  return false;
++}
+diff --git a/bishengir/test/Dialect/HIVM/hivm-create-preload-local-buffer-after-loop.mlir b/bishengir/test/Dialect/HIVM/hivm-create-preload-local-buffer-after-loop.mlir
+new file mode 100644
+index 000000000..d247c5e39
+--- /dev/null
++++ b/bishengir/test/Dialect/HIVM/hivm-create-preload-local-buffer-after-loop.mlir
+@@ -0,0 +1,94 @@
++// RUN: bishengir-opt %s -create-preload | FileCheck %s
++
++// A CV loop yields a preload-local UB pointer_cast that is stored after the
++// loop. CreatePreload rematerializes that buffer in the body; post-loop users
++// must see a clone after the loop, not the in-loop definition.
++// CHECK-LABEL: func.func @yield_preload_local_used_after
++// CHECK-DAG: %[[ADDR0:.*]] = arith.constant 16384 : i64
++// CHECK-DAG: %[[ADDR1:.*]] = arith.constant 65536 : i64
++// CHECK: %[[FOR:.*]] = scf.for
++// CHECK: scf.yield %{{.*}} : memref<64x64xf32, {{.*}}ub{{.*}}>
++// CHECK-NEXT: }
++// CHECK: %[[CLONE:.*]] = hivm.hir.pointer_cast(%[[ADDR0]], %[[ADDR1]])
++// CHECK-NEXT: %[[FLAT:.*]] = memref.collapse_shape %[[CLONE]]
++// CHECK: hivm.hir.store ins(%[[FLAT]]
++// CHECK: memref.collapse_shape %[[FOR]]
++func.func @yield_preload_local_used_after(
++    %arg0: memref<?xf32, #hivm.address_space<gm>>,
++    %arg1: memref<?xf32, #hivm.address_space<gm>>,
++    %ub: i32) {
++  %c16384 = arith.constant 16384 : i64
++  %c65536 = arith.constant 65536 : i64
++  %c32768 = arith.constant 32768 : i64
++  %c81920 = arith.constant 81920 : i64
++  %c49152 = arith.constant 49152 : i64
++  %c0_i32 = arith.constant 0 : i32
++  %c1_i32 = arith.constant 1 : i32
++  %init_tcb = hivm.hir.pointer_cast(%c16384, %c65536)
++      : memref<64x64xf32, #hivm.address_space<ub>>
++  %init_out = hivm.hir.pointer_cast(%c49152)
++      : memref<64x64xf32, #hivm.address_space<ub>>
++  %gm_in = memref.reinterpret_cast %arg0 to offset: [0], sizes: [64, 64],
++      strides: [64, 1]
++      : memref<?xf32, #hivm.address_space<gm>>
++      to memref<64x64xf32, strided<[64, 1]>, #hivm.address_space<gm>>
++  %gm_out0 = memref.reinterpret_cast %arg1 to offset: [0], sizes: [64, 64],
++      strides: [64, 1]
++      : memref<?xf32, #hivm.address_space<gm>>
++      to memref<64x64xf32, strided<[64, 1]>, #hivm.address_space<gm>>
++  %0:2 = scf.for %i = %c0_i32 to %ub step %c1_i32
++      iter_args(%acc_tcb = %init_tcb, %acc_out = %init_out)
++      -> (memref<64x64xf32, #hivm.address_space<ub>>,
++          memref<64x64xf32, #hivm.address_space<ub>>) : i32 {
++    %vec = hivm.hir.pointer_cast(%c32768, %c81920)
++        : memref<64x64xf32, #hivm.address_space<ub>>
++    annotation.mark %vec {hivm.multi_buffer = 2 : i32}
++        : memref<64x64xf32, #hivm.address_space<ub>>
++    %tcb = hivm.hir.pointer_cast(%c16384, %c65536)
++        : memref<64x64xf32, #hivm.address_space<ub>>
++    annotation.mark %tcb {hivm.multi_buffer = 2 : i32,
++                          hivm.preload_local_buffer = 1 : i32}
++        : memref<64x64xf32, #hivm.address_space<ub>>
++    scope.scope : () -> () {
++      annotation.mark %tcb {effects = ["write", "read"],
++          hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<0>}
++          : memref<64x64xf32, #hivm.address_space<ub>>
++      scope.return
++    } {hivm.loop_core_type = #hivm.tcore_type<CUBE>,
++       hivm.max_preload_num = 2 : i32, hivm.preload_num = 1 : i32, no_inline}
++    %out = scope.scope : () -> memref<64x64xf32, #hivm.address_space<ub>> {
++      %gm_flat = memref.collapse_shape %gm_in [[0, 1]]
++          : memref<64x64xf32, strided<[64, 1]>, #hivm.address_space<gm>>
++          into memref<4096xf32, strided<[1]>, #hivm.address_space<gm>>
++      %vec_flat = memref.collapse_shape %vec [[0, 1]]
++          : memref<64x64xf32, #hivm.address_space<ub>>
++          into memref<4096xf32, #hivm.address_space<ub>>
++      hivm.hir.load ins(%gm_flat : memref<4096xf32, strided<[1]>,
++                                      #hivm.address_space<gm>>)
++                   outs(%vec_flat : memref<4096xf32, #hivm.address_space<ub>>)
++          eviction_policy = <EvictFirst> core_type = <VECTOR>
++      %produced = hivm.hir.pointer_cast(%c49152)
++          : memref<64x64xf32, #hivm.address_space<ub>>
++      scope.return %produced : memref<64x64xf32, #hivm.address_space<ub>>
++    } {hivm.loop_core_type = #hivm.tcore_type<VECTOR>,
++       hivm.max_preload_num = 2 : i32, hivm.preload_num = 0 : i32, no_inline}
++    scf.yield %tcb, %out : memref<64x64xf32, #hivm.address_space<ub>>,
++                           memref<64x64xf32, #hivm.address_space<ub>>
++  } {hivm.cv_pipelined_loop}
++  %tcb_flat = memref.collapse_shape %0#0 [[0, 1]]
++      : memref<64x64xf32, #hivm.address_space<ub>>
++      into memref<4096xf32, #hivm.address_space<ub>>
++  %gm0_flat = memref.collapse_shape %gm_out0 [[0, 1]]
++      : memref<64x64xf32, strided<[64, 1]>, #hivm.address_space<gm>>
++      into memref<4096xf32, strided<[1]>, #hivm.address_space<gm>>
++  hivm.hir.store ins(%tcb_flat : memref<4096xf32, #hivm.address_space<ub>>)
++                outs(%gm0_flat : memref<4096xf32, strided<[1]>,
++                                     #hivm.address_space<gm>>)
++  %out_flat = memref.collapse_shape %0#1 [[0, 1]]
++      : memref<64x64xf32, #hivm.address_space<ub>>
++      into memref<4096xf32, #hivm.address_space<ub>>
++  hivm.hir.store ins(%out_flat : memref<4096xf32, #hivm.address_space<ub>>)
++                outs(%gm0_flat : memref<4096xf32, strided<[1]>,
++                                     #hivm.address_space<gm>>)
++  return
++}
+diff --git a/bishengir/test/Dialect/HIVM/split-mix-kernel-cases.mlir b/bishengir/test/Dialect/HIVM/split-mix-kernel-cases.mlir
+index b2cca0bb8..d70d0590f 100644
+--- a/bishengir/test/Dialect/HIVM/split-mix-kernel-cases.mlir
++++ b/bishengir/test/Dialect/HIVM/split-mix-kernel-cases.mlir
+@@ -44,3 +44,44 @@ module {
+     return %0#0 : i32
+   }
+ }
++
++// -----
++
++// Preload cube scope returns a tightly coupled UB tensor consumed by vector.
++// AIV must keep the scope result; stubbing with tensor.empty is illegal.
++// CHECK-LABEL: func.func @scope_tcb_result_mix_aic(
++// CHECK: %[[CUBE:.*]] = scope.scope : () -> tensor<64x32xf32>
++// CHECK: tightly_coupled_buffer = {{.*}}tightly_coupled_buffer<0>
++// CHECK: scope.return
++// CHECK-LABEL: func.func @scope_tcb_result_mix_aiv(
++// CHECK: %[[CUBE:.*]] = scope.scope : () -> tensor<64x32xf32>
++// CHECK: tightly_coupled_buffer = {{.*}}tightly_coupled_buffer<0>
++// CHECK: scope.return %[[TCB:.*]] : tensor<64x32xf32>
++// CHECK: hivm.hir.vadd ins(%{{.*}}, %[[CUBE]] : tensor<64x32xf32>, tensor<64x32xf32>)
++// CHECK-NOT: tensor.empty() : tensor<64x32xf32>
++module {
++  func.func @scope_tcb_result(%arg0: tensor<64x32xf32>, %arg1: tensor<64x32xf32>)
++      -> tensor<64x32xf32>
++      attributes {hivm.func_core_type = #hivm.func_core_type<MIX>, mix_mode = "mix"} {
++    %c0 = arith.constant 0 : i32
++    %c1 = arith.constant 1 : i32
++    %cst = arith.constant 0.0 : f32
++    %init = tensor.empty() : tensor<64x32xf32>
++    %0 = scf.for %i = %c0 to %c1 step %c1 iter_args(%acc = %init) -> (tensor<64x32xf32>) : i32 {
++      %cube = scope.scope : () -> tensor<64x32xf32> {
++        %alloc = memref.alloc() : memref<64x32xf32, #hivm.address_space<ub>>
++        annotation.mark %alloc {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<0>} : memref<64x32xf32, #hivm.address_space<ub>>
++        %cast = memref.memory_space_cast %alloc : memref<64x32xf32, #hivm.address_space<ub>> to memref<64x32xf32>
++        %t = bufferization.to_tensor %cast restrict writable : memref<64x32xf32>
++        %mm = hivm.hir.vbrc {hivm.tcore_type = #hivm.tcore_type<CUBE>} ins(%cst : f32) outs(%init : tensor<64x32xf32>) -> tensor<64x32xf32>
++        scope.return %t : tensor<64x32xf32>
++      } {hivm.loop_core_type = #hivm.tcore_type<CUBE>, hivm.max_preload_num = 2 : i32, hivm.preload_num = 1 : i32, no_inline}
++      %vec = scope.scope : () -> tensor<64x32xf32> {
++        %add = hivm.hir.vadd ins(%arg0, %cube : tensor<64x32xf32>, tensor<64x32xf32>) outs(%arg1 : tensor<64x32xf32>) -> tensor<64x32xf32>
++        scope.return %add : tensor<64x32xf32>
++      } {hivm.loop_core_type = #hivm.tcore_type<VECTOR>, hivm.max_preload_num = 2 : i32, hivm.preload_num = 0 : i32, no_inline}
++      scf.yield %vec : tensor<64x32xf32>
++    }
++    return %0 : tensor<64x32xf32>
++  }
++}

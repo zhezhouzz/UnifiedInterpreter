@@ -1,0 +1,14 @@
+[
+  {
+    "function": "test_preload_local_buffer_lifetime_is_per_enclosing_loop",
+    "location": "loc(\"<stdin>\":8:7)",
+    "op": "scope.scope",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_preload_local_buffer_lifetime_is_per_enclosing_loop",
+    "location": "loc(\"<stdin>\":23:7)",
+    "op": "scope.scope",
+    "reason": "missing Core interpretation"
+  }
+]

@@ -1,0 +1,8 @@
+[
+  {
+    "function": "test_custom_macro_multi_slots",
+    "location": "loc(\"<stdin>\":18:5)",
+    "op": "hivm.hir.custom_macro",
+    "reason": "missing Core interpretation"
+  }
+]

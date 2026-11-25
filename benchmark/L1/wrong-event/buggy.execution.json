@@ -1,0 +1,20 @@
+{
+  "verdict": "deadlock",
+  "states_discovered": 25,
+  "witness": [
+    "0:0 arith.constant",
+    "0:1 arith.constant",
+    "0:2 hivm.hir.pointer_cast",
+    "0:3 hivm.hir.pointer_cast",
+    "0:4 issue",
+    "0:5 setflag",
+    "0:6 waitflag",
+    "0:7 issue",
+    "0:8 setflag",
+    "0:9 waitflag",
+    "0:10 issue",
+    "0:4 issue.done[MTE2] ub:0:0=7",
+    "0:5 setflag.done[MTE2]"
+  ],
+  "observation": "blocked PCs (11,), queues ((0, 6, 'V'), (0, 7, 'V'), (0, 8, 'V'), (0, 9, 'MTE3'), (0, 10, 'MTE3')), live tokens [(False, 0, 'MTE2', 'V', 0, 1)]"
+}

@@ -1,0 +1,10 @@
+{
+  "issue": 1017,
+  "mr": "5331",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/5331",
+  "commit": "4895ebe228d8ceeaa5cf89c3a1076664683595d5",
+  "parent": "02fc509a89a4865e6407c5ab9ef917713180cb5d",
+  "title": "[Template][Cube] fix: remove MX dispatch from A6 MmadCal",
+  "tests": [],
+  "diff_scope": "merge-base to pinned MR head"
+}

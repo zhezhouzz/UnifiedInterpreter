@@ -1,0 +1,74 @@
+[
+  {
+    "function": "test_mmadL1",
+    "location": "loc(\"<stdin>\":3:14)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "test_mmadL1",
+    "location": "loc(\"<stdin>\":4:16)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "test_mmadL1",
+    "location": "loc(\"<stdin>\":5:16)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "test_mmadL1",
+    "location": "loc(\"<stdin>\":12:16)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "test_mmadL1",
+    "location": "loc(\"<stdin>\":14:16)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "test_mmadL1",
+    "location": "loc(\"<stdin>\":17:16)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "test_mmadL1",
+    "location": "loc(\"<stdin>\":18:16)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "test_mmadL1",
+    "location": "loc(\"<stdin>\":20:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_mmadL1",
+    "location": "loc(\"<stdin>\":21:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_mmadL1",
+    "location": "loc(\"<stdin>\":22:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_mmadL1",
+    "location": "loc(\"<stdin>\":23:10)",
+    "op": "hivm.hir.mmadL1",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_mmadL1",
+    "location": "loc(\"<stdin>\":26:5)",
+    "op": "some_use",
+    "reason": "missing Core interpretation"
+  }
+]

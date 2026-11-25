@@ -1,0 +1,11 @@
+{
+  "verdict": "race",
+  "states_discovered": 23,
+  "witness": [
+    "1:0 arith.constant",
+    "1:1 hivm.hir.pointer_cast",
+    "1:2 issue",
+    "1:2 issue.done[MTE2] read gm:0=2"
+  ],
+  "observation": "1:2 issue.done[MTE2] read gm:0=2"
+}

@@ -1,0 +1,12 @@
+{
+  "issue": 1046,
+  "mr": "5251",
+  "commit": "d04e61b57b7258f0bd97c9f2b7ef035c658dcde3",
+  "parent": "0d2b4c3474e404bf4bacb3d4f2bb1ca75737c5be",
+  "title": "[HIVM] feat: simplify L1-to-L0 copy",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/5251",
+  "tests": [
+    "bishengir/test/Dialect/HIVM/l12l0-layout.mlir",
+    "bishengir/unittests/Dialect/Utils/L12L0BuilderTest.cpp"
+  ]
+}

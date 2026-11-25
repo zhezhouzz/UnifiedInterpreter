@@ -1,0 +1,23 @@
+{
+  "id": "regbase-memory/plan-memory-vf--18-vf_inplace_reuse_reachable_through_load",
+  "tier": "L3",
+  "category": "regbase-memory",
+  "source_ref": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/RegBase/plan-memory-vf.mlir",
+  "chip_profile": null,
+  "core_ratio": null,
+  "compile_argv": [
+    "bishengir-opt",
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "entry_functions": [
+    "vf_inplace_reuse_reachable_through_load",
+    "plan_memory_vf_no_inplace_reuse_with_reshape_user"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "split_index": 18,
+  "upstream_path": "bishengir/test/Dialect/HIVM/RegBase/plan-memory-vf.mlir"
+}

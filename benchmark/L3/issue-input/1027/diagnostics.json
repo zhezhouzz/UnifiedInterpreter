@@ -1,0 +1,110 @@
+[
+  {
+    "function": "single_fixpipe_after_scf_if",
+    "location": "loc(\"<stdin>\":7:10)",
+    "op": "bufferization.to_tensor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "single_fixpipe_after_scf_if",
+    "location": "loc(\"<stdin>\":8:10)",
+    "op": "bufferization.to_tensor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "single_fixpipe_after_scf_if",
+    "location": "loc(\"<stdin>\":11:10)",
+    "op": "scf.if",
+    "reason": "loop-carried values or yielded joins need bindings"
+  },
+  {
+    "function": "single_fixpipe_after_scf_if",
+    "location": "loc(\"<stdin>\":25:5)",
+    "op": "hivm.hir.store",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "single_fixpipe_after_scf_if",
+    "location": "loc(\"<stdin>\":26:5)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "bound_accumulator_with_branch_users",
+    "location": "loc(\"<stdin>\":36:12)",
+    "op": "scf.if",
+    "reason": "loop-carried values or yielded joins need bindings"
+  },
+  {
+    "function": "bound_accumulator_with_branch_users",
+    "location": "loc(\"<stdin>\":51:5)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "bound_accumulator_with_branch_users",
+    "location": "loc(\"<stdin>\":53:5)",
+    "op": "hivm.hir.store",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "bound_accumulator_with_branch_users",
+    "location": "loc(\"<stdin>\":56:10)",
+    "op": "hivm.hir.mmadL1",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "bound_if_initializes_loop",
+    "location": "loc(\"<stdin>\":70:5)",
+    "op": "scope.scope",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "resident_if_with_branch_stores",
+    "location": "loc(\"<stdin>\":96:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "resident_if_with_branch_stores",
+    "location": "loc(\"<stdin>\":99:12)",
+    "op": "scf.if",
+    "reason": "loop-carried values or yielded joins need bindings"
+  },
+  {
+    "function": "resident_if_with_branch_stores",
+    "location": "loc(\"<stdin>\":115:5)",
+    "op": "hivm.hir.store",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "bound_if_with_c_only_users",
+    "location": "loc(\"<stdin>\":125:10)",
+    "op": "scf.if",
+    "reason": "loop-carried values or yielded joins need bindings"
+  },
+  {
+    "function": "bound_if_with_c_only_users",
+    "location": "loc(\"<stdin>\":134:5)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "bound_if_with_c_only_users",
+    "location": "loc(\"<stdin>\":135:12)",
+    "op": "tensor.dim",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "bound_if_with_c_only_users",
+    "location": "loc(\"<stdin>\":136:10)",
+    "op": "hivm.hir.mmadL1",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "bound_if_with_c_only_users",
+    "location": "loc(\"<stdin>\":137:10)",
+    "op": "hivm.hir.mmadL1",
+    "reason": "requires bufferization"
+  }
+]

@@ -1,0 +1,12 @@
+{
+  "issue": null,
+  "mr": "3653",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/3653",
+  "commit": "15274471e01c6c8b742250cbedfdd0197cfc1611",
+  "parent": "bfae68e0f094d099db5abce1590609af3f576892",
+  "title": "[HIVM][ConvertLayout] fix: clone multi-use conversion",
+  "tests": [
+    "bishengir/test/Dialect/HIVM/propagate-convert-layout.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

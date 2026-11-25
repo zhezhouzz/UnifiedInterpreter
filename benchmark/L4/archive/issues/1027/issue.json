@@ -1,0 +1,10 @@
+{
+  "title": "[HIVM] A5 fixpipe insertion breaks L0C-bound conditional matmul results (DTS2026111745590)",
+  "iid": 1027,
+  "updated_at": "2026-11-20T15:58:08.160+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1027",
+  "linked_mrs": [
+    "5305"
+  ]
+}

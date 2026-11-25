@@ -1,0 +1,13 @@
+{
+  "issue": null,
+  "mr": "3684",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/3684",
+  "commit": "711e1724f19832ed8a4a90a30251803d490c90f7",
+  "parent": "cb9552f0f506bb0b3599f4e6e8973e6656d9674b",
+  "title": "[AscendNPU IR]: keep mix-split TCB yields and clone after preload",
+  "tests": [
+    "bishengir/test/Dialect/HIVM/hivm-create-preload-local-buffer-after-loop.mlir",
+    "bishengir/test/Dialect/HIVM/split-mix-kernel-cases.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

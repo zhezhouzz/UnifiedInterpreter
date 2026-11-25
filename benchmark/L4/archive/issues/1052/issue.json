@@ -1,0 +1,8 @@
+{
+  "title": "Can FP32 reduce_sum on Ascend 910B4 match PyTorch eager more closely for row-weight gradients?",
+  "iid": 1052,
+  "updated_at": "2026-11-23T16:21:12.220+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1052",
+  "linked_mrs": []
+}

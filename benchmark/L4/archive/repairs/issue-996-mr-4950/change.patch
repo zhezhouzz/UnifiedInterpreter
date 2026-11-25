@@ -1,0 +1,429 @@
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/AlignBuffer/PropagateAlignUtil.cpp b/bishengir/lib/Dialect/HIVM/Transforms/AlignBuffer/PropagateAlignUtil.cpp
+index b36431e8b..3aa0e9f14 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/AlignBuffer/PropagateAlignUtil.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/AlignBuffer/PropagateAlignUtil.cpp
+@@ -22,6 +22,7 @@
+ #include "bishengir/Dialect/HIVM/Utils/Utils.h"
+ #include "bishengir/Dialect/Scope/IR/Scope.h"
+ #include "bishengir/Dialect/Utils/Util.h"
++#include "bishengir/Target/NPU/NPUArchitectureFeatures.h"
+ #include "mlir/Dialect/Arith/IR/Arith.h"
+ #include "mlir/Dialect/Func/IR/FuncOps.h"
+ #include "mlir/Dialect/MemRef/IR/MemRef.h"
+@@ -204,6 +205,29 @@ LogicalResult propagateAlignInfoByCollapse(
+         getCollapsedDim(alignDims[i], reassociations, propagateFromShapes,
+                         alignDimAttrName, isContiguous);
+     if (!mappedDim.has_value()) {
++      // An internal row boundary may disappear in a flat debug view. Keep
++      // constraints on the source when they already require no padding.
++      if (alignDimAttrName == hivm::StrideAlignDimsAttr::name.str() &&
++          isContiguous && propagateFromTy.hasStaticShape()) {
++        auto target = hacc::utils::getTargetDevice(
++            op->template getParentOfType<ModuleOp>());
++        bool isRegBased =
++            target && *target != hacc::TargetDevice::Unknown &&
++            bishengir::npu::getExecutionModel(hacc::getArchitecture(*target)) ==
++                bishengir::npu::ExecutionModel::kRegBased;
++        auto units = utils::collectAlignUnits<MemRefType>(
++            alignDims, alignBytes, propagateFromTy, isRegBased);
++        if (units.size() == propagateFromShapes.size() + 1) {
++          SmallVector<OpFoldResult> shape;
++          for (int64_t size : propagateFromShapes)
++            shape.push_back(rewriter.getIndexAttr(size));
++          auto [aligned, original] =
++              calculateAlignedShape(rewriter, op.getLoc(), shape, units);
++          if (isEqualConstantIntOrValueArray(aligned, original))
++            return rewriter.notifyMatchFailure(
++                op, "source already satisfies stride alignment");
++        }
++      }
+       return op.emitError() << "cannot align " << alignDims[i] << " axis for "
+                             << propagateFromValue;
+     }
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/InsertPropagation.cpp b/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/InsertPropagation.cpp
+index c51b27497..592d7672b 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/InsertPropagation.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/InsertLoadStoreForMixCV/InsertPropagation.cpp
+@@ -179,6 +179,18 @@ LogicalResult InsertPropagationPattern::insertPropagatorForDMAOp(
+ std::optional<LogicalResult>
+ InsertPropagationPattern::handleSpecialCase(Operation *op,
+                                             PatternRewriter &rewriter) const {
++  // Printing observes the logical tensor in UB, independently of Cube users.
++  if (auto debugOp = dyn_cast<hivm::DebugOp>(op)) {
++    auto coreType = debugOp.getTcoretype();
++    if (debugOp.getDebugtype() != "print" ||
++        !isa<RankedTensorType>(debugOp.getArg().getType()) ||
++        debugOp.getMemscope() ||
++        (coreType && coreType->getTcoretype() != TCoreType::CUBE_OR_VECTOR) ||
++        isPropagatorInserted(op))
++      return failure();
++    return insertPropagatorForVectorOp(op, rewriter);
++  }
++
+   // Handle scalar case
+   if (auto extractOp = dyn_cast<tensor::ExtractOp>(op)) {
+     if (isPropagatorInserted(op)) {
+diff --git a/bishengir/lib/Dialect/Tensor/Transforms/CanonicalizeTensorReshape.cpp b/bishengir/lib/Dialect/Tensor/Transforms/CanonicalizeTensorReshape.cpp
+index eff2ad221..590855783 100644
+--- a/bishengir/lib/Dialect/Tensor/Transforms/CanonicalizeTensorReshape.cpp
++++ b/bishengir/lib/Dialect/Tensor/Transforms/CanonicalizeTensorReshape.cpp
+@@ -19,6 +19,7 @@
+ //
+ //===----------------------------------------------------------------------===//
+ 
++#include "bishengir/Dialect/HFusion/Utils/Utils.h"
+ #include "bishengir/Dialect/Tensor/Transforms/Passes.h"
+ #include "bishengir/Dialect/Utils/Util.h"
+ #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+@@ -249,6 +250,21 @@ getReshapedLoadSourceType(MemRefType srcType, ArrayRef<int64_t> dstShape,
+   return result;
+ }
+ 
++/// Trace shape-only branches whose consumers all require a Cube layout.
++static bool isUsedOnlyForMatmul(Value value) {
++  if (value.use_empty())
++    return false;
++  return llvm::all_of(value.getUsers(), [value](Operation *user) {
++    if (hfusion::isMatmulOps(user))
++      return true;
++    if (isa<tensor::ReshapeOp, tensor::ExpandShapeOp, tensor::CollapseShapeOp,
++            tensor::CastOp>(user) &&
++        user->getOperand(0) == value)
++      return isUsedOnlyForMatmul(user->getResult(0));
++    return false;
++  });
++}
++
+ /// Fold a memref load followed by tensor.reshape or tensor.collapse_shape into
+ /// a load with the final logical shape:
+ ///   src_view -> copy -> alloc -> to_tensor -> reshape/collapse
+@@ -267,9 +283,12 @@ getReshapedLoadSourceType(MemRefType srcType, ArrayRef<int64_t> dstShape,
+ /// checks, retaining a collapse_shape operation's explicit reassociation.
+ ///
+ /// Safety requirements:
+-/// - The tensor has one use; the alloc is used only by its initializing copy
+-///   and to_tensor. memref.copy has no results, so use_empty(copy) cannot prove
+-///   that the destination buffer has no other consumers.
++/// - The tensor has one use, or the folded branch serves only matmul while
++///   another branch needs the original logical layout. Compatible Vector
++///   views retain one shared snapshot rather than duplicating UB buffers.
++///   The alloc is used only by its initializing copy and to_tensor.
++///   memref.copy has no results, so use_empty(copy) cannot prove that the
++///   destination buffer has no other consumers.
+ /// - Alloc, copy, to_tensor, and reshape are ordered in one block. Insert each
+ ///   replacement at its original operation to preserve dominance and ordering
+ ///   relative to intervening memory effects.
+@@ -294,11 +313,11 @@ foldMemrefLoadReshape(Value tensorSrc, RankedTensorType srcType,
+       srcType.getElementType() != dstType.getElementType())
+     return failure();
+ 
+-  // Sole consumer: otherwise erasing/rewriting the load chain would drop or
+-  // corrupt data for other users of to_tensor.
+-  if (!tensorSrc.hasOneUse())
++  if (!tensorSrc.hasOneUse() &&
++      (!isUsedOnlyForMatmul(reshapeLikeOp->getResult(0)) ||
++       isUsedOnlyForMatmul(tensorSrc)))
+     return rewriter.notifyMatchFailure(
+-        reshapeLikeOp, "to_tensor / reshape source has multiple consumers");
++        reshapeLikeOp, "shared reshape source without a separate Cube layout");
+ 
+   auto toTensor = tensorSrc.getDefiningOp<bufferization::ToTensorOp>();
+   if (!toTensor || toTensor.getResult() != tensorSrc)
+@@ -412,12 +431,15 @@ foldMemrefLoadReshape(Value tensorSrc, RankedTensorType srcType,
+ 
+   rewriter.replaceOp(reshapeLikeOp, newToTensor);
+ 
+-  // Sole-use was required above, so the old chain is now dead.
+-  rewriter.eraseOp(toTensor);
+-  rewriter.eraseOp(copyOp);
+-  rewriter.eraseOp(alloc);
+-  if (reinterp->use_empty())
+-    rewriter.eraseOp(reinterp);
++  // Other logical views still observe the original snapshot. Each new copy
++  // stays at the original transfer point, before any intervening GM writes.
++  if (toTensor->use_empty()) {
++    rewriter.eraseOp(toTensor);
++    rewriter.eraseOp(copyOp);
++    rewriter.eraseOp(alloc);
++    if (reinterp->use_empty())
++      rewriter.eraseOp(reinterp);
++  }
+   return success();
+ }
+ 
+@@ -438,6 +460,21 @@ public:
+   }
+ };
+ 
++class FoldLoadExpand : public OpRewritePattern<tensor::ExpandShapeOp> {
++public:
++  explicit FoldLoadExpand(MLIRContext *context)
++      : OpRewritePattern(context, /*benefit=*/10) {}
++
++  LogicalResult matchAndRewrite(tensor::ExpandShapeOp op,
++                                PatternRewriter &rewriter) const override {
++    // Reshape decomposition may leave a shared flat load's view expanded.
++    if (op.getSrcType().getRank() != 1)
++      return failure();
++    return foldMemrefLoadReshape(op.getSrc(), op.getSrcType(),
++                                 op.getResultType(), {}, rewriter, op);
++  }
++};
++
+ /// A collapse must retain the operation's own reassociation.
+ class FoldLoadCollapse : public OpRewritePattern<tensor::CollapseShapeOp> {
+ public:
+@@ -511,7 +548,7 @@ void CanonicalizeTensorReshape::runOnOperation() {
+   RewritePatternSet patterns(context);
+   // Prefer folding load+reshape/collapse into a final-shaped load before
+   // decomposing reshape into collapse/expand pairs.
+-  patterns.insert<FoldLoadReshape, FoldLoadCollapse>(context);
++  patterns.insert<FoldLoadReshape, FoldLoadExpand, FoldLoadCollapse>(context);
+   patterns.insert<CanonicalizeTensorReshapeOpPattern>(patterns.getContext());
+   patterns.insert<FoldReshape>(patterns.getContext());
+   // This pattern decomposes `tensor.reshape` into a one-dimensional tensor using collapse and then expands it.
+diff --git a/bishengir/lib/Tools/bishengir-compile/regbase/BiShengIRCompileMain.cpp b/bishengir/lib/Tools/bishengir-compile/regbase/BiShengIRCompileMain.cpp
+index 70e8659cd..bf8334a39 100644
+--- a/bishengir/lib/Tools/bishengir-compile/regbase/BiShengIRCompileMain.cpp
++++ b/bishengir/lib/Tools/bishengir-compile/regbase/BiShengIRCompileMain.cpp
+@@ -616,7 +616,7 @@ HIVMCMainConfig HIVMCFromBiShengIRConfig(BiShengIRCompileMainConfig &config,
+   hivmcConfig.simtOptimizationMode(1900101);
+   hivmcConfig.enableAutoCVBalance(true);
+   hivmcConfig.setUseDPX(true);
+-  hivmcConfig.onlyRunHIVMPipeline(false);
++  hivmcConfig.onlyRunHIVMPipeline(config.getOnlyRunHIVMPipeline());
+ 
+   hivmcConfig.appendBishengOptions(config.getAppendBishengOptions());
+   hivmcConfig.compileTriton(config.getEnableTritonKernelCompile());
+diff --git a/bishengir/test/Dialect/HIVM/hivm-enable-stride-align-copy-no-propagate.mlir b/bishengir/test/Dialect/HIVM/hivm-enable-stride-align-copy-no-propagate.mlir
+index 7a4223f24..14d9abf38 100644
+--- a/bishengir/test/Dialect/HIVM/hivm-enable-stride-align-copy-no-propagate.mlir
++++ b/bishengir/test/Dialect/HIVM/hivm-enable-stride-align-copy-no-propagate.mlir
+@@ -76,3 +76,21 @@ func.func @copy_both_sides_aligned_distinct_dims() {
+   hivm.hir.copy ins(%src : memref<2x15xf16, #hivm.address_space<ub>>) outs(%dst : memref<2x15xf16, #hivm.address_space<ub>>)
+   return
+ }
++
++// -----
++
++// A flat observation need not carry an internal row constraint when the
++// original matrix already satisfies the complete alignment requirements.
++// CHECK-LABEL: func.func @aligned_matrix_flat_view
++// CHECK: %[[MATRIX:.*]] = memref.alloc() : memref<16x32xf32, #hivm.address_space<ub>>
++// CHECK-NOT: annotation.mark
++// CHECK: %[[FLAT:.*]] = memref.collapse_shape %[[MATRIX]]
++// CHECK: return %[[FLAT]] : memref<512xf32, #hivm.address_space<ub>>
++module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
++  func.func @aligned_matrix_flat_view() -> memref<512xf32, #hivm.address_space<ub>> {
++    %matrix = memref.alloc() : memref<16x32xf32, #hivm.address_space<ub>>
++    annotation.mark %matrix {hivm.stride_align_dims = array<i32: 0, 1>, hivm.stride_align_value_in_byte = array<i32: 8, 32>} : memref<16x32xf32, #hivm.address_space<ub>>
++    %flat = memref.collapse_shape %matrix [[0, 1]] : memref<16x32xf32, #hivm.address_space<ub>> into memref<512xf32, #hivm.address_space<ub>>
++    return %flat : memref<512xf32, #hivm.address_space<ub>>
++  }
++}
+diff --git a/bishengir/test/Dialect/Tensor/fold-nd-load-reshape-to-3d.mlir b/bishengir/test/Dialect/Tensor/fold-nd-load-reshape-to-3d.mlir
+index e8ad3e089..534d50425 100644
+--- a/bishengir/test/Dialect/Tensor/fold-nd-load-reshape-to-3d.mlir
++++ b/bishengir/test/Dialect/Tensor/fold-nd-load-reshape-to-3d.mlir
+@@ -213,6 +213,62 @@ func.func @fold_same_rank_with_batch_gap(%base: memref<?xf32>) -> tensor<2x32x64
+ 
+ // -----
+ 
++// Split the Cube view while both prints share the original logical snapshot.
++// Both copies must precede a write to the GM source, even though print follows it.
++// CHECK-LABEL: func.func @print_and_cube_reshape_snapshot
++// CHECK-NOT: memref.copy
++// CHECK: memref.copy %{{.*}}, %[[CUBE_ALLOC:.*]] : memref<4x32x32xbf16> to memref<4x32x32xbf16>
++// CHECK-NEXT: memref.copy %{{.*}}, %[[VECTOR_ALLOC:.*]] : memref<4096xbf16, strided<[1]>> to memref<4096xbf16>
++// CHECK-NEXT: %[[CUBE:.*]] = bufferization.to_tensor %[[CUBE_ALLOC]] restrict writable : memref<4x32x32xbf16>
++// CHECK-NEXT: %[[VECTOR:.*]] = bufferization.to_tensor %[[VECTOR_ALLOC]] restrict writable : memref<4096xbf16>
++// CHECK: memref.store
++// CHECK-NOT: memref.copy
++// CHECK: %[[PRINTED:.*]] = tensor.expand_shape %[[VECTOR]]
++// CHECK-NEXT: hfusion.print "x: " {hex = false} %[[PRINTED]] : tensor<2x2x32x32xbf16>
++// CHECK-NEXT: hfusion.print "flat" {hex = false} %[[VECTOR]] : tensor<4096xbf16>
++// CHECK-NEXT: %[[RESULT:.*]] = linalg.batch_matmul ins(%[[CUBE]],
++// CHECK-NEXT: return %[[RESULT]] : tensor<4x32x32xf32>
++func.func @print_and_cube_reshape_snapshot(%base: memref<?xbf16>, %rhs: tensor<4x32x32xbf16>, %out: tensor<4x32x32xf32>) -> tensor<4x32x32xf32> {
++  %zero = arith.constant 0 : index
++  %value = arith.constant 0.0 : bf16
++  %print_shape = arith.constant dense<[2, 2, 32, 32]> : tensor<4xi64>
++  %cube_shape = arith.constant dense<[4, 32, 32]> : tensor<3xi64>
++  %src = memref.reinterpret_cast %base to offset: [0], sizes: [4096], strides: [1] : memref<?xbf16> to memref<4096xbf16, strided<[1]>>
++  %alloc = memref.alloc() : memref<4096xbf16>
++  memref.copy %src, %alloc : memref<4096xbf16, strided<[1]>> to memref<4096xbf16>
++  %tensor = bufferization.to_tensor %alloc restrict writable : memref<4096xbf16>
++  memref.store %value, %base[%zero] : memref<?xbf16>
++  %cube = tensor.reshape %tensor(%cube_shape) : (tensor<4096xbf16>, tensor<3xi64>) -> tensor<4x32x32xbf16>
++  %printed = tensor.reshape %tensor(%print_shape) : (tensor<4096xbf16>, tensor<4xi64>) -> tensor<2x2x32x32xbf16>
++  hfusion.print "x: " {hex = false} %printed : tensor<2x2x32x32xbf16>
++  hfusion.print "flat" {hex = false} %tensor : tensor<4096xbf16>
++  %result = linalg.batch_matmul ins(%cube, %rhs : tensor<4x32x32xbf16>, tensor<4x32x32xbf16>) outs(%out : tensor<4x32x32xf32>) -> tensor<4x32x32xf32>
++  return %result : tensor<4x32x32xf32>
++}
++
++// -----
++
++// A print view and a direct tensor consumer share the original snapshot.
++// CHECK-LABEL: func.func @print_reshape_keeps_other_snapshot_user
++// CHECK-NOT: memref.copy
++// CHECK: memref.copy
++// CHECK-NEXT: %[[ORIGINAL:.*]] = bufferization.to_tensor %{{.*}} restrict writable : memref<4096xbf16>
++// CHECK-NEXT: %[[PRINTED:.*]] = tensor.expand_shape %[[ORIGINAL]]
++// CHECK-NEXT: hfusion.print "x: " {hex = false} %[[PRINTED]] : tensor<2x2x32x32xbf16>
++// CHECK-NEXT: return %[[ORIGINAL]] : tensor<4096xbf16>
++func.func @print_reshape_keeps_other_snapshot_user(%base: memref<?xbf16>) -> tensor<4096xbf16> {
++  %shape = arith.constant dense<[2, 2, 32, 32]> : tensor<4xi64>
++  %src = memref.reinterpret_cast %base to offset: [0], sizes: [4096], strides: [1] : memref<?xbf16> to memref<4096xbf16, strided<[1]>>
++  %alloc = memref.alloc() : memref<4096xbf16>
++  memref.copy %src, %alloc : memref<4096xbf16, strided<[1]>> to memref<4096xbf16>
++  %tensor = bufferization.to_tensor %alloc restrict writable : memref<4096xbf16>
++  %printed = tensor.reshape %tensor(%shape) : (tensor<4096xbf16>, tensor<4xi64>) -> tensor<2x2x32x32xbf16>
++  hfusion.print "x: " {hex = false} %printed : tensor<2x2x32x32xbf16>
++  return %tensor : tensor<4096xbf16>
++}
++
++// -----
++
+ // Coprime dimensions need the strict contiguous flatten fallback because a
+ // loose expand/collapse reassociation cannot factor 6x10 directly into 4x15.
+ // Also preserve the absence of both to_tensor flags.
+diff --git a/bishengir/test/bishengir-compile/triton/device-debug/mixed-layout-print.mlir b/bishengir/test/bishengir-compile/triton/device-debug/mixed-layout-print.mlir
+new file mode 100644
+index 000000000..b930e431b
+--- /dev/null
++++ b/bishengir/test/bishengir-compile/triton/device-debug/mixed-layout-print.mlir
+@@ -0,0 +1,133 @@
++// RUN: split-file %s %t
++// RUN: bishengir-compile %t/batch.mlir --target=Ascend950PR_9579 --enable-hfusion-compile=true --enable-triton-kernel-compile=true --enable-tuning-mode=true --only-run-hivm-pipeline=true --enable-layout-optimization=false --mlir-print-ir-after=hivm-insert-load-store-for-mix-cv -o %t/batch-v1.out > %t/batch-v1.log 2>&1
++// RUN: FileCheck %s --check-prefix=BATCH --implicit-check-not="error:" --implicit-check-not="hivm.hir.l12ub" < %t/batch-v1.log
++// RUN: FileCheck %s --check-prefix=LOWERED < %t/batch-v1.out
++// RUN: bishengir-compile %t/batch.mlir --target=Ascend950PR_9579 --enable-hfusion-compile=true --enable-triton-kernel-compile=true --enable-tuning-mode=true --only-run-hivm-pipeline=true --enable-layout-optimization=true --mlir-print-ir-after=hivm-insert-load-store-for-mix-cv,hivm-insert-convert-layout -o %t/batch-fallback.out > %t/batch-fallback.log 2>&1
++// RUN: FileCheck %s --check-prefix=BATCH --implicit-check-not="error:" --implicit-check-not="InsertConvertLayout" < %t/batch-fallback.log
++// RUN: bishengir-compile %t/matmul.mlir --target=Ascend950PR_9579 --enable-hfusion-compile=true --enable-triton-kernel-compile=true --enable-tuning-mode=true --only-run-hivm-pipeline=true --enable-layout-optimization=false -o %t/matmul-v1.out > %t/matmul-v1.log 2>&1
++// RUN: FileCheck %s --check-prefix=CLEAN --allow-empty --implicit-check-not="error:" < %t/matmul-v1.log
++// RUN: bishengir-compile %t/vector.mlir --target=Ascend950PR_9579 --enable-hfusion-compile=true --enable-triton-kernel-compile=true --enable-tuning-mode=true --only-run-hivm-pipeline=true --enable-layout-optimization=false -o %t/vector-v1.out > %t/vector-v1.log 2>&1
++// RUN: FileCheck %s --check-prefix=VECTOR < %t/vector-v1.out
++// RUN: bishengir-compile %t/vector.mlir --target=Ascend950PR_9579 --enable-hfusion-compile=true --enable-triton-kernel-compile=true --enable-tuning-mode=true --only-run-hivm-pipeline=true --enable-layout-optimization=true -o %t/vector-v2.out > %t/vector-v2.log 2>&1
++// RUN: FileCheck %s --check-prefix=VECTOR < %t/vector-v2.out
++
++
++// LOWERED-LABEL: llvm.func @kernel_mix_aic
++// LOWERED: llvm.call @nd2nz_bfloat16_t
++// LOWERED-LABEL: llvm.func @kernel_mix_aiv
++// LOWERED: llvm.call @load_gm_to_ubuf_1d_bfloat16_t
++// LOWERED: llvm.call @print_4d_bfloat16_t_ubuf.vector
++// LOWERED: llvm.call @print_4d_bfloat16_t_ubuf.vector
++// LOWERED: llvm.call @print_4d_float_ubuf.vector
++
++// Two print shapes share one 128 KiB snapshot. Duplicating this load would
++// need 256 KiB of UB, exceeding the target's 248 KiB capacity.
++// VECTOR-LABEL: llvm.func @kernel(
++// VECTOR-NOT: llvm.call @load_gm_to_ubuf
++// VECTOR: %[[UB:.*]] = llvm.inttoptr {{.*}} : i64 to !llvm.ptr<6>
++// VECTOR-NEXT: llvm.call @load_gm_to_ubuf_1d_bfloat16_t({{.*}}, %[[UB]], %[[UB]],
++// VECTOR-NOT: llvm.call @load_gm_to_ubuf
++// VECTOR: llvm.call @print_4d_bfloat16_t_ubuf({{.*}}, %[[UB]], %[[UB]],
++// VECTOR-NOT: llvm.call @load_gm_to_ubuf
++// VECTOR: llvm.call @print_1d_bfloat16_t_ubuf({{.*}}, %[[UB]], %[[UB]],
++// VECTOR-NOT: llvm.call @load_gm_to_ubuf
++
++// Reconstructed from the rank-4 print / rank-3 batch-matmul report. Batch
++// matmul retains its existing layout fallback. Both batched and ordinary
++// matmul printing must keep the logical debug snapshot separate from Cube data.
++// CLEAN: [INFO] Using merged native A5 regbase pipeline
++// BATCH-LABEL: IR Dump After InsertLoadStoreForMixCV
++// BATCH: hivm.hir.load {{.*}}core_type = <VECTOR>
++// BATCH: hivm.hir.batchMmadL1
++// BATCH: hivm.hir.debug {{.*}}memscope = #hivm.address_space<ub>{{.*}}prefix = " x: "{{.*}}tcoretype = #hivm.tcore_type<VECTOR>{{.*}} : tensor<2x2x32x32xbf16>
++// BATCH: hivm.hir.debug {{.*}}memscope = #hivm.address_space<ub>{{.*}}prefix = " y: "{{.*}} : tensor<2x2x32x32xbf16>
++// BATCH: hivm.hir.debug {{.*}}memscope = #hivm.address_space<ub>{{.*}}prefix = " z: "{{.*}} : tensor<2x2x32x32xf32>
++
++//--- batch.mlir
++module {
++  func.func private @triton_print(tensor<2x2x32x32xbf16>) attributes {hex = false, prefix = " x: "}
++  func.func private @triton_print_0(tensor<2x2x32x32xbf16>) attributes {hex = false, prefix = " y: "}
++  func.func private @triton_print_1(tensor<2x2x32x32xf32>) attributes {hex = false, prefix = " z: "}
++  func.func @kernel(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xbf16> {tt.tensor_kind = 0 : i32}, %arg3: memref<?xbf16> {tt.tensor_kind = 0 : i32}, %arg4: memref<?xf32> {tt.tensor_kind = 1 : i32}, %arg5: i32, %arg6: i32, %arg7: i32, %arg8: i32, %arg9: i32, %arg10: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd"} {
++    %cst = arith.constant dense<4096> : tensor<1xi64>
++    %cst_0 = arith.constant dense<[4, 32, 32]> : tensor<3xi64>
++    %cst_1 = arith.constant dense<[2, 2, 32, 32]> : tensor<4xi64>
++    %cst_2 = arith.constant 0.000000e+00 : f32
++    %0 = tensor.empty() : tensor<4x32x32xf32>
++    %1 = linalg.fill ins(%cst_2 : f32) outs(%0 : tensor<4x32x32xf32>) -> tensor<4x32x32xf32>
++    %reinterpret_cast = memref.reinterpret_cast %arg2 to offset: [0], sizes: [4096], strides: [1] : memref<?xbf16> to memref<4096xbf16, strided<[1]>>
++    %alloc = memref.alloc() : memref<4096xbf16>
++    memref.copy %reinterpret_cast, %alloc : memref<4096xbf16, strided<[1]>> to memref<4096xbf16>
++    %2 = bufferization.to_tensor %alloc restrict writable : memref<4096xbf16>
++    %reshape = tensor.reshape %2(%cst_1) : (tensor<4096xbf16>, tensor<4xi64>) -> tensor<2x2x32x32xbf16>
++    %reinterpret_cast_3 = memref.reinterpret_cast %arg3 to offset: [0], sizes: [4096], strides: [1] : memref<?xbf16> to memref<4096xbf16, strided<[1]>>
++    %alloc_4 = memref.alloc() : memref<4096xbf16>
++    memref.copy %reinterpret_cast_3, %alloc_4 : memref<4096xbf16, strided<[1]>> to memref<4096xbf16>
++    %3 = bufferization.to_tensor %alloc_4 restrict writable : memref<4096xbf16>
++    %reshape_5 = tensor.reshape %3(%cst_1) : (tensor<4096xbf16>, tensor<4xi64>) -> tensor<2x2x32x32xbf16>
++    %reshape_6 = tensor.reshape %2(%cst_0) : (tensor<4096xbf16>, tensor<3xi64>) -> tensor<4x32x32xbf16>
++    %reshape_7 = tensor.reshape %3(%cst_0) : (tensor<4096xbf16>, tensor<3xi64>) -> tensor<4x32x32xbf16>
++    %4 = linalg.batch_matmul {input_precision = "ieee"} ins(%reshape_6, %reshape_7 : tensor<4x32x32xbf16>, tensor<4x32x32xbf16>) outs(%1 : tensor<4x32x32xf32>) -> tensor<4x32x32xf32>
++    %reshape_8 = tensor.reshape %4(%cst_1) : (tensor<4x32x32xf32>, tensor<4xi64>) -> tensor<2x2x32x32xf32>
++    call @triton_print(%reshape) : (tensor<2x2x32x32xbf16>) -> ()
++    call @triton_print_0(%reshape_5) : (tensor<2x2x32x32xbf16>) -> ()
++    call @triton_print_1(%reshape_8) : (tensor<2x2x32x32xf32>) -> ()
++    %reinterpret_cast_9 = memref.reinterpret_cast %arg4 to offset: [0], sizes: [4096], strides: [1] : memref<?xf32> to memref<4096xf32, strided<[1]>>
++    %reshape_10 = tensor.reshape %4(%cst) : (tensor<4x32x32xf32>, tensor<1xi64>) -> tensor<4096xf32>
++    bufferization.materialize_in_destination %reshape_10 in writable %reinterpret_cast_9 : (tensor<4096xf32>, memref<4096xf32, strided<[1]>>) -> ()
++    return
++  }
++}
++
++//--- matmul.mlir
++module {
++  func.func private @triton_print(tensor<1x1x32x32xbf16>) attributes {hex = false, prefix = " x: "}
++  func.func private @triton_print_0(tensor<1x1x32x32xbf16>) attributes {hex = false, prefix = " y: "}
++  func.func private @triton_print_1(tensor<1x1x32x32xf32>) attributes {hex = false, prefix = " z: "}
++  func.func @kernel(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xbf16> {tt.tensor_kind = 0 : i32}, %arg3: memref<?xbf16> {tt.tensor_kind = 0 : i32}, %arg4: memref<?xf32> {tt.tensor_kind = 1 : i32}, %arg5: i32, %arg6: i32, %arg7: i32, %arg8: i32, %arg9: i32, %arg10: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd"} {
++    %cst = arith.constant dense<1024> : tensor<1xi64>
++    %cst_0 = arith.constant dense<[32, 32]> : tensor<2xi64>
++    %cst_1 = arith.constant dense<[1, 1, 32, 32]> : tensor<4xi64>
++    %cst_2 = arith.constant 0.000000e+00 : f32
++    %0 = tensor.empty() : tensor<32x32xf32>
++    %1 = linalg.fill ins(%cst_2 : f32) outs(%0 : tensor<32x32xf32>) -> tensor<32x32xf32>
++    %reinterpret_cast = memref.reinterpret_cast %arg2 to offset: [0], sizes: [1024], strides: [1] : memref<?xbf16> to memref<1024xbf16, strided<[1]>>
++    %alloc = memref.alloc() : memref<1024xbf16>
++    memref.copy %reinterpret_cast, %alloc : memref<1024xbf16, strided<[1]>> to memref<1024xbf16>
++    %2 = bufferization.to_tensor %alloc restrict writable : memref<1024xbf16>
++    %reshape = tensor.reshape %2(%cst_1) : (tensor<1024xbf16>, tensor<4xi64>) -> tensor<1x1x32x32xbf16>
++    %reinterpret_cast_3 = memref.reinterpret_cast %arg3 to offset: [0], sizes: [1024], strides: [1] : memref<?xbf16> to memref<1024xbf16, strided<[1]>>
++    %alloc_4 = memref.alloc() : memref<1024xbf16>
++    memref.copy %reinterpret_cast_3, %alloc_4 : memref<1024xbf16, strided<[1]>> to memref<1024xbf16>
++    %3 = bufferization.to_tensor %alloc_4 restrict writable : memref<1024xbf16>
++    %reshape_5 = tensor.reshape %3(%cst_1) : (tensor<1024xbf16>, tensor<4xi64>) -> tensor<1x1x32x32xbf16>
++    %reshape_6 = tensor.reshape %2(%cst_0) : (tensor<1024xbf16>, tensor<2xi64>) -> tensor<32x32xbf16>
++    %reshape_7 = tensor.reshape %3(%cst_0) : (tensor<1024xbf16>, tensor<2xi64>) -> tensor<32x32xbf16>
++    %4 = linalg.matmul {input_precision = "ieee"} ins(%reshape_6, %reshape_7 : tensor<32x32xbf16>, tensor<32x32xbf16>) outs(%1 : tensor<32x32xf32>) -> tensor<32x32xf32>
++    %reshape_8 = tensor.reshape %4(%cst_1) : (tensor<32x32xf32>, tensor<4xi64>) -> tensor<1x1x32x32xf32>
++    call @triton_print(%reshape) : (tensor<1x1x32x32xbf16>) -> ()
++    call @triton_print_0(%reshape_5) : (tensor<1x1x32x32xbf16>) -> ()
++    call @triton_print_1(%reshape_8) : (tensor<1x1x32x32xf32>) -> ()
++    %reinterpret_cast_9 = memref.reinterpret_cast %arg4 to offset: [0], sizes: [1024], strides: [1] : memref<?xf32> to memref<1024xf32, strided<[1]>>
++    %reshape_10 = tensor.reshape %4(%cst) : (tensor<32x32xf32>, tensor<1xi64>) -> tensor<1024xf32>
++    bufferization.materialize_in_destination %reshape_10 in writable %reinterpret_cast_9 : (tensor<1024xf32>, memref<1024xf32, strided<[1]>>) -> ()
++    return
++  }
++}
++
++//--- vector.mlir
++module {
++  func.func private @triton_print(tensor<32x2x32x32xbf16>) attributes {hex = false, prefix = " x: "}
++  func.func private @triton_print_flat(tensor<65536xbf16>) attributes {hex = false, prefix = "flat"}
++  func.func @kernel(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xbf16> {tt.tensor_kind = 0 : i32}, %arg3: memref<?xbf16> {tt.tensor_kind = 0 : i32}, %arg4: memref<?xf32> {tt.tensor_kind = 1 : i32}, %arg5: i32, %arg6: i32, %arg7: i32, %arg8: i32, %arg9: i32, %arg10: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd"} {
++    %in = memref.reinterpret_cast %arg2 to offset: [0], sizes: [65536], strides: [1] : memref<?xbf16> to memref<65536xbf16, strided<[1]>>
++    %buf = memref.alloc() : memref<65536xbf16>
++    memref.copy %in, %buf : memref<65536xbf16, strided<[1]>> to memref<65536xbf16>
++    %v = bufferization.to_tensor %buf restrict writable : memref<65536xbf16>
++    %shape = arith.constant dense<[32, 2, 32, 32]> : tensor<4xi64>
++    %p = tensor.reshape %v(%shape) : (tensor<65536xbf16>, tensor<4xi64>) -> tensor<32x2x32x32xbf16>
++    call @triton_print(%p) : (tensor<32x2x32x32xbf16>) -> ()
++    call @triton_print_flat(%v) : (tensor<65536xbf16>) -> ()
++    return
++  }
++}

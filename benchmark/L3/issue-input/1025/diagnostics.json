@@ -1,0 +1,26 @@
+[
+  {
+    "function": "pair",
+    "location": "loc(\"<stdin>\":3:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "pair",
+    "location": "loc(\"<stdin>\":4:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "pair",
+    "location": "loc(\"<stdin>\":5:10)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "pair",
+    "location": "loc(\"<stdin>\":6:10)",
+    "op": "hivm.hir.vcast",
+    "reason": "requires bufferization"
+  }
+]

@@ -1,0 +1,18 @@
+{
+  "id": "handwritten/reverse-direction",
+  "tier": "L3",
+  "category": "handwritten",
+  "source_ref": "authored protocol litmus",
+  "chip_profile": null,
+  "core_ratio": "0:1",
+  "compile_argv": [
+    "bishengir-opt",
+    "-canonicalize"
+  ],
+  "entry_functions": [
+    "reverse_direction"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5"
+}

@@ -1,0 +1,11 @@
+{
+  "title": "[Bug][A6] A6 vector stores can overrun short predicate rows or corrupt transposed output",
+  "iid": 1021,
+  "updated_at": "2026-11-20T15:13:26.059+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1021",
+  "linked_mrs": [
+    "5335"
+  ],
+  "attachment_commit": "5a4c18f32979e54b55aad976e1ce1a4e0b064c68"
+}

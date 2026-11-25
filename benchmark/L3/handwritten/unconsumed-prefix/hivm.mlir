@@ -1,0 +1,10 @@
+module {
+  func.func @unconsumed_prefix(%arg0: memref<32xf32, #hivm.address_space<gm>>, %arg1: memref<32xf32, #hivm.address_space<gm>>) attributes {hacc.entry, hacc.function_kind = #hacc.function_kind<DEVICE>} {
+    %c0_i64 = arith.constant 0 : i64
+    %0 = hivm.hir.pointer_cast(%c0_i64) : memref<32xf32, #hivm.address_space<ub>>
+    hivm.hir.load ins(%arg0 : memref<32xf32, #hivm.address_space<gm>>) outs(%0 : memref<32xf32, #hivm.address_space<ub>>)
+    hivm.hir.set_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]
+    return
+  }
+}
+

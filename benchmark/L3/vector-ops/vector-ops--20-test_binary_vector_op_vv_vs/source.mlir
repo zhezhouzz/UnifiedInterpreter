@@ -1,0 +1,26 @@
+func.func @test_binary_vector_op_vv_vs(
+  %src1 : memref<?x?xf16>, %src2 : memref<?x?xf16>, %dst : memref<?x?xf16>, %cst : f16) {
+  hivm.hir.vadd ins(%src1, %src2 : memref<?x?xf16>, memref<?x?xf16>)
+                outs(%dst : memref<?x?xf16>)
+  hivm.hir.vmul ins(%src1, %src2 : memref<?x?xf16>, memref<?x?xf16>)
+                outs(%dst : memref<?x?xf16>)
+  hivm.hir.vsub ins(%src1, %src2 : memref<?x?xf16>, memref<?x?xf16>)
+                outs(%dst : memref<?x?xf16>)
+  hivm.hir.vdiv ins(%src1, %src2 : memref<?x?xf16>, memref<?x?xf16>)
+                outs(%dst : memref<?x?xf16>)
+  hivm.hir.vmax ins(%src1, %src2 : memref<?x?xf16>, memref<?x?xf16>)
+                outs(%dst : memref<?x?xf16>)
+  hivm.hir.vmin ins(%src1, %src2 : memref<?x?xf16>, memref<?x?xf16>)
+                outs(%dst : memref<?x?xf16>)
+  hivm.hir.vadd ins(%src1, %cst : memref<?x?xf16>, f16)
+                outs(%dst : memref<?x?xf16>)
+  hivm.hir.vmul ins(%src1, %cst : memref<?x?xf16>, f16)
+                outs(%dst : memref<?x?xf16>)
+  hivm.hir.vsub ins(%src1, %cst : memref<?x?xf16>, f16)
+                outs(%dst : memref<?x?xf16>)
+  hivm.hir.vmax ins(%src1, %cst : memref<?x?xf16>, f16)
+                outs(%dst : memref<?x?xf16>)
+  hivm.hir.vmin ins(%src1, %cst : memref<?x?xf16>, f16)
+                outs(%dst : memref<?x?xf16>)
+  return
+}

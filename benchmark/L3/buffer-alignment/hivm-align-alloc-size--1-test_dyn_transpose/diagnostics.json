@@ -1,0 +1,8 @@
+[
+  {
+    "function": "test_dyn_transpose",
+    "location": "loc(\"<stdin>\":5:5)",
+    "op": "hivm.hir.vtranspose",
+    "reason": "missing Core interpretation"
+  }
+]

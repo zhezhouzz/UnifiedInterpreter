@@ -1,0 +1,8 @@
+[
+  {
+    "function": "test_scope_scope_multi_result_stride_align",
+    "location": "loc(\"<stdin>\":3:12)",
+    "op": "scope.scope",
+    "reason": "missing Core interpretation"
+  }
+]

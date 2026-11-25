@@ -1,0 +1,20 @@
+[
+  {
+    "function": "test_vsub_b64",
+    "location": "loc(\"<stdin>\":3:14)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "test_vsub_b64",
+    "location": "loc(\"<stdin>\":4:16)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "test_vsub_b64",
+    "location": "loc(\"<stdin>\":5:16)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  }
+]

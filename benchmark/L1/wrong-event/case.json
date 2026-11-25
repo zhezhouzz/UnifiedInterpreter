@@ -1,0 +1,28 @@
+{
+  "id": "wrong-event",
+  "tier": "L1",
+  "category": "protocol-model",
+  "source_ref": "authored event mismatch",
+  "chip_profile": "Ascend910B1",
+  "core_ratio": "0:1",
+  "compile_argv": [
+    "bishengir-opt",
+    "-canonicalize"
+  ],
+  "entry_functions": [
+    "kernel"
+  ],
+  "expected_verdict": {
+    "buggy": "deadlock",
+    "fixed": "safe"
+  },
+  "oracle_note": "Receiver waits on a different key.",
+  "execution": {
+    "streams": [
+      "kernel"
+    ],
+    "initial": {
+      "gm:0": 7
+    }
+  }
+}

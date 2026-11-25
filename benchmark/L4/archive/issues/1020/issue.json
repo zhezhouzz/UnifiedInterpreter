@@ -1,0 +1,11 @@
+{
+  "title": "[Bug][A6] CreatePreload aborts on affine tile sizes and can reuse a live buffer slot",
+  "iid": 1020,
+  "updated_at": "2026-11-20T15:13:17.387+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1020",
+  "linked_mrs": [
+    "5334"
+  ],
+  "attachment_commit": "28f715b74a3664a305cf62509ec7834b106ae908"
+}

@@ -1,0 +1,79 @@
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/NormalizeMatmul.cpp b/bishengir/lib/Dialect/HIVM/Transforms/NormalizeMatmul.cpp
+index a71e743f0..53bc700a9 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/NormalizeMatmul.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/NormalizeMatmul.cpp
+@@ -749,7 +749,7 @@ bool hasDebugUse(Value val) {
+ 
+ // Find the outer res of scf.if and scf.for block
+ // The %arg should be the output of op if in scf.for
+-// The output only used by yield op
++// The output is carried by the corresponding yield operand.
+ struct CCFInfo {
+   Value inVal;
+   Value outVal;
+@@ -803,17 +803,12 @@ CCFInfo getOutermostCCFInfo(Operation *op, CCFInfo info) {
+       }
+       return CCFInfo::getFailure(info);
+     }
+-    // The res should only be used by yields in the for body.
+-    for (OpOperand &use : info.outVal.getUses()) {
+-      Operation *user = use.getOwner();
+-      auto yieldOp = dyn_cast<scf::YieldOp>(user);
+-      if (!yieldOp)
+-        return CCFInfo::getFailure(info);
+-      if (yieldOp->getBlock() != forOp.getBody())
+-        return CCFInfo::getFailure(info);
+-      if (use.getOperandNumber() != argIdx)
+-        return CCFInfo::getFailure(info);
+-    }
++    // The accumulation result must be carried by the corresponding yield
++    // operand. Other users are allowed: they observe the same logical matmul
++    // result, but do not participate in the accumulation chain.
++    auto yieldOp = cast<scf::YieldOp>(forOp.getBody()->getTerminator());
++    if (yieldOp.getOperand(argIdx) != info.outVal)
++      return CCFInfo::getFailure(info);
+ 
+     IntegerAttr ubAttr, lbAttr;
+     if (matchPattern(forOp.getUpperBound(), m_Constant(&ubAttr)) &&
+diff --git a/bishengir/test/Dialect/HIVM/normalize-matmul.mlir b/bishengir/test/Dialect/HIVM/normalize-matmul.mlir
+index 81a5dd7bc..81d8264a8 100644
+--- a/bishengir/test/Dialect/HIVM/normalize-matmul.mlir
++++ b/bishengir/test/Dialect/HIVM/normalize-matmul.mlir
+@@ -1945,6 +1945,37 @@ func.func @test_mmadl1_normalize_in_nested_ccf(%arg0: i1, %arg1: i1, %arg2: i32,
+ }
+ }
+ 
++// -----
++// A direct scf.for-carried matmul result may have independent side users.
++// CHECK-LABEL: func.func @test_mmadl1_normalize_for_with_side_user
++// CHECK: memref.alloca() {normalize_matmul_counter
++// CHECK: hivm.hir.mmadL1 {{.*}}normalized_in_L0C
++module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
++func.func @test_mmadl1_normalize_for_with_side_user(
++    %a: tensor<16x16xf16>, %b: tensor<16x16xf16>, %ub: i32)
++    -> tensor<16x16xf32> {
++  %c0_i32 = arith.constant 0 : i32
++  %c1_i32 = arith.constant 1 : i32
++  %c0 = arith.constant 0 : index
++  %false = arith.constant false
++  %zero = arith.constant 0.0 : f32
++  %empty = tensor.empty() : tensor<16x16xf32>
++  %init = hivm.hir.vbrc ins(%zero : f32) outs(%empty : tensor<16x16xf32>) -> tensor<16x16xf32>
++  %result:2 = scf.for %i = %c0_i32 to %ub step %c1_i32
++      iter_args(%acc = %init, %side = %init)
++      -> (tensor<16x16xf32>, tensor<16x16xf32>) : i32 {
++    %mmad = hivm.hir.mmadL1
++        ins(%a, %b, %false, %c0, %c0, %c0
++            : tensor<16x16xf16>, tensor<16x16xf16>, i1, index, index, index)
++        outs(%acc : tensor<16x16xf32>) -> tensor<16x16xf32>
++    %abs = hivm.hir.vabs ins(%mmad : tensor<16x16xf32>)
++        outs(%empty : tensor<16x16xf32>) -> tensor<16x16xf32>
++    scf.yield %mmad, %abs : tensor<16x16xf32>, tensor<16x16xf32>
++  }
++  return %result#1 : tensor<16x16xf32>
++}
++}
++
+ // -----
+ // CHECK-LABEL: func.func @test_mmadmx_elemwise_bias_decompose(
+ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {

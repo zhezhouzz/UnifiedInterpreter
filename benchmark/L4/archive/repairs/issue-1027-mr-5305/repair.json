@@ -1,0 +1,13 @@
+{
+  "issue": 1027,
+  "mr": "5305",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/5305",
+  "commit": "d88edb84635bf47f0eeed6fc9d571e89e17357d3",
+  "parent": "665a41b99c207e43760f759935f5d59bb4582601",
+  "title": "[HIVM] fix: preserve L0C-bound conditional accumulators",
+  "tests": [
+    "bishengir/test/Dialect/HIVM/insert-fixpipe-for-scf-if-mmad.mlir",
+    "bishengir/test/Dialect/HIVM/insert-fixpipe-for-sliced-if-result.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

@@ -1,0 +1,44 @@
+[
+  {
+    "function": "valid_alloc_for_simd",
+    "location": "loc(\"<stdin>\":7:5)",
+    "op": "hivm.hir.set_flag",
+    "reason": "intra-stream scalar endpoint requires local-scalar-memory profile"
+  },
+  {
+    "function": "valid_alloc_for_simd",
+    "location": "loc(\"<stdin>\":9:5)",
+    "op": "hivm.hir.set_flag",
+    "reason": "intra-stream scalar endpoint requires local-scalar-memory profile"
+  },
+  {
+    "function": "valid_alloc_for_simd",
+    "location": "loc(\"<stdin>\":10:5)",
+    "op": "hivm.hir.wait_flag",
+    "reason": "intra-stream scalar endpoint requires local-scalar-memory profile"
+  },
+  {
+    "function": "valid_alloc_for_simd",
+    "location": "loc(\"<stdin>\":11:10)",
+    "op": "memref.load",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "valid_alloc_for_simd",
+    "location": "loc(\"<stdin>\":12:5)",
+    "op": "hivm.hir.wait_flag",
+    "reason": "intra-stream scalar endpoint requires local-scalar-memory profile"
+  },
+  {
+    "function": "valid_alloc_for_simd",
+    "location": "loc(\"<stdin>\":13:10)",
+    "op": "memref.load",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "valid_alloc_for_simd",
+    "location": "loc(\"<stdin>\":14:10)",
+    "op": "arith.mulf",
+    "reason": "missing Core interpretation"
+  }
+]

@@ -1,0 +1,59 @@
+{
+  "hivm_memref_store_ub_to_gm": {
+    "params": [],
+    "body": [
+      {
+        "cmd": "alloc",
+        "space": "ub",
+        "args": [],
+        "results": [
+          0
+        ],
+        "types": [
+          "memref<16x16xf16, #hivm.address_space<ub>>"
+        ],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>"
+        }
+      },
+      {
+        "cmd": "alloc",
+        "space": "gm",
+        "args": [],
+        "results": [
+          1
+        ],
+        "types": [
+          "memref<16x16xf16, #hivm.address_space<gm>>"
+        ],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>"
+        }
+      },
+      {
+        "cmd": "issue",
+        "p": "MTE3",
+        "fn": "store",
+        "write_operand": 1,
+        "read_operands": [
+          0
+        ],
+        "args": [
+          0,
+          1
+        ],
+        "results": [],
+        "types": [],
+        "attrs": {}
+      },
+      {
+        "cmd": "return",
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {}
+      }
+    ],
+    "core_kind": null
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "issue": 1021,
+  "mr": "5335",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/5335",
+  "commit": "a406a9dba470a4a3235ac2814abd1e4163b17382",
+  "parent": "3a4b39cf3e8fd3fd93b42bf2d0f4f94756146f8a",
+  "title": "[HIVM][Vectorize] fix: preserve AVE vector store bounds and strides",
+  "tests": [
+    "bishengir/test/Conversion/HIVMAVEToAVEIntrin/a6-short-packed-predicate-stores.mlir",
+    "bishengir/test/Conversion/HIVMToLLVM/regbase-convert-llvm.mlir",
+    "bishengir/test/Conversion/VectorToHIVMAVE/noncontiguous-transfer-write.mlir",
+    "bishengir/test/Conversion/VectorToHIVMAVE/strided-transfer-write.mlir",
+    "bishengir/test/Dialect/HIVM/Vectorize/hivm-vectorize-transpose-store-rows.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

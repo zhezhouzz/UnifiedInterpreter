@@ -1,0 +1,248 @@
+[
+  {
+    "function": "_attn_fwd_mix_aic",
+    "location": "loc(\"<stdin>\":33:5)",
+    "op": "hivm.hir.set_ffts_base_addr",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aic",
+    "location": "loc(\"<stdin>\":40:5)",
+    "op": "hivm.hir.sync_block_set",
+    "reason": "dynamic cross-core event or FFTS operand needs a binding"
+  },
+  {
+    "function": "_attn_fwd_mix_aic",
+    "location": "loc(\"<stdin>\":76:7)",
+    "op": "hivm.hir.mmadL1",
+    "reason": "mmadL1 sync_related_args require internal MTE1/M protocol"
+  },
+  {
+    "function": "_attn_fwd_mix_aic",
+    "location": "loc(\"<stdin>\":81:15)",
+    "op": "memref.view",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aic",
+    "location": "loc(\"<stdin>\":86:7)",
+    "op": "hivm.hir.sync_block_set",
+    "reason": "dynamic cross-core event or FFTS operand needs a binding"
+  },
+  {
+    "function": "_attn_fwd_mix_aic",
+    "location": "loc(\"<stdin>\":90:17)",
+    "op": "memref.view",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aic",
+    "location": "loc(\"<stdin>\":97:7)",
+    "op": "hivm.hir.sync_block_set",
+    "reason": "dynamic cross-core event or FFTS operand needs a binding"
+  },
+  {
+    "function": "_attn_fwd_mix_aic",
+    "location": "loc(\"<stdin>\":106:7)",
+    "op": "hivm.hir.mmadL1",
+    "reason": "mmadL1 sync_related_args require internal MTE1/M protocol"
+  },
+  {
+    "function": "_attn_fwd_mix_aic",
+    "location": "loc(\"<stdin>\":111:17)",
+    "op": "memref.view",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aic",
+    "location": "loc(\"<stdin>\":116:7)",
+    "op": "hivm.hir.sync_block_set",
+    "reason": "dynamic cross-core event or FFTS operand needs a binding"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":156:5)",
+    "op": "hivm.hir.set_ffts_base_addr",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":160:5)",
+    "op": "hivm.hir.sync_block_set",
+    "reason": "dynamic cross-core event or FFTS operand needs a binding"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":161:5)",
+    "op": "hivm.hir.sync_block_set",
+    "reason": "dynamic cross-core event or FFTS operand needs a binding"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":179:15)",
+    "op": "memref.view",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":183:25)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":184:27)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":188:7)",
+    "op": "hivm.hir.sync_block_set",
+    "reason": "dynamic cross-core event or FFTS operand needs a binding"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":190:27)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":196:7)",
+    "op": "hivm.hir.vreduce",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":197:27)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":203:27)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":204:27)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":206:7)",
+    "op": "hivm.hir.vexp",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":208:27)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":216:17)",
+    "op": "memref.view",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":219:28)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":223:7)",
+    "op": "hivm.hir.sync_block_set",
+    "reason": "dynamic cross-core event or FFTS operand needs a binding"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":226:7)",
+    "op": "hivm.hir.vreduce",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":228:28)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":236:7)",
+    "op": "hivm.hir.vexp",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":241:28)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":247:18)",
+    "op": "memref.view",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":251:28)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":252:28)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":256:7)",
+    "op": "hivm.hir.sync_block_set",
+    "reason": "dynamic cross-core event or FFTS operand needs a binding"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":263:7)",
+    "op": "hivm.hir.vln",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":268:23)",
+    "op": "memref.expand_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":271:7)",
+    "op": "hivm.hir.vdiv",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":280:28)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":281:28)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "_attn_fwd_mix_aiv",
+    "location": "loc(\"<stdin>\":285:28)",
+    "op": "memref.collapse_shape",
+    "reason": "missing Core interpretation"
+  }
+]

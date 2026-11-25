@@ -1,0 +1,20 @@
+{
+  "id": "issue-input/1025",
+  "tier": "L3",
+  "category": "issue-input",
+  "source_ref": "https://gitcode.com/Ascend/AscendNPU-IR/blob/a75cab62dad8cb188b421533b9bdf341d73b724a/bishengir/test/Dialect/HFusion/hfusion-simplify-ops.mlir",
+  "chip_profile": null,
+  "core_ratio": null,
+  "compile_argv": [
+    "bishengir-opt",
+    "-allow-unregistered-dialect",
+    "-convert-hfusion-to-hivm"
+  ],
+  "entry_functions": [
+    "pair"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "split_index": 2
+}

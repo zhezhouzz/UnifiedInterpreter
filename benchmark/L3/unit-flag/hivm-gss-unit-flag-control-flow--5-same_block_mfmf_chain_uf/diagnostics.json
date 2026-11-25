@@ -1,0 +1,14 @@
+[
+  {
+    "function": "same_block_mfmf_chain_uf",
+    "location": "loc(\"<stdin>\":26:5)",
+    "op": "hivm.hir.mmadL1",
+    "reason": "mmadL1 sync_related_args require internal MTE1/M protocol"
+  },
+  {
+    "function": "same_block_mfmf_chain_uf",
+    "location": "loc(\"<stdin>\":44:5)",
+    "op": "hivm.hir.mmadL1",
+    "reason": "mmadL1 sync_related_args require internal MTE1/M protocol"
+  }
+]

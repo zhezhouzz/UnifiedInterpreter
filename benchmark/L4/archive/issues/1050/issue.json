@@ -1,0 +1,8 @@
+{
+  "title": "[Performance]: use NDDMA for short slice rows",
+  "iid": 1050,
+  "updated_at": "2026-11-23T15:05:49.351+08:00",
+  "state": "closed",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1050",
+  "linked_mrs": []
+}

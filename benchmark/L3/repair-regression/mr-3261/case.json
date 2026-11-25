@@ -1,0 +1,23 @@
+{
+  "id": "repair-regression/mr-3261",
+  "tier": "L3",
+  "category": "repair-regression",
+  "source_ref": "https://gitcode.com/Ascend/AscendNPU-IR/blob/e507be8a4d921a3efa93e3c501071e112592b3e4/bishengir/test/Dialect/HIVM/hivm-create-preload.mlir",
+  "chip_profile": null,
+  "core_ratio": null,
+  "compile_argv": [
+    "bishengir-opt",
+    "-create-preload"
+  ],
+  "entry_functions": [
+    "_sdpa_infer_kernel_infer_workspace_shape_function",
+    "_sdpa_infer_kernel_infer_task_type_function",
+    "_sdpa_infer_kernel_mix_aic",
+    "_sdpa_infer_kernel_mix_aiv"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "split_index": 0,
+  "upstream_path": "bishengir/test/Dialect/HIVM/hivm-create-preload.mlir"
+}

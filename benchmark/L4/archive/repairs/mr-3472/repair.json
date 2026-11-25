@@ -1,0 +1,12 @@
+{
+  "issue": null,
+  "mr": "3472",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/3472",
+  "commit": "7ed12d3ee6d8dc84748180db798aa06324a3f1fb",
+  "parent": "367dfcce62ed4a0e78f38333692ce578f7bd37aa",
+  "title": "[HIVM][GraphSyncSolver] fix: trace zero-trip aliases",
+  "tests": [
+    "bishengir/test/Dialect/HIVM/SyncSolver/hivm-gss-yield-multi-buffer.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

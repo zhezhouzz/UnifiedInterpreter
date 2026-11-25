@@ -1,0 +1,26 @@
+[
+  {
+    "function": "test_batchMmadL1",
+    "location": "loc(\"<stdin>\":3:14)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "test_batchMmadL1",
+    "location": "loc(\"<stdin>\":4:16)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "test_batchMmadL1",
+    "location": "loc(\"<stdin>\":5:16)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "test_batchMmadL1",
+    "location": "loc(\"<stdin>\":11:5)",
+    "op": "hivm.hir.batchMmadL1",
+    "reason": "missing Core interpretation"
+  }
+]

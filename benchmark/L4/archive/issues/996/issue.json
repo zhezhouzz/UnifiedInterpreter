@@ -1,0 +1,10 @@
+{
+  "title": "[Bug]: [HIVM] Rank-4 device printing aborts when sharing a load with batch matmul",
+  "iid": 996,
+  "updated_at": "2026-11-19T10:04:28.629+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/996",
+  "linked_mrs": [
+    "4950"
+  ]
+}

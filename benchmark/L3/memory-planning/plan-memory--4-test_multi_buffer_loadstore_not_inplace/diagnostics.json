@@ -1,0 +1,26 @@
+[
+  {
+    "function": "test_multi_buffer_loadstore_not_inplace",
+    "location": "loc(\"<stdin>\":12:7)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_multi_buffer_loadstore_not_inplace",
+    "location": "loc(\"<stdin>\":14:7)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_multi_buffer_loadstore_not_inplace",
+    "location": "loc(\"<stdin>\":16:7)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_multi_buffer_loadstore_not_inplace",
+    "location": "loc(\"<stdin>\":18:7)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  }
+]

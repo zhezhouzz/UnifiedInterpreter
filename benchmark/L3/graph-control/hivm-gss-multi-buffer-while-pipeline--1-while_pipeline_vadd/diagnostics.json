@@ -1,0 +1,8 @@
+[
+  {
+    "function": "while_pipeline_vadd",
+    "location": "loc(\"<stdin>\":5:10)",
+    "op": "scf.while",
+    "reason": "missing Core interpretation"
+  }
+]

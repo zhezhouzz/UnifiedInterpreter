@@ -1,0 +1,20 @@
+{
+  "id": "repair-regression/mr-3406",
+  "tier": "L3",
+  "category": "repair-regression",
+  "source_ref": "https://gitcode.com/Ascend/AscendNPU-IR/blob/a930f820919495b57e5a563097044829c262bfe3/bishengir/test/Dialect/HIVM/tile-cube-vector-loop.mlir",
+  "chip_profile": null,
+  "core_ratio": null,
+  "compile_argv": [
+    "bishengir-opt",
+    "-tile-cube-vector-loop=tile-mix-cube-loop=4"
+  ],
+  "entry_functions": [
+    "test_cube"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "split_index": 2,
+  "upstream_path": "bishengir/test/Dialect/HIVM/tile-cube-vector-loop.mlir"
+}
