@@ -1,0 +1,145 @@
+{
+  "profile": "host-float64",
+  "configuration": {
+    "batch": 1,
+    "heads": 1,
+    "N": 128,
+    "D": 128,
+    "causal": false,
+    "program_count": 20,
+    "scale": 1.0
+  },
+  "baselines": {
+    "hfusion": {
+      "path": "artifacts/flash_attention/ir/hfusion_level.mlir",
+      "sha256": "e1a4a761750428433d0b757e9087c07b2fd632491399a472f3a5a2fb98ec552c"
+    },
+    "hivm": {
+      "path": "artifacts/flash_attention/ir/attention_hivm_compute.mlir",
+      "sha256": "bcf2542c1915b135dfd223f37a5b491ee306b80b53592831b0b7c6c22094078e"
+    }
+  },
+  "inputs": {
+    "uniform-logits": {
+      "V": {"entries": [[1, 0, 1]]}
+    },
+    "asymmetric-key": {
+      "Q": {"columns": [[0, 1]]},
+      "K": {"entries": [[0, 1, 1]]},
+      "V": {"entries": [[1, 0, 1]]}
+    }
+  },
+  "source_expected": {
+    "kind": "output",
+    "O_column": 0,
+    "O_value": 0.0078125,
+    "log_sum_exp": 4.852030263919617
+  },
+  "mutations": [
+    {
+      "id": "missing-key-transpose",
+      "rule": "Preserve the key transpose when lowering QK matmul",
+      "input": "asymmetric-key",
+      "ir_expected": {
+        "kind": "output",
+        "O_column": 0,
+        "O_value": 0.02095527160970061,
+        "log_sum_exp": 4.865365036119043
+      },
+      "edits": {
+        "hfusion": [
+          {
+            "before": "%17 = linalg.matmul {input_precison = \"ieee\"} ins(%14, %transposed :",
+            "after": "%17 = linalg.matmul {input_precison = \"ieee\"} ins(%14, %15 :"
+          }
+        ],
+        "hivm": [
+          {
+            "before": "%16 = hivm.hir.mmadL1 {b_transpose} ins(%13, %14,",
+            "after": "%16 = hivm.hir.mmadL1 ins(%13, %14,"
+          }
+        ]
+      }
+    },
+    {
+      "id": "transposed-value-strides",
+      "rule": "Preserve the value buffer's strides during layout lowering",
+      "input": "uniform-logits",
+      "ir_expected": {
+        "kind": "output",
+        "O_column": 1,
+        "O_value": 0.0078125,
+        "log_sum_exp": 4.852030263919617
+      },
+      "edits": {
+        "hfusion": [
+          {
+            "before": "%reinterpret_cast_2 = memref.reinterpret_cast %arg5 to offset: [%9], sizes: [128, 128], strides: [128, 1] : memref<?xf16> to memref<128x128xf16, strided<[128, 1], offset: ?>>",
+            "after": "%reinterpret_cast_2 = memref.reinterpret_cast %arg5 to offset: [%9], sizes: [128, 128], strides: [1, 128] : memref<?xf16> to memref<128x128xf16, strided<[1, 128], offset: ?>>"
+          }
+        ],
+        "hivm": [
+          {
+            "before": "%reinterpret_cast_2 = memref.reinterpret_cast %arg5 to offset: [%8], sizes: [128, 128], strides: [128, 1] : memref<?xf16> to memref<128x128xf16, strided<[128, 1], offset: ?>>",
+            "after": "%reinterpret_cast_2 = memref.reinterpret_cast %arg5 to offset: [%8], sizes: [128, 128], strides: [1, 128] : memref<?xf16> to memref<128x128xf16, strided<[1, 128], offset: ?>>"
+          }
+        ]
+      },
+      "shared_edits": [
+        {
+          "before": "memref.copy %reinterpret_cast_2, %alloc_6 : memref<128x128xf16, strided<[128, 1], offset: ?>>",
+          "after": "memref.copy %reinterpret_cast_2, %alloc_6 : memref<128x128xf16, strided<[1, 128], offset: ?>>"
+        }
+      ]
+    },
+    {
+      "id": "wrong-denominator-reduction",
+      "rule": "Preserve the sum of exponentials when lowering normalization",
+      "input": "uniform-logits",
+      "ir_expected": {
+        "kind": "output",
+        "O_column": 0,
+        "O_value": 1,
+        "log_sum_exp": 0
+      },
+      "edits": {
+        "hfusion": [
+          {
+            "before": "%38 = arith.addf %in, %init : f32",
+            "after": "%38 = arith.maxnumf %in, %init : f32"
+          }
+        ],
+        "hivm": [
+          {
+            "before": "%26 = hivm.hir.vreduce <sum> ins",
+            "after": "%26 = hivm.hir.vreduce <max> ins"
+          }
+        ]
+      }
+    },
+    {
+      "id": "reused-output-tile-offset",
+      "rule": "Preserve the program-dependent output tile offset",
+      "input": "uniform-logits",
+      "ir_expected": {
+        "kind": "error",
+        "error": "ReadUninitialized",
+        "at": "materialize_output"
+      },
+      "edits": {
+        "hfusion": [
+          {
+            "before": "%reinterpret_cast_4 = memref.reinterpret_cast %arg7 to offset: [%13]",
+            "after": "%reinterpret_cast_4 = memref.reinterpret_cast %arg7 to offset: [%9]"
+          }
+        ],
+        "hivm": [
+          {
+            "before": "%reinterpret_cast_4 = memref.reinterpret_cast %arg7 to offset: [%12]",
+            "after": "%reinterpret_cast_4 = memref.reinterpret_cast %arg7 to offset: [%8]"
+          }
+        ]
+      }
+    }
+  ]
+}
