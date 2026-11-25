@@ -187,7 +187,7 @@ The race runner accepts `race list`, `race run NAME` and `race replay FILE`.
 See [Core Language race benchmarks](docs/race-benchmarks.md) for the benchmark
 catalog, the concrete BFS and SMT backends, and symbolic loop counts.
 For execution on the original HIVM OCaml AST, see the
-[trace interface and two-load example](docs/trace-interpreter.md).
+[trace interface and fifo-copy example](docs/trace-interpreter.md).
 
 Use an OCaml 5 switch:
 
