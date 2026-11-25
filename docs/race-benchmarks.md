@@ -82,3 +82,16 @@ dune runtest
 python3 scripts/check_race_benchmarks.py --symbolic
 python3 scripts/check_race_benchmarks.py --filter vectorlayout/ --n 4096 --kv-heads 4 --output _build/race-4096
 ```
+
+## HIVM trace 全量测试结果
+
+在 `scheduler` 提交 `b004cb0` 上，78 个 benchmark 各使用默认输入运行 BFS 和 SMT，另外 35 个支持符号参数的 benchmark 运行了符号 SMT，191 次运行全部通过。两个具体后端在每个程序上找到的目标事件对均一致。35 个程序共检出 116 对竞争，其余 43 个程序在默认输入下没有检出竞争。符号求解有 19 个程序返回 `race` 和具体的 `N`，16 个返回 `no-race`。[逐项结果 CSV](../benchmarks/results/hivm-races.csv)
+
+CSV 每行记录一个 benchmark 的默认 `N`、两个具体后端各自找到的竞争对数、符号求解状态及本次找到的 `N`。固定输入的程序留空参数和符号求解列。`no-race` 的模型列也留空，整数 `0` 表示实际参数值。仓库回归测试通过。另用两个后端各自生成的 `fifo-copy` 前缀执行复制函数，正向和反向分别得到 `[7,7,7]` 和 `[7,7,0]`。[数值重放脚本](../scripts/check_fifo_hivm.py)
+
+在仓库根目录运行以下命令可以复现全量测试。脚本从当前 benchmark 目录读取用例，检查每条前缀中两次目标访问的顺序和结束事件，并逐项比较 BFS 与 SMT 找到的目标事件对。各次运行的 JSON 报告和 `results.csv` 保存在 `_build/hivm-race-results/`。[全量测试脚本](../scripts/check_hivm_race_benchmarks.py)
+
+```sh
+dune build bin/main.exe
+python3 scripts/check_hivm_race_benchmarks.py
+```
