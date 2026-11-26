@@ -54,9 +54,9 @@ let sites node (t : transition) =
       Some {node;id;observed={reads=ranges r;writes=ranges w};conditional_writes=ranges pw;
             possible={reads=ranges (List.rev_append r pr);writes=ranges (List.rev_append w pw)}})
 
-let compile_memory ?(backend=Bug_traces.Search) ?(readonly=[])
+let compile_memory ?(backend=Bug_traces.Search) ?(readonly=[]) ?(immutable_views=[])
     ?(iteration_ordinals=false) ?describe program memory bindings =
-  let direct = Device_dependencies.direct_stores ?describe program in
+  let direct = Device_dependencies.direct_stores ?describe ~immutable_views program in
   let selectors = Hashtbl.create 16 and transfers = Hashtbl.create 64 and indexed=Hashtbl.create 16 in
   let previous = Hashtbl.create 16 and blocked = Hashtbl.create 8 and queues = Hashtbl.create 16
   and pending = Hashtbl.create 128 and flags = Hashtbl.create 32 in
@@ -73,22 +73,31 @@ let compile_memory ?(backend=Bug_traces.Search) ?(readonly=[])
       ["phase",`String e.phase;"pipe",`String (Device_ast.pipe_name e.pipe);"label",`String e.site;
        "path",Race_report.ints e.path;"iterations",Race_report.ints e.iterations] in
     descriptors := `Assoc (("choice",Device_trace.choice t.choice)::fields) :: !descriptors;
-    let earlier_writes=Hashtbl.create 4 and internal_selector=ref false in
+    let earlier_writes=Hashtbl.create 4 and source_reads=Hashtbl.create 16 and internal_selector=ref false in
     let previously_written r=match Hashtbl.find_opt earlier_writes r.bank with
-      | None -> false | Some (first,limit) -> first<r.limit && r.first<limit in
-    List.iter (fun (e : event) -> Option.iter (fun o ->
+      | None -> false | Some spans -> intersect [r] spans<>[] in
+    List.iter (fun (e : event) -> Option.iter (fun (o:observation) ->
+      if o.reads<>[] then (
+        let reads=if List.exists previously_written o.reads then None else Some o.reads in
+        let reads=match Hashtbl.find_opt source_reads e.path with
+          | Some (loops,prior) when loops=e.iterations ->
+              Option.bind prior (fun xs -> Option.map (fun ys -> ranges (xs@ys)) reads)
+          | _ -> reads in
+        Hashtbl.replace source_reads e.path (e.iterations,reads));
       if o.masks<>[] then (
         if List.exists previously_written (o.masks@o.offsets) then internal_selector:=true;
         Hashtbl.replace indexed n (ranges (o.indexed@Option.value ~default:[] (Hashtbl.find_opt indexed n)));
         let m,x=Option.value ~default:([],[]) (Hashtbl.find_opt selectors n) in
         Hashtbl.replace selectors n (ranges (o.masks@m),ranges (o.offsets@x)));
       if o.writes<>[] then (
-        let reads = if Hashtbl.mem direct (e.stream,e.path) && not (List.exists previously_written o.reads)
-          then Some o.reads else None in
+        let reads = Option.bind (Hashtbl.find_opt direct (e.stream,e.path)) (fun paths ->
+          List.fold_left (fun acc path ->
+            Option.bind acc (fun rs -> Option.bind (Hashtbl.find_opt source_reads path) (fun (_,src) ->
+              Option.map (List.rev_append rs) src))) (Some []) paths |> Option.map ranges) in
         let prev = Option.value ~default:[] (Hashtbl.find_opt transfers n) in
         Hashtbl.replace transfers n ((o.writes,reads)::prev));
-      List.iter (fun r -> Hashtbl.replace earlier_writes r.bank (match Hashtbl.find_opt earlier_writes r.bank with
-        | None -> r.first,r.limit | Some (lo,hi) -> min lo r.first,max hi r.limit)) (o.writes@o.possible_writes)
+      List.iter (fun r -> Hashtbl.replace earlier_writes r.bank
+        (ranges (r::Option.value ~default:[] (Hashtbl.find_opt earlier_writes r.bank)))) (o.writes@o.possible_writes)
     ) e.observation) t.observations;
     let parents = ref [] in
     let require a = parents := a :: !parents in
@@ -162,7 +171,9 @@ let compile_memory ?(backend=Bug_traces.Search) ?(readonly=[])
 
 let compile_program ?backend program (input : Vectorlayout_input.input) =
   let readonly = List.map (fun i -> Device_value.Global i) [4;5;6;7;8] in
-  compile_memory ?backend ~readonly program input.memory input.bindings
+  let immutable_views = List.filter_map (function
+    | name,Device_value.View v when List.mem v.bank readonly -> Some name | _ -> None) input.bindings in
+  compile_memory ?backend ~readonly ~immutable_views program input.memory input.bindings
 
 let compile ?backend variant input =
   compile_program ?backend (Vectorlayout.make variant input.Vectorlayout_input.blocks) input
