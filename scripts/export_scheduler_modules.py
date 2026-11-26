@@ -5,26 +5,15 @@ from pathlib import Path
 
 from xdsl.context import Context
 from xdsl.dialects.builtin import AffineMapAttr, Builtin, DenseArrayBase, FloatAttr, IndexType, IntegerAttr, IntegerType, MemRefType, TensorType, UnregisteredAttr, VectorType
-from xdsl.ir.affine import AffineBinaryOpExpr, AffineBinaryOpKind, AffineConstantExpr, AffineDimExpr, AffineSymExpr
 from xdsl.parser import Parser
-from xdsl.parser.affine_parser import AffineParser
+from scheduler_affine import SemiAffineMaps, affine
 
 from export_vectorlayout_ast import encode_function
 from project_hfusion_ir import compile_ir
 
 
-class SemiAffine(AffineParser):
-    def _create_binop_expr(self, lhs, rhs, binop):
-        # 保留设备布局中的半仿射乘积和除法。xDSL 的简化运算只接受常数右操作数。
-        kinds = {op.get_token(): op for op in AffineBinaryOpKind}
-        if binop.text in ("*", "mod", "ceildiv", "floordiv"):
-            return AffineBinaryOpExpr(kinds[binop.text], lhs, rhs)
-        return super()._create_binop_expr(lhs, rhs, binop)
-
-
-class ModuleParser(Parser):
-    def parse_affine_map(self):
-        return SemiAffine(self._parser_state).parse_affine_map()
+class ModuleParser(SemiAffineMaps, Parser):
+    pass
 
 
 def type_info(ty):
@@ -39,16 +28,6 @@ def type_info(ty):
     if isinstance(ty, IndexType):
         return {"kind": "integer", "bits": 64}
     return {"kind": "other", "name": str(ty)}
-
-
-def affine(expr):
-    if isinstance(expr, AffineConstantExpr):
-        return expr.value
-    if isinstance(expr, AffineDimExpr):
-        return ["d", expr.position]
-    if isinstance(expr, AffineSymExpr):
-        return ["s", expr.position]
-    return [expr.kind.get_token(), affine(expr.lhs), affine(expr.rhs)]
 
 
 def export(opt, source):

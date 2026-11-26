@@ -23,7 +23,7 @@ type operation = {
 and block = {arguments : value list; body : operation list}
 type catalog_origin = {benchmark:string; model_digest:string;
                        sites:(string * (int list * int list) list) list}
-type t = {digest : string; attributes : (string * string) list; functions : (string * operation) list;
+type t = {digest : string; format : string; attributes : (string * string) list; functions : (string * operation) list;
           catalog_origin : catalog_origin option; types : (string * Yojson.Safe.t) list;
           mlir_types : (string * typ) list; source_sha256 : string option}
 
@@ -74,7 +74,7 @@ let of_json doc =
   let types = optional_assoc Fun.id (J.member "types" doc) in
   let mlir_types = if format = `String "mlir-module-1" then List.map (fun (name,t) -> name,typ t) types
     else [] in
-  {digest;catalog_origin;types;mlir_types;
+  {digest;format=J.to_string format;catalog_origin;types;mlir_types;
    source_sha256=J.to_string_option (J.member "source_sha256" doc);
    attributes=assoc J.to_string (J.member "attributes" doc);
    functions=assoc op (J.member "functions" doc) |> List.map (fun (s,f) -> "@" ^ s,f)}
@@ -91,7 +91,7 @@ let scheduling_json ast =
     "properties",assoc str o.properties;"literals",`Assoc o.literals;
     "regions",list (list block) o.regions]
   and block b = `Assoc ["arguments",list value b.arguments;"body",list op b.body] in
-  `Assoc ["format",str "hivm-module-1";"types",`Assoc ast.types;"attributes",assoc str ast.attributes;
+  `Assoc ["format",str ast.format;"types",`Assoc ast.types;"attributes",assoc str ast.attributes;
           "source_sha256",str (Option.get ast.source_sha256);
           "functions",assoc op (List.map (fun (k,v) -> String.sub k 1 (String.length k-1),v) ast.functions)]
 type syntax = Custom | Generic | BiSheng of string

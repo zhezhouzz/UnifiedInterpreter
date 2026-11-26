@@ -19,7 +19,7 @@ type operation = {
 and block = {arguments : value list; body : operation list}
 type catalog_origin = {benchmark:string; model_digest:string;
                        sites:(string * (int list * int list) list) list}
-type t = private {digest : string; attributes : (string * string) list; functions : (string * operation) list;
+type t = private {digest : string; format : string; attributes : (string * string) list; functions : (string * operation) list;
                   catalog_origin : catalog_origin option; types : (string * Yojson.Safe.t) list;
                   mlir_types : (string * typ) list; source_sha256 : string option}
 type syntax = Custom | Generic | BiSheng of string

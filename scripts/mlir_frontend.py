@@ -1,5 +1,3 @@
-"""Parse an HFusion/HIVM MLIR module for the Core Language lowerer."""
-
 import argparse
 import json
 import subprocess
@@ -7,14 +5,33 @@ import sys
 
 from xdsl.context import Context
 from xdsl.dialects.builtin import (
-    ArrayAttr, Builtin, DenseArrayBase, DYNAMIC_INDEX, FileLineColLoc, FloatAttr,
+    AffineMapAttr, AnyFloat, ArrayAttr, Builtin, DenseArrayBase, DenseIntOrFPElementsAttr, DYNAMIC_INDEX, FileLineColLoc, FloatAttr,
     IndexType, IntegerAttr, IntegerType, MemRefType, NameLoc, NoneAttr,
     StridedLayoutAttr, StringAttr, TensorType, UnitAttr, UnregisteredOp, VectorType,
 )
 from xdsl.dialects.utils import EnumAttribute
+from xdsl.irdl import IRDLOperation, irdl_op_definition
 from xdsl.utils.exceptions import ParseError, VerifyException
 
-from attention_frontend import read_module
+from attention_dialects import context
+from attention_frontend import LocatedParser
+from scheduler_affine import SemiAffineMaps, affine, strided_layout
+
+
+@irdl_op_definition
+class HFusionBarrierOp(IRDLOperation):
+    name = "hfusion.barrier"
+    assembly_format = "attr-dict"
+
+
+class SchedulerParser(SemiAffineMaps, LocatedParser):
+    class _TensorLiteralElement(LocatedParser._TensorLiteralElement):
+        def to_type(self, parser, element_type):
+            # MLIR 的十六进制浮点常量按位编码，标量和 dense 元素遵循相同规则。
+            if isinstance(element_type, AnyFloat) and self.span.text.lower().startswith("0x"):
+                raw = self.value.to_bytes(element_type.compile_time_size, "little")
+                return next(element_type.iter_unpack(raw))
+            return super().to_type(parser, element_type)
 
 
 def opcode(op):
@@ -67,7 +84,9 @@ def type_info(typ):
         if isinstance(typ, MemRefType):
             info["space"] = None if isinstance(typ.memory_space, NoneAttr) else str(typ.memory_space)
             if isinstance(typ.layout, StridedLayoutAttr):
-                info.update(layout="strided", offset=typ.get_offset(), strides=typ.get_strides())
+                info.update(layout="strided", offset=typ.get_offset(), strides=list(typ.layout.get_strides()))
+            elif isinstance(typ.layout, AffineMapAttr):
+                info.update(strided_layout(typ.layout.data) or {"layout": "opaque"})
             else:
                 info["layout"] = "identity" if isinstance(typ.layout, NoneAttr) else "opaque"
         return info
@@ -76,6 +95,9 @@ def type_info(typ):
 
 
 def attribute_value(attr):
+    if isinstance(attr, AffineMapAttr):
+        return {"dimensions": attr.data.num_dims, "symbols": attr.data.num_symbols,
+                "results": [affine(expr) for expr in attr.data.results]}
     if isinstance(attr, IntegerAttr):
         return attr.value.data
     if isinstance(attr, FloatAttr):
@@ -86,6 +108,8 @@ def attribute_value(attr):
         return True
     if isinstance(attr, DenseArrayBase):
         return list(attr.get_values())
+    if isinstance(attr, DenseIntOrFPElementsAttr):
+        return [repr(v) if isinstance(v, float) else v for v in attr.get_values()]
     if isinstance(attr, ArrayAttr):
         return [attribute_value(value) for value in attr.data]
     if isinstance(attr, EnumAttribute):
@@ -94,11 +118,16 @@ def attribute_value(attr):
 
 
 def export_module(source, filename, generic=False, normalized=False):
-    ctx = Context(allow_unregistered=True) if generic else None
-    if ctx is not None:
+    if generic:
+        ctx = Context(allow_unregistered=True)
         ctx.load_dialect(Builtin)
+    else:
+        ctx = context()
+        ctx.load_op(HFusionBarrierOp)
     parser_filename = f"{filename} (generic assembly)" if normalized else filename
-    module, parser = read_module(source, parser_filename, ctx)
+    parser = SchedulerParser(ctx, source, parser_filename)
+    module = parser.parse_module()
+    module.verify()
     types = {}
 
     def describe_type(typ):
@@ -159,7 +188,7 @@ def main():
     try:
         if args.bishengir_opt:
             source = subprocess.run(
-                [args.bishengir_opt, "--mlir-print-op-generic", "--mlir-print-debuginfo"],
+                [args.bishengir_opt, "--verify-each", "--mlir-print-op-generic", "--mlir-print-local-scope"],
                 input=source, stdout=subprocess.PIPE, text=True, check=True,
             ).stdout
         normalized = args.bishengir_opt is not None
