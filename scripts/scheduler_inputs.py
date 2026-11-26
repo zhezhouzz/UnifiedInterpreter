@@ -45,7 +45,7 @@ def prepare_inputs(request, module):
         types = sig(entry)
         if "bindings" in inp:
             args = next(b["arguments"] for b in inp["bindings"] if b["stream"] == sid).copy()
-            if request["name"].startswith("litao/add-Ascend910B1/"):
+            if request["stage"] == "hfusion" and request["name"].startswith("litao/add-Ascend910B1/"):
                 # HFusion 的 ABI 以锁和 workspace 开始，最后三个参数是 program_id。
                 args = args[1:] + [0, 0, 0]
         elif entry == "@two_loads":

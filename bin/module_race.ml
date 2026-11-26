@@ -59,8 +59,9 @@ let input_request ?n name =
   end else if String.starts_with ~prefix:"cv/scene1/" name then
     dict ["kind",text "scene1";"model",scene_model ?query_length:n ()],n
   else
-    let pair = Hivm_trace.registered_file catalog name (Hivm_trace.ast_file name) in
-    let entries,count,inputs = Hivm_trace.core_inputs ?n pair in
+    let model = match Benchmark_traces.find catalog name with
+      | Race_benchmarks.Core launch -> launch | Device _ -> invalid_arg "expected Core launch" in
+    let entries,count,inputs = Hivm_trace.benchmark_arguments ?n name model in
     let entries = List.map (fun (id,entry) -> dict ["stream",int id;"entry",text entry]) entries in
     dict ["kind",text "core";"entries",list entries;"inputs",inputs],Option.map Z.to_int count
 
@@ -109,6 +110,13 @@ let dispatch args =
   let stages,rest = List.partition (fun x -> x="--hivm" || x="--hfusion") args in
   let args = rest @ stages in
   match args,stage_of args with
+  | ["launch-request";name;_],Some stage ->
+      let case = List.assoc name (cases ()) in
+      let launch,n = input_request name in
+      let extra = if stage="hfusion" then field "extra_arguments" case else `Null in
+      let launch = dict (("extra_arguments",extra)::assoc launch) in
+      Yojson.Safe.to_channel stdout (dict ["stage",text stage;"name",text name;"launch",launch;
+        "n",Option.fold ~none:`Null ~some:int n]); print_newline (); true
   | "list"::flags,Some stage ->
       if List.exists (fun s -> not (List.mem s ["--hfusion";"--hivm";"--json"])) flags then
         invalid_arg "unknown catalog option";

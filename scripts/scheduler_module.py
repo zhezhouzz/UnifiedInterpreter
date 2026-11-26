@@ -5,6 +5,7 @@ import operator
 from dataclasses import dataclass
 import sys
 from scheduler_inputs import prepare_inputs
+from mlir_benchmark_launch import launch_for, source_signature
 
 
 def strides(shape):
@@ -359,6 +360,11 @@ SYNCHRONOUS = TENSOR_COMPUTE | {
 def main():
     request = json.load(sys.stdin)
     module = request["module"]
+    if module["format"] == "mlir-module-1":
+        inputs = prepare_inputs(request, source_signature(module))
+        configuration = launch_for(dict(request, launch=dict(kind="explicit", value=inputs)), module, {})
+        json.dump(dict(configuration=configuration, inputs=inputs), sys.stdout)
+        return
     inputs = prepare_inputs(request, module)
     instances = inputs["instances"]
     if len({s["stream"] for s in instances}) != len(instances):

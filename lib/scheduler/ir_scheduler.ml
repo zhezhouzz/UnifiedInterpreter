@@ -36,6 +36,14 @@ let prepare ?n name stage ast launch =
   let compiled = compile (`Assoc ["module",Ast.scheduling_json ast;
     "stage",`String (stage_name stage);"name",`String name;"launch",launch;
     "n",Option.fold ~none:`Null ~some:(fun n -> `Int n) n]) in
+  if ast.format="mlir-module-1" then begin
+    let configuration = field "configuration" compiled in
+    let lowered = Hivm_trace.Mlir.lower ~configuration ast in
+    let nodes,pairs = Hivm_trace.source_event_order lowered in
+    let rules = Array.map (fun (_,parents) ->
+      Order.{requires=List.map (fun i -> [i]) parents;excludes=[]}) nodes in
+    Array.map fst nodes,rules,pairs,field "inputs" compiled,"complete"
+  end else
   let nodes = J.to_list (field "nodes" compiled) |> Array.of_list in
   let rules = Array.map (fun node -> Order.{requires=List.map integers (J.to_list (field "requires" node));
         excludes=integers (field "excludes" node)}) nodes in
