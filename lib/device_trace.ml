@@ -47,7 +47,10 @@ let bindings input =
   `Assoc (List.map (fun (name,value) ->
     name,(match value with View v -> buffer v | Reg r ->
       `Assoc ["type",string (dtype_name r.layout.element);"lane_bits",int r.layout.lane_bits;"registers",int r.registers;
-              "lanes",array (fun x -> string (Int64.to_string x)) r.lanes])) input.bindings)
+              "lanes",array (fun x -> string (Int64.to_string x)) r.lanes]
+      | Tensor t -> `Assoc ["type",string (dtype_name t.element);"shape",array int t.dimensions;
+                            "cells",array (function Some x -> string (Int64.to_string x) | None -> `Null) t.cells]))
+    input.bindings)
 
 let document variant input result : Yojson.Safe.t =
   `Assoc ["format",string "vectorlayout-1";"variant",string (Vectorlayout.variant_name variant);

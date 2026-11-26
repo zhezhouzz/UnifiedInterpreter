@@ -204,6 +204,8 @@ See [Core Language race benchmarks](docs/race-benchmarks.md) for the benchmark
 catalog, the concrete BFS and SMT backends, and symbolic loop counts.
 For execution on the original HIVM OCaml AST, see the
 [trace interface and fifo-copy example](docs/trace-interpreter.md).
+Use `race mlir FILE` to parse HFusion or HIVM MLIR and analyze a concrete launch.
+See the [MLIR input and launch guide](docs/mlir-to-core.md).
 
 Use an OCaml 5 switch:
 

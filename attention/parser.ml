@@ -119,12 +119,13 @@ let rec check_integer_range file json =
   | `List items -> List.iter (check_integer_range file) items
   | _ -> ()
 
-let parse ~file input =
+let parse_json ~script ?(arguments=[]) ~file input =
   let root = match Sys.getenv_opt "ATTENTION_ROOT" with
     | Some path -> path | None -> project_root (Sys.getcwd ()) in
   let python = Filename.concat root ".venv-attention/bin/python" in
-  let frontend = Filename.concat root "scripts/attention_frontend.py" in
-  let channels = Unix.open_process_args_full python [|python;"-B";frontend;file|] (Unix.environment ()) in
+  let frontend = Filename.concat (Filename.concat root "scripts") script in
+  let argv = Array.of_list (python :: "-B" :: frontend :: file :: arguments) in
+  let channels = Unix.open_process_args_full python argv (Unix.environment ()) in
   let stdout,stdin,stderr = channels in
   output_string stdin input;
   close_out stdin;
@@ -132,10 +133,12 @@ let parse ~file input =
   (match Unix.close_process_full channels with
   | Unix.WEXITED 0 -> ()
   | _ -> failwith ("xDSL frontend failed:\n" ^ diagnostic));
-  let json =
-    try Yojson.Safe.from_string output
-    with Yojson.Json_error message ->
-      failwith ("xDSL frontend produced malformed JSON: " ^ message) in
+  try Yojson.Safe.from_string output
+  with Yojson.Json_error message ->
+    failwith ("xDSL frontend produced malformed JSON: " ^ message)
+
+let parse ~file input =
+  let json = parse_json ~script:"attention_frontend.py" ~file input in
   check_integer_range file json;
   { name = json |> member "name" |> to_string;
     arguments = json |> member "arguments" |> to_list |> List.map argument;

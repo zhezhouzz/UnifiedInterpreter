@@ -5,44 +5,17 @@ import subprocess
 from pathlib import Path
 
 from xdsl.context import Context
-from xdsl.dialects.builtin import Builtin, UnregisteredOp
+from xdsl.dialects.builtin import Builtin
 from xdsl.parser import Parser
 
 from check_vectorlayout_sources import FUSED, function_names, sections
+from mlir_frontend import encode_function
 
 
 DIGESTS = {
     "ok": "10b036e929601b3436971e55b64faf828f3cd8b447b2233f98764305327ef4cd",
     "fail": "f5ce22f8993f97e7b5efe9ad11dbdb7a12482fb191fe8402385345cda44d2f29",
 }
-
-
-def encode_function(function):
-    # SSA 编号以函数为作用域，保留每个结果及 block 参数的原始 MLIR 类型。
-    numbers = {}
-
-    def define(value):
-        number = len(numbers)
-        numbers[value] = number
-        return [number, str(value.type)]
-
-    def block(b):
-        return {"arguments": [define(a) for a in b.args], "body": [node(o) for o in b.ops]}
-
-    def node(op):
-        if op.successors:
-            raise ValueError("unexpected CFG successor in structured vectorlayout module")
-        name = op.op_name.data if isinstance(op, UnregisteredOp) else op.name
-        return {
-            "opcode": name,
-            "operands": [numbers[v] for v in op.operands],
-            "results": [define(v) for v in op.results],
-            "attributes": {k: str(v) for k, v in op.attributes.items() if k != "op_name__"},
-            "properties": {k: str(v) for k, v in op.properties.items()},
-            "regions": [[block(b) for b in region.blocks] for region in op.regions],
-        }
-
-    return node(function)
 
 
 def main():

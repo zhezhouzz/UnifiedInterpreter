@@ -38,9 +38,9 @@ class LocatedParser(Parser):
 
     def _register_ssa_definition(self, name, values, span):
         super()._register_ssa_definition(name, values, span)
-        if len(values) != 1:
-            raise ValueError("attention profile requires individual SSA result bindings")
-        self.names[values[0]] = "%" + name
+        for index, value in enumerate(values):
+            suffix = f"#{index}" if len(values) > 1 else ""
+            self.names[value] = f"%{name}{suffix}"
 
 
 def scalar_type(typ):
@@ -158,12 +158,17 @@ def export_operation(operation, parser):
     }
 
 
-def read_program(source, filename):
+def read_module(source, filename, ctx=None):
     if version("xdsl") != "0.74.0":
         raise RuntimeError("attention requires xdsl==0.74.0")
-    parser = LocatedParser(context(), source, filename)
+    parser = LocatedParser(context() if ctx is None else ctx, source, filename)
     module = parser.parse_module()
     module.verify()
+    return module, parser
+
+
+def read_program(source, filename):
+    module, parser = read_module(source, filename)
     functions = tuple(module.body.block.ops)
     if len(functions) != 1 or not isinstance(functions[0], FuncOp):
         raise ValueError("attention input must contain exactly one function")

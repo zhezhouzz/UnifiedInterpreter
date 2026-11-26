@@ -124,7 +124,8 @@ let source name (launch : Race_benchmarks.launch) =
             nested (fun () -> let running=block ((x,Number k)::env) (site @ [0]) body in
               let v=define "arith.addi %s, %s : i128" k stride in line "scf.yield %s, %s : i128, i1" v running);
             line "}"; continue (result ^ "#1") 1 rest
-        | For _ -> invalid_arg "expected a literal fixture stride" in
+        | For _ -> invalid_arg "expected a literal fixture stride"
+        | Yield _ | Branch_values _ | For_values _ -> invalid_arg "unsupported fixture region results" in
       let env=List.map (fun x -> x,Number (Printf.sprintf "%%n%d" x)) params in
       ignore (block env [] s.body); line "return");
     line "}" in

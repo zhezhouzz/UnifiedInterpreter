@@ -57,6 +57,15 @@
  (deps (source_tree ../benchmarks/litao))
  (libraries unified_interpreter yojson))
 
+(test
+ (name test_mlir_lowering)
+ (modules test_mlir_lowering)
+ (deps (source_tree ../examples/kernels)
+       fixtures/hivm_mmad_parts.mlir fixtures/hfusion_carried_indirect.mlir fixtures/dynamic_slices.mlir
+       ../scripts/mlir_frontend.py ../scripts/attention_frontend.py
+       ../scripts/attention_dialects.py ../requirements-attention.txt)
+ (libraries hivm_trace unified_interpreter attention_runtime yojson))
+
 (rule
  (alias runtest)
  (deps (source_tree ../benchmarks) (source_tree ../examples/kernels)

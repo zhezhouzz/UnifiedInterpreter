@@ -102,19 +102,10 @@ let mappings ast stream =
     Hashtbl.add sites path origin) (device_sites stream) (source_sites ast name);
   sites
 
-let export ast (model : R.model) races =
+let export_events ~entries ~location (model : R.model) races =
   let streams = Array.of_list model.program.streams in
-  let entries = Array.map (fun s -> entry s.D.location.core) streams in
   let ids = Hashtbl.create (Array.length streams) in
   Array.iteri (fun i s -> Hashtbl.add ids s.D.location i) streams;
-  let maps = Array.map (mappings ast) streams in
-  let location (id : R.identity) =
-    let origin = Hashtbl.find maps.(id.stream) id.path and s = streams.(id.stream) in
-    let iterations = match id.loops with [] -> [] | pid::rest ->
-      let offset = pid-s.location.block in
-      if offset<0 || offset mod 28<>0 then invalid_arg "invalid block loop induction value";
-      offset/28::rest in
-    {stream=id.stream;entry=entries.(id.stream);origin;iterations} in
   let signal (src,dst,p,q,k) = {receiver=Hashtbl.find ids dst;source=p;target=q;flag=k;cross=src<>dst} in
   let action = function
     | Device_run.Compute -> Compute | Barrier_step -> Barrier
@@ -166,27 +157,41 @@ let export ast (model : R.model) races =
     | _ -> invalid_arg "expected two conflicting accesses" in
   Array.to_list (Array.mapi (fun i name -> i,name) entries),List.map race races
 
+let export ast (model : R.model) races =
+  let streams = Array.of_list model.program.streams in
+  let entries = Array.map (fun s -> entry s.D.location.core) streams in
+  let maps = Array.map (mappings ast) streams in
+  let location (id : R.identity) =
+    let origin = Hashtbl.find maps.(id.stream) id.path and s = streams.(id.stream) in
+    let iterations = match id.loops with [] -> [] | pid::rest ->
+      let offset = pid-s.location.block in
+      if offset<0 || offset mod 28<>0 then invalid_arg "invalid block loop induction value";
+      offset/28::rest in
+    {stream=id.stream;entry=entries.(id.stream);origin;iterations} in
+  export_events ~entries ~location model races
+
 let generate ?n ~kv_heads ~timeout_ms method_ variant ast =
   let config = {Vectorlayout_input.default with
     length=Option.value ~default:Vectorlayout_input.default.length n;kv_heads} in
   let name = "vectorlayout/" ^ Vectorlayout.variant_name variant in
-  let report (m : R.model) status witnesses =
+  let report (input : Vectorlayout_input.input) (m : R.model) status witnesses =
     let streams,races = export ast m witnesses in
     let coordinates = List.mapi (fun id s -> `Assoc ["stream",`Int id;"block",`Int s.D.location.block;
       "core",`String (D.core_name s.location.core)]) m.program.streams in
-    {benchmark=name;streams;n=Some (Z.of_int m.input.config.length);races;status;
+    {benchmark=name;streams;n=Some (Z.of_int input.config.length);races;status;
      inputs=`Assoc ["ast_format",`String "hivm-module-1";"ast_digest",`String ast.A.digest;
-                    "config",Device_trace.config m.input.config;
-                    "bindings",Device_trace.bindings (Vectorlayout_input.hivm_arguments m.input);
+                    "config",Device_trace.config input.config;
+                    "bindings",Device_trace.bindings (Vectorlayout_input.hivm_arguments input);
                     "coordinates",`List coordinates]} in
   match method_ with
   | Benchmark_traces.Concrete backend ->
-      let m = R.compile ~backend variant (Vectorlayout_input.make config) in
-      report m Complete_search (R.generate m)
+      let input = Vectorlayout_input.make config in
+      let m = R.compile ~backend variant input in
+      report input m Complete_search (R.generate m)
   | Symbolic ->
       if n<>None then invalid_arg "symbolic analysis requires a free N";
       match Device_symbolic.find_model ~timeout_ms variant config with
-      | Ok (m,w) -> report m Race_found [w]
+      | Ok (input,m,w) -> report input m Race_found [w]
       | Error reason -> {benchmark=name;streams=[];n=None;
                          inputs=`Assoc ["ast_format",`String "hivm-module-1";"ast_digest",`String ast.digest];
                          status=Unknown reason;races=[]}

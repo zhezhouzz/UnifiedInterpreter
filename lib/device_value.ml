@@ -3,11 +3,14 @@ open Device_ast
 (* 每个元素保存其位表示；layout 记录相邻有效元素在寄存器中的间距。 *)
 type vector = { layout : layout; registers : int; lanes : int64 array }
 type bank = Global of int | Unified of location | Cbuf of int | Matrix_a of int | Matrix_b of int | Acc of int
+          | Allocation of string
 type view = { bank : bank; ty : dtype; bit : int; shape : int array; strides : int array }
-type value = Reg of vector | View of view
+type tensor = { element : dtype; dimensions : int array; cells : int64 option array }
+type value = Reg of vector | View of view | Tensor of tensor
 
-let reg = function Reg r -> r | View _ -> invalid_arg "expected register"
-let view = function View v -> v | Reg _ -> invalid_arg "expected buffer"
+let reg = function Reg r -> r | _ -> invalid_arg "expected register"
+let view = function View v -> v | _ -> invalid_arg "expected buffer"
+let tensor = function Tensor t -> t | _ -> invalid_arg "expected an SSA tensor value"
 let truncate ty x =
   let width = bits ty in
   if width = 64 then x else Int64.logand x (Int64.pred (Int64.shift_left 1L width))
@@ -146,6 +149,7 @@ let bank_name = function Global i -> Printf.sprintf "gm%d" i
   | Unified l -> Printf.sprintf "ub%d.%s" l.block (core_name l.core)
   | Cbuf b -> Printf.sprintf "l1.%d" b | Matrix_a b -> Printf.sprintf "l0a.%d" b
   | Matrix_b b -> Printf.sprintf "l0b.%d" b | Acc b -> Printf.sprintf "l0c.%d" b
+  | Allocation name -> name
 
 type memory = (bank, bytes) Hashtbl.t
 let storage memory bank = match Hashtbl.find_opt memory bank with

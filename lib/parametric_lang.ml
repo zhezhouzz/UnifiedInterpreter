@@ -61,6 +61,7 @@ let lift_storage ctx = function
 let lift ctx = function
   | VInt n -> Integer (num ctx n) | VBool b -> Boolean (bool ctx b)
   | VFloat x -> Float x | VEvent f -> Flag (int ctx f)
+  | VBuffer _ -> raise (Unsupported "strided MLIR buffers require a concrete launch")
   | VView xs ->
       (* 相邻地址合并为区间，保持原有视图顺序。 *)
       let rec runs acc = function

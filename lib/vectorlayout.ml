@@ -16,7 +16,7 @@ let max_ x y = Binary (Max,x,y)
 let lt x y = Compare (Lt,x,y)
 let both x y = Binary (And,x,y)
 let loop index hi step body =
-  For {index;lo=z;hi;step=i step;carried=[];body;yield=[]}
+  For {index;index_type=I32;lo=z;hi;step=i step;carried=[];body;yield=[]}
 let row = v "row" and col = v "col" and t = v "t"
 let rows body = loop "row" (i 32) 1 body
 let chunks body = loop "col" (i 128) 64 body
@@ -215,7 +215,7 @@ let vector_iteration variant =
        Fill (result,negative_inf);Store (out_mask,[z],Cast (I8,vector predicate 32))]] in
   let consume =
     let valid,int_mask,offset,result,out_mask = meta variant true in
-    let inner = For {index="col";lo=z;hi=i 128;step=i 64;
+    let inner = For {index="col";index_type=I32;lo=z;hi=i 128;step=i 64;
       carried=["maxima",Broadcast (negative_inf,64)];
       body=[
         Let ("score",Read (scores variant UB false,[row;col],64) *: v "scale");
@@ -244,7 +244,7 @@ let make variant blocks =
     let iterations = if cube then cube_iteration variant else vector_iteration variant in
     let run = loop "t" (span +: i 3) 1 (iterations @ [Advance_counter "preload"]) in
     let drain = if cube then [wait FIX M z;wait MTE1 MTE2 one] else [wait MTE3 V z] in
-    let block_loop = For {index="pid";lo=Block;hi=arg 25 *: arg 26 *: arg 27;step=i 28;
+    let block_loop = For {index="pid";index_type=I32;lo=Block;hi=arg 25 *: arg 26 *: arg 27;step=i 28;
       carried=[];yield=[];body=[
         Control (60,false);Control (48,true);
         Let ("axis0",rem (v "pid") (arg 25));

@@ -1,6 +1,8 @@
 open Unified_interpreter
 module Ast = Attention_runtime.Parser
 module Module_ast = Hivm_module
+module Mlir = Mlir_lowering
+module Mlir_device = Mlir_device
 
 type pipe = Core_lang.Device.pipe = S | V | M | MTE1 | MTE2 | MTE3 | FIX
 type origin = { path : int list; opcode : string; part : string option }
@@ -56,3 +58,8 @@ val fixture_source : (string * (unit -> Race_benchmarks.benchmark)) list -> stri
 val generate : ?n:int -> ?kv_heads:int -> ?timeout_ms:int -> Benchmark_traces.method_ -> pairing -> report
 val core_inputs : ?n:int -> pairing -> (int * string) list * Z.t option * Yojson.Safe.t
 val to_json : report -> Yojson.Safe.t
+
+type lowered_mlir = Core_mlir of Mlir.t | Device_mlir of Mlir_device.t
+val lower_mlir : ?entry:string -> ?configuration:Yojson.Safe.t -> Module_ast.t -> lowered_mlir
+val analyze_mlir : backend:Bug_traces.backend -> ?hivm:bool -> lowered_mlir -> Yojson.Safe.t
+val replay_mlir : lowered_mlir -> Yojson.Safe.t -> int

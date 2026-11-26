@@ -8,7 +8,17 @@ type occurrence = { stream : int; site : int list; iterations : int list }
 type storage = Input of int | Allocated of occurrence
 type address = storage * int
 type view = address list
-type value = VInt of Z.t | VFloat of float | VBool of bool | VEvent of int | VView of view
+type buffer = {
+  storage : storage option;
+  bytes : int;
+  offset : Z.t;
+  shape : int list;
+  strides : Z.t list;
+  element_bytes : int;
+}
+type value =
+  | VInt of Z.t | VFloat of float | VBool of bool | VEvent of int | VView of view
+  | VBuffer of buffer
 type operand = Literal of value | Var of int
 type endpoint = Data of int | ScalarEnd
 type barrier = Pipe of int | All
@@ -17,13 +27,16 @@ type signal = LocalSet | LocalWait | BlockSet | BlockWait
 type command =
   | End
   | Return of operand list
+  | Yield of operand list
   | Scalar of int * int * operand list * command
   | Alloc of int * int * operand list * command
   | Issue of int * int * operand list * command
   | Sync of signal * int * endpoint * operand * command
   | Barrier of barrier * command
   | Branch of operand * command * command * command
+  | Branch_values of int list * operand * command * command * command
   | For of int * operand * operand * operand * command * command
+  | For_values of int * operand * operand * operand * (int * operand) list * int list * command * command
 
 type footprint = { reads : address list; writes : address list }
 type stream = { id : int; pipes : int list; params : (int * value) list; body : command }
@@ -64,6 +77,9 @@ let stream_plan ?loop_bound program stream =
   if Option.fold ~none:false ~some:(fun bound -> bound < 0) loop_bound then
     invalid_arg "Core_lang: negative loop bound";
   let actions = ref [] in
+  let bind variables values env =
+    if List.length variables <> List.length values then invalid_arg "Core_lang: invalid region yield";
+    List.combine variables values @ env in
   let rec run env path iterations command continue =
     let occurrence = { stream = stream.id; site = List.rev path; iterations = List.rev iterations } in
     let emit id action = actions := (id, action) :: !actions in
@@ -71,8 +87,31 @@ let stream_plan ?loop_bound program stream =
     let next env cmd = run env (0 :: path) iterations cmd continue in
     let value = lookup env in
     let args = List.map value in
+    let branch results test yes no rest =
+      let arm, cmd = match value test with
+        | VBool true -> 0, yes | VBool false -> 1, no
+        | _ -> invalid_arg "Core_lang: expected branch condition" in
+      issue Control;
+      run env (arm :: path) iterations cmd
+        (fun values -> run (bind results values env) (2 :: path) iterations rest continue) in
+    let for_loop x lo hi stride carried results body rest =
+      let lo, hi, stride = integer (value lo), integer (value hi), integer (value stride) in
+      let variables = List.map fst carried in
+      let rec loop ordinal index values =
+        let another = if Z.sign stride > 0 then Z.lt index hi else Z.gt index hi in
+        if not another then (
+          issue Control;
+          run (bind results values env) (1 :: path) iterations rest continue)
+        else if loop_bound = Some ordinal then true
+        else (
+          emit { occurrence with iterations = List.rev (ordinal :: iterations) } Control;
+          let local = bind variables values ((x, VInt index) :: env) in
+          run local (0 :: path) (ordinal :: iterations) body
+            (loop (ordinal + 1) (Z.add index stride))) in
+      Z.sign stride <> 0 && loop 0 lo (args (List.map snd carried)) in
     match command with
-    | End -> continue ()
+    | End -> continue []
+    | Yield vs -> continue (args vs)
     | Return vs -> ignore (args vs); false
     | Scalar (x, op, vs, rest) ->
         let v = program.scalar_eval stream.id op (args vs) in
@@ -103,7 +142,8 @@ let stream_plan ?loop_bound program stream =
               let receivers = List.filter_map (fun s ->
                 if program.block_edge stream.id source s.id target then Some (key s.id) else None
               ) program.streams in
-              Submit (source, Set receivers)
+              let item = Set receivers in
+              if scalar_endpoint stream source then Immediate item else Submit (source, item)
           | (LocalWait | BlockWait), Data pipe -> Submit (pipe, Wait (key stream.id))
           | (LocalWait | BlockWait), ScalarEnd -> Scalar_wait (key stream.id) in
         issue action;
@@ -111,26 +151,11 @@ let stream_plan ?loop_bound program stream =
     | Barrier (b, rest) ->
         issue (Fence (match b with Pipe p -> [p] | All -> stream.pipes));
         next env rest
-    | Branch (test, yes, no, rest) ->
-        let branch, cmd = match value test with
-          | VBool true -> 0, yes | VBool false -> 1, no
-          | _ -> invalid_arg "Core_lang: expected branch condition" in
-        issue Control;
-        run env (branch :: path) iterations cmd
-          (fun () -> run env (2 :: path) iterations rest continue)
-    | For (x, lo, hi, stride, body, rest) ->
-        let lo, hi, stride = integer (value lo), integer (value hi), integer (value stride) in
-        let rec loop ordinal index =
-          let another = if Z.sign stride > 0 then Z.lt index hi else Z.gt index hi in
-          if not another then (
-            issue Control;
-            run env (1 :: path) iterations rest continue)
-          else if loop_bound = Some ordinal then true
-          else (
-            emit { occurrence with iterations = List.rev (ordinal :: iterations) } Control;
-            run ((x, VInt index) :: env) (0 :: path) (ordinal :: iterations) body
-              (fun () -> loop (ordinal + 1) (Z.add index stride))) in
-        Z.sign stride <> 0 && loop 0 lo
+    | Branch (test, yes, no, rest) -> branch [] test yes no rest
+    | Branch_values (results, test, yes, no, rest) -> branch results test yes no rest
+    | For (x, lo, hi, stride, body, rest) -> for_loop x lo hi stride [] [] body rest
+    | For_values (x, lo, hi, stride, carried, results, body, rest) ->
+        for_loop x lo hi stride carried results body rest
   in
-  let cutoff = run stream.params [] [] stream.body (fun () -> false) in
+  let cutoff = run stream.params [] [] stream.body (fun _ -> false) in
   { actions = List.rev !actions; cutoff }

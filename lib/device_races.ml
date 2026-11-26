@@ -9,7 +9,8 @@ type access_site = {id : identity; node : int; observed : footprint; possible : 
                     conditional_writes : access list}
 type cached = {env : (string * Device_value.value) list; inputs : (access * string) list;
                outputs : (access * string) list; access : observation}
-type model = {program : Device_ast.program;input : Vectorlayout_input.input;steps : choice array;
+type model = {program : Device_ast.program; memory : Device_value.memory;
+              bindings : (string * Device_value.value) list; iteration_ordinals : bool; steps : choice array;
               source_steps : source_step array;
               parents : int list array; graph : Precedence.t; sites : access_site list;
               banks : (choice,Device_value.bank list) Hashtbl.t; cache : (choice,cached list) Hashtbl.t;
@@ -53,8 +54,9 @@ let sites node (t : transition) =
       Some {node;id;observed={reads=ranges r;writes=ranges w};conditional_writes=ranges pw;
             possible={reads=ranges (List.rev_append r pr);writes=ranges (List.rev_append w pw)}})
 
-let compile_program ?(backend=Bug_traces.Search) program (input : Vectorlayout_input.input) =
-  let direct = Device_dependencies.direct_stores program in
+let compile_memory ?(backend=Bug_traces.Search) ?(readonly=[])
+    ?(iteration_ordinals=false) ?describe program memory bindings =
+  let direct = Device_dependencies.direct_stores ?describe program in
   let selectors = Hashtbl.create 16 and transfers = Hashtbl.create 64 and indexed=Hashtbl.create 16 in
   let previous = Hashtbl.create 16 and blocked = Hashtbl.create 8 and queues = Hashtbl.create 16
   and pending = Hashtbl.create 128 and flags = Hashtbl.create 32 in
@@ -118,7 +120,7 @@ let compile_program ?(backend=Bug_traces.Search) program (input : Vectorlayout_i
       Hashtbl.replace selectors n (ranges reads,[]));
     access := List.rev_append touched !access;
     rows := !parents :: !rows; actions := t.choice :: !actions in
-  ignore (run ~on_step ~record_events:false program input.memory input.bindings);
+  ignore (run ~on_step ~record_events:false ~iteration_ordinals program memory bindings);
   let parents = Array.of_list (List.rev !rows) in
   Hashtbl.iter (fun _ (s,w) ->
     let sends = Array.of_list (List.rev s) and waits = Array.of_list (List.rev w) in
@@ -141,8 +143,8 @@ let compile_program ?(backend=Bug_traces.Search) program (input : Vectorlayout_i
       writes;
     Hashtbl.replace read_write steps.(a.node) (List.filter (fun bank ->
       List.exists (fun r -> r.bank=bank) a.possible.reads) (Hashtbl.find banks steps.(a.node)))) sites;
-  List.iter (fun i -> if Hashtbl.mem mutable_banks (Device_value.Global i) then
-    invalid_arg "device launch metadata is writable") [4;5;6;7;8];
+  List.iter (fun bank -> if Hashtbl.mem mutable_banks bank then
+    invalid_arg "device launch metadata is writable") readonly;
   let graph = Precedence.compile (match backend with Bug_traces.Search -> Bfs | Solve -> Smt) parents in
   let locations = Array.of_list program.streams in
   let blocks = Array.map (function Host s | Finish (s,_) -> locations.(s).location.block) steps in
@@ -153,10 +155,14 @@ let compile_program ?(backend=Bug_traces.Search) program (input : Vectorlayout_i
   let independent = Hashtbl.fold (fun (bank,block) () ok -> ok &&
     not (Hashtbl.fold (fun (b,k) () found -> found || (b=bank && k<>block)) readers false)) writers true &&
     Array.for_all (fun n -> List.for_all (fun p -> blocks.(p)=blocks.(n)) parents.(n)) graph.order in
-  {program;input;parents;steps;source_steps=Array.of_list (List.rev !source_steps);
+  {program;memory;bindings;iteration_ordinals;parents;steps;source_steps=Array.of_list (List.rev !source_steps);
    banks;cache=Hashtbl.create 128;graph;sites;selectors;transfers;indexed;
    blocks;independent;descriptors=Array.of_list (List.rev !descriptors);
    verified=Hashtbl.create 128;by_node;mutable_banks;read_write;writers_by_bank;host_accesses}
+
+let compile_program ?backend program (input : Vectorlayout_input.input) =
+  let readonly = List.map (fun i -> Device_value.Global i) [4;5;6;7;8] in
+  compile_memory ?backend ~readonly program input.memory input.bindings
 
 let compile ?backend variant input =
   compile_program ?backend (Vectorlayout.make variant input.Vectorlayout_input.blocks) input
@@ -180,7 +186,7 @@ let restore bank (r,data) =
 
 (* 每条已提交的 vectorlayout 计算只修改内存。缓存键包含发射时捕获的
    寄存器和实际读取的字节。部分字节写入仅恢复命中的位。 *)
-let execute model stream serial env c work =
+let execute model stream serial env (c : Device_eval.context) work =
   let key = Finish (stream,serial) and bank = Hashtbl.find c.memory in
   let entries = Option.value ~default:[] (Hashtbl.find_opt model.cache key) in
   match List.find_opt (fun e -> e.env=env && List.for_all (matches bank) e.inputs) entries with
@@ -255,7 +261,7 @@ let footprints ?(sliced=true) model nodes wanted =
   let work s i env c f = if Option.fold ~none:true ~some:(fun a -> Hashtbl.mem a (Finish (s,i))) active
     then execute model s i env c f in
   (try ignore (run ~prefix ~on_step ~execute:work ~copy_bank:(Hashtbl.mem banks) ~record_events:false
-     model.program model.input.memory model.input.bindings)
+     ~iteration_ordinals:model.iteration_ordinals model.program model.memory model.bindings)
    with Invalid_indirect_address _ -> raise (Invalid_prefix (List.hd !order)));
   let find site = (List.find (fun x -> x.node=site.node && x.id=site.id) !hits).observed in
   List.map find wanted

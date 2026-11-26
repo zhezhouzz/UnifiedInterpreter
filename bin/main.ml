@@ -49,7 +49,13 @@ let () = match Array.to_list Sys.argv with
       let run=if List.exists (fun a -> List.mem a ["--hfusion";"--hfusion-ast";"--hfusion-ir"]) args
         then Hfusion_race.run else Race.run in
       (try if not (Module_race.dispatch args) then run (Array.of_list ("race"::args)) with
-       | Arg.Help message -> print_string message | Arg.Bad message -> prerr_string message;exit 2)
+       | Arg.Help message -> print_string message
+       | Attention_runtime.Source.Error (span,message) ->
+           Printf.eprintf "%s: %s\n" (Attention_runtime.Source.describe span) message; exit 2
+       | Yojson.Json_error message | Yojson.Safe.Util.Type_error (message,_) ->
+           Printf.eprintf "invalid JSON input: %s\n" message; exit 2
+       | Arg.Bad message | Invalid_argument message | Failure message | Sys_error message ->
+           prerr_endline message; exit 2)
   | _::"vectorlayout"::args ->
       (try vectorlayout (Array.of_list ("vectorlayout"::args)) with
        | Arg.Help message -> print_string message

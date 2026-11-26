@@ -8,7 +8,7 @@ from xdsl.context import Context
 from xdsl.dialects.builtin import Builtin, NameLoc
 from xdsl.parser import Parser
 
-from export_vectorlayout_ast import encode_function
+from mlir_frontend import encode_function
 
 
 REVISION = "ee071f0409535dd13fcb2e2e96fd3e5f5ce050eb"

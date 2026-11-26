@@ -40,6 +40,8 @@ let compile ctx family n =
       match command with
       | End -> [], yes
       | Return _ -> [], bool ctx false
+      | Yield _ | Branch_values _ | For_values _ ->
+          raise (Unsupported "SSA region results require a concrete launch")
       | Scalar (x,op,vs,next) ->
           let v = eval ctx (args vs) (family.scalar stream.id op) in
           child 0 ((x,v) :: env) next
@@ -66,7 +68,7 @@ let compile ctx family n =
                 let keys = List.filter_map (fun s ->
                   if family.block_edge stream.id source s.id target then Some (channel s.id) else None
                 ) family.streams in
-                event (Some source) (Send keys)
+                event (if scalar_endpoint stream source then None else Some source) (Send keys)
             | (LocalWait | BlockWait),Data p -> event (Some p) (Consume (channel stream.id))
             | (LocalWait | BlockWait),ScalarEnd -> event None (Consume (channel stream.id)) in
           then_do [op] env next

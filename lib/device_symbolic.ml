@@ -98,11 +98,11 @@ let find_model ~timeout_ms variant config =
                (match Device_races.minimum schedule x y with
                 | Some w ->
                     Device_races.replay_witness schedule w;
-                    Ok (schedule,w)
+                    Ok (input,schedule,w)
                 | None -> query tail)
              | _ -> query tail) in
   query (List.rev !segments)
 
 let find ~timeout_ms variant config =
-  Result.map (fun (model,w) ->
-    model.Device_races.input.config,w,Device_races.events model) (find_model ~timeout_ms variant config)
+  Result.map (fun ((input : Vectorlayout_input.input),model,w) -> input.config,w,Device_races.events model)
+    (find_model ~timeout_ms variant config)

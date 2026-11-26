@@ -5,6 +5,8 @@ module C = Core_lang
 module Device_ast = C.Device
 module J = Yojson.Safe.Util
 module Module_ast = Hivm_module
+module Mlir = Mlir_lowering
+module Mlir_device = Mlir_device
 include Hivm_event
 
 let invalid fmt = Printf.ksprintf (fun s -> invalid_arg ("Hivm_trace: " ^ s)) fmt
@@ -46,11 +48,11 @@ let core_sites body =
   let rec walk site loops cmd rest =
     let next cmd = walk (0 :: site) loops cmd rest in
     match cmd with
-    | C.Return _ | End -> rest
+    | C.Return _ | End | Yield _ -> rest
     | Scalar (_, _, _, cmd) -> next cmd
-    | Branch _ -> invalid "paired conditional needs an explicit HIVM branch region mapping at %s"
+    | Branch _ | Branch_values _ -> invalid "paired conditional needs an explicit HIVM branch region mapping at %s"
                     (path_name (List.rev site))
-    | For (_, _, _, _, body, cmd) ->
+    | For (_, _, _, _, body, cmd) | For_values (_, _, _, _, _, _, body, cmd) ->
         walk (0 :: site) (List.rev site :: loops) body (walk (1 :: site) loops cmd rest)
     | (Issue (_, _, _, cmd) | Sync (_, _, _, _, cmd) | Barrier (_, cmd) | Alloc (_, _, _, cmd)) as action ->
         (List.rev site, List.rev loops, action) :: next cmd in
@@ -273,10 +275,10 @@ let catalog_pair ~root name (launch : Race_benchmarks.launch) (ast : Module_ast.
     let rec walk site cmd =
       let child i cmd = walk (site @ [i]) cmd in
       match cmd with
-      | C.End | Return _ -> ()
+      | C.End | Return _ | Yield _ -> ()
       | Scalar (_,_,_,rest) -> child 0 rest
-      | For (_,_,_,_,body,rest) -> child 0 body; child 1 rest
-      | Branch (_,a,b,rest) -> child 0 a; child 1 b; child 2 rest
+      | For (_,_,_,_,body,rest) | For_values (_,_,_,_,_,_,body,rest) -> child 0 body; child 1 rest
+      | Branch (_,a,b,rest) | Branch_values (_,_,a,b,rest) -> child 0 a; child 1 b; child 2 rest
       | Alloc (_,_,_,rest) ->
           bind site (fun code attr -> code="memref.alloc" || code="func.call" && attr "callee"=Some "@reserve");
           child 0 rest
@@ -321,7 +323,7 @@ let fixture_source catalog name = match Benchmark_traces.find catalog name with
       Fixture_source.source name launch
   | _ -> invalid "%s has an archived source" name
 
-let export_races pairing schedule witnesses =
+let export_races ~pipes ~entries ~source schedule witnesses =
   let open Race_report.Schedule in
   let index = Race_report.index schedule in
   let conflicts = Hashtbl.create (List.length schedule.pairs) in
@@ -330,7 +332,7 @@ let export_races pairing schedule witnesses =
   Array.iteri (fun i node -> match node.phase with
     | Finish f -> Hashtbl.add finish (node.id,f.pipe) i
     | Emit _ -> ()) schedule.nodes;
-  let pipe = pipe_of pairing.pipes in
+  let pipe = pipe_of pipes in
   let task id p = {id=Hashtbl.find finish (id,p);pipe=pipe p} in
   let signal (k : C.key) = {receiver=k.receiver; source=pipe k.source;
     target=(match k.target with ScalarEnd -> S | Data p -> pipe p);flag=k.flag;cross=k.block} in
@@ -338,9 +340,9 @@ let export_races pairing schedule witnesses =
     | C.Operation _ -> Compute | Bar -> Barrier
     | Set keys -> Set (List.map signal keys) | Wait k -> Wait (signal k) in
   let at (id : C.occurrence) phase action =
-    let origin = Hashtbl.find pairing.sites (id.stream,id.site) in
-    Some {location={stream=id.stream;entry=List.assoc id.stream pairing.entries;
-                    origin;iterations=id.iterations};action;phase} in
+    Option.map (fun origin ->
+      {location={stream=id.stream;entry=List.assoc id.stream entries;
+                 origin;iterations=id.iterations};action;phase}) (source id.stream id.site) in
   let convert = function
     | C.Issued (_, Control) -> None
     | Issued (id, Reserve _) -> at id (Execute None) Allocate
@@ -370,13 +372,15 @@ let generate_core ?n ~timeout_ms method_ pairing =
   let report ?schedule n status races = {benchmark=pairing.name;streams=pairing.entries;n;
                                 inputs=pairing.inputs schedule n;status;races} in
   let parameter = launch.family.parameter <> [] in
+  let export = export_races ~pipes:pairing.pipes ~entries:pairing.entries
+    ~source:(fun stream site -> Some (Hashtbl.find pairing.sites (stream,site))) in
   match method_ with
   | Benchmark_traces.Concrete backend ->
       if n <> None && not parameter then invalid "fixed entry parameters";
       let n = Z.of_int (Option.value n ~default:launch.default_n) in
       let schedule = Race_report.schedule launch n in
       let result = Race_report.witnesses backend schedule in
-      report ~schedule (if parameter then Some n else None) Complete_search (export_races pairing schedule result.races)
+      report ~schedule (if parameter then Some n else None) Complete_search (export schedule result.races)
   | Symbolic ->
       if n <> None || not parameter then invalid "symbolic analysis requires a free N";
       if launch.capacity <> 1 then report None (Unknown "symbolic analysis requires capacity 1") []
@@ -385,7 +389,7 @@ let generate_core ?n ~timeout_ms method_ pairing =
         | Unknown why -> report None (Unknown why) []
         | Race {n;witness} ->
             let schedule=Race_report.schedule launch n in
-            report ~schedule (Some n) Race_found (export_races pairing schedule [witness])
+            report ~schedule (Some n) Race_found (export schedule [witness])
 
 let generate ?n ?(kv_heads=1) ?(timeout_ms=5000) method_ = function
   | Core p -> generate_core ?n ~timeout_ms method_ p
@@ -430,3 +434,117 @@ let to_json report =
     "n",optional (fun n -> if Z.fits_int n then `Int (Z.to_int n) else `Intlit (Z.to_string n)) report.n;
     "inputs",report.inputs;
     "status",`String status;"races",`List (List.map race report.races)] @ details)
+
+let mlir_schedule (lowered : Mlir.t) =
+  Race_report.Schedule.compile ~capacity:lowered.launch.capacity lowered.program
+
+let mlir_inputs (ast : Module_ast.t) launch =
+  `Assoc (["ast_format",`String "mlir-module-1";"ast_digest",`String ast.digest] @
+          J.to_assoc (Mlir.Launch.inputs launch))
+
+let mlir_source (p : Mlir.source) =
+  let span = match p.span with
+    | None -> `Null
+    | Some s -> `Assoc ["file",`String s.file;"line",`Int s.start.line;"column",`Int s.start.column] in
+  `Assoc ["path",ints p.origin.path;"opcode",`String p.origin.opcode;
+          "part",optional (fun part -> `String part) p.origin.part;
+          "span",span;"synthetic",`Bool p.synthetic]
+
+let mlir_events (lowered : Mlir.t) (schedule : Race_report.Schedule.t) =
+  let points = List.to_seq lowered.sources |> Hashtbl.of_seq in
+  let events = Race_report.events_of (Array.get lowered.operation_names) schedule |> J.to_list in
+  let annotate event (node : Race_report.Schedule.node) =
+    match Hashtbl.find_opt points (node.id.stream,node.id.site) with
+    | None -> event
+    | Some (p : Mlir.source) ->
+        `Assoc (J.to_assoc event @ ["origin",mlir_source p]) in
+  `List (List.map2 annotate events (Array.to_list schedule.nodes))
+
+let analyze_core_mlir ~backend ~hivm (lowered : Mlir.t) =
+  let schedule = mlir_schedule lowered in
+  let witnesses = Race_report.witnesses backend schedule in
+  let entries = List.map (fun (s : Mlir.Launch.stream) -> s.id,s.entry) lowered.launch.streams in
+  let name = String.concat "," (List.map snd entries) and inputs = mlir_inputs lowered.ast lowered.launch in
+  if hivm then (
+    let points = List.to_seq lowered.sources |> Hashtbl.of_seq in
+    let source stream site = match Hashtbl.find_opt points (stream,site) with
+      | Some p when p.synthetic -> None
+      | Some p -> Some p.origin
+      | None -> invalid "missing source in lowered stream %d at %s" stream (path_name site) in
+    let pipes = List.map (fun p -> Mlir.pipe_id p,p) [S;V;M;MTE1;MTE2;MTE3;FIX] in
+    let races = export_races ~pipes ~entries ~source schedule witnesses.races in
+    to_json {benchmark=name;streams=entries;n=None;inputs;status=Complete_search;races})
+  else
+    let index = Race_report.index schedule in
+    `Assoc ["format",`String "core-race-1";"benchmark",`String name;
+            "backend",`String (match backend with Search -> "bfs" | Solve -> "smt");
+            "status",`String "complete";"capacity",`Int lowered.launch.capacity;
+            "inputs",inputs;"address_unit",`String "byte";"events",mlir_events lowered schedule;
+            "races",`List (List.map (Race_report.core_race schedule index) witnesses.races)]
+
+let verify_mlir_report report inputs capacity unit events =
+  if J.member "format" report <> `String "core-race-1" || J.member "inputs" report <> inputs ||
+     J.member "capacity" report <> `Int capacity || J.member "address_unit" report <> `String unit ||
+     J.member "events" report <> events
+  then invalid "MLIR report does not match this source module and launch";
+  J.to_list (J.member "races" report)
+
+let replay_core_mlir (lowered : Mlir.t) report =
+  let schedule = mlir_schedule lowered in
+  let races = verify_mlir_report report (mlir_inputs lowered.ast lowered.launch) lowered.launch.capacity
+      "byte" (mlir_events lowered schedule) in
+  List.iter (Race_report.replay_core schedule) races;
+  2 * List.length races
+
+type lowered_mlir = Core_mlir of Mlir.t | Device_mlir of Mlir_device.t
+
+let lower_mlir ?entry ?configuration ast =
+  let launch = Mlir.Launch.bind ?entry ?configuration ast in
+  if Mlir_device.required launch then Device_mlir (Mlir_device.lower_with_launch ast launch)
+  else Core_mlir (Mlir.lower_with_launch ast launch)
+
+let mlir_device_model ~backend (lowered : Mlir_device.t) =
+  let points = List.to_seq lowered.sources |> Hashtbl.of_seq in
+  let rec describe stream path message = match Hashtbl.find_opt points (stream,path) with
+    | Some (p : Mlir.source) ->
+        let location = Option.fold p.span ~none:"" ~some:(fun span ->
+          Attention_runtime.Source.describe span ^ ": ") in
+        location ^ p.origin.opcode ^ ": " ^ message
+    | None -> (match List.rev path with
+        | _::parent -> describe stream (List.rev parent) message | [] -> message) in
+  Device_races.compile_memory ~backend ~iteration_ordinals:true ~describe
+    lowered.program lowered.memory lowered.bindings
+
+let analyze_device_mlir ~backend ~hivm (lowered : Mlir_device.t) =
+  let model = mlir_device_model ~backend lowered in
+  let races = Device_races.generate model in
+  let inputs = mlir_inputs lowered.ast lowered.launch and name = lowered.program.name in
+  if hivm then (
+    let entries = Array.of_list (List.map (fun (s : Mlir.Launch.stream) -> s.entry) lowered.launch.streams) in
+    let points = List.to_seq lowered.sources |> Hashtbl.of_seq in
+    let location (id : Device_races.identity) =
+      let origin = (Hashtbl.find points (id.stream,id.path) : Mlir.source).origin in
+      {stream=id.stream;entry=entries.(id.stream);origin;iterations=id.loops} in
+    let streams,races = Vectorlayout_hivm.export_events ~entries ~location model races in
+    to_json {benchmark=name;streams;n=None;inputs;status=Complete_search;races})
+  else
+    let sources = List.map (fun ((stream,path),source) ->
+        `Assoc ["stream",`Int stream;"path",ints path;"origin",mlir_source source]) lowered.sources in
+    `Assoc ["format",`String "core-race-1";"benchmark",`String name;
+            "backend",`String (match backend with Search -> "bfs" | Solve -> "smt");
+            "status",`String "complete";"capacity",`Int lowered.launch.capacity;
+            "inputs",inputs;"address_unit",`String "bit";"events",Device_races.events model;
+            "sources",`List sources;"races",`List races]
+
+let analyze_mlir ~backend ?(hivm=false) = function
+  | Core_mlir p -> analyze_core_mlir ~backend ~hivm p
+  | Device_mlir p -> analyze_device_mlir ~backend ~hivm p
+
+let replay_mlir lowered report = match lowered with
+  | Core_mlir p -> replay_core_mlir p report
+  | Device_mlir p ->
+      let model = mlir_device_model ~backend:Bug_traces.Search p in
+      let races = verify_mlir_report report (mlir_inputs p.ast p.launch) p.launch.capacity
+          "bit" (Device_races.events model) in
+      List.iter (Device_races.replay_witness model) races;
+      2 * List.length races

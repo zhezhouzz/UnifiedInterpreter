@@ -50,8 +50,8 @@ let replay_core schedule j =
 let schedule launch n =
   Race_schedule.compile ~capacity:launch.Litao_benchmark.capacity (Parametric_lang.instantiate launch.family n)
 
-let events launch schedule =
-  let item = function Operation (op,_) -> launch.Litao_benchmark.op_name op
+let events_of op_name schedule =
+  let item = function Operation (op,_) -> op_name op
     | Set _ -> "set" | Wait _ -> "wait" | Bar -> "barrier" in
   `List (Array.to_list (Array.map (fun node ->
     let phase,kind,pipe = match node.phase with
@@ -62,6 +62,8 @@ let events launch schedule =
       | Finish {pipe;item=i;_} -> "done",item i,Some pipe in
     `Assoc ["id",occurrence node.id;"phase",`String phase;"operation",`String kind;
            "pipe",Option.fold ~none:`Null ~some:(fun p -> `Int p) pipe]) schedule.nodes))
+
+let events launch = events_of launch.Litao_benchmark.op_name
 
 let witnesses backend schedule = match backend with
   | Bug_traces.Search -> Race_search.generate schedule

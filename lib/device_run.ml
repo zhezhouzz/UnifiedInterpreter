@@ -16,7 +16,8 @@ type _ Effect.t += Enqueue : task * bool -> unit Effect.t
 type fiber = { mutable next : (unit -> unit) option; mutable blocked : int option;
                mutable tasks : task list }
 
-let run ?schedule ?prefix ?on_step ?on_stop ?execute ?copy_bank ?(record_events=true) (program : program) inputs bindings =
+let run ?schedule ?prefix ?on_step ?on_stop ?execute ?copy_bank ?(record_events=true)
+    ?(iteration_ordinals=false) (program : program) inputs bindings =
   if program.register_bytes <= 0 then invalid_arg "invalid register size";
   let memory = Hashtbl.create (Hashtbl.length inputs) in
   Hashtbl.iter (fun k b -> Hashtbl.add memory k
@@ -86,14 +87,17 @@ let run ?schedule ?prefix ?on_step ?on_stop ?execute ?copy_bank ?(record_events=
           let lo = num l.lo and hi = num l.hi and step = num l.step in
           if step <= 0 || List.length l.carried <> List.length l.yield then invalid_arg "invalid loop";
           let names = List.map fst l.carried in
-          let rec repeat i values =
+          let rec repeat ordinal i values =
             if i >= hi then List.combine names values @ env else
-            let inner = (l.index,scalar I32 (Int64.of_int i)) :: List.combine names values @ env in
-            let scope = block nested p site path (loops @ [i]) inner l.body in
-            current := p,site,path,loops @ [i];
+            let inner = (l.index,scalar l.index_type (Int64.of_int i)) :: List.combine names values @ env in
+            let loops = loops @ [if iteration_ordinals then ordinal else i] in
+            let scope = block nested p site path loops inner l.body in
+            current := p,site,path,loops;
             let values = List.map (eval c scope) l.yield in
-            flush c "yield"; repeat (i+step) values in
-          repeat lo (List.map (fun (_,e) -> ev e) l.carried)
+            flush c "yield";
+            let next = if i > max_int-step then hi else i+step in
+            repeat (ordinal+1) next values in
+          repeat 0 lo (List.map (fun (_,e) -> ev e) l.carried)
       | Issue (queue,label,body) ->
           require_host ();
           let work () = ignore (block true queue label path loops env body) in
@@ -117,10 +121,12 @@ let run ?schedule ?prefix ?on_step ?on_stop ?execute ?copy_bank ?(record_events=
       | Debug (label,e) ->
           let data = match ev e with
             | Reg r -> Array.to_list r.lanes
-            | View v -> List.init (product v.shape) (fun i -> read c v (coords v.shape i)) in
+            | View v -> List.init (product v.shape) (fun i -> read c v (coords v.shape i))
+            | Tensor t -> List.init (Array.length t.cells) (fun i ->
+                tensor_cell t (coords t.dimensions i)) in
           record c "debug" (label ^ " " ^ String.concat "," (List.map Int64.to_string data)); env
-      | (Store _ | Masked_store _ | Copy _ | Fill _ | Indirect_load _ | Indirect_store _
-        | Nd2nz _ | Mmad _ | Fixpipe_row_split _) -> memory_op c env cmd; env in
+      | (Store _ | Masked_store _ | Copy _ | Copy_tensor _ | Fill _ | Indirect_load _ | Indirect_store _
+        | Scatter_tensor _ | Nd2nz _ | Mmad _ | Fixpipe_row_split _) -> memory_op c env cmd; env in
     fiber.next <- Some (fun () ->
       Effect.Deep.match_with (fun () -> ignore (block false S "scalar" [] [] bindings stream.body)) ()
         {retc=(fun () -> fiber.next <- None);exnc=raise;

@@ -26,9 +26,17 @@ type expr =
   | Reduce_max of expr
   | Buffer of space * dtype * expr * expr list * expr list
   | Strided_view of expr * expr * expr list * expr list
+  | Reinterpret_view of expr * expr * expr list * expr list
   | Slice of expr * expr list * expr list * expr list
   | Reshape of expr * expr list
   | Read of expr * expr list * int
+  | Empty_tensor of dtype * expr list
+  | Tensor_fill of expr * expr
+  | Tensor_range of expr * expr list * expr
+  | Tensor_compare of comparison * expr * expr * expr
+  | Tensor_get of expr * expr list
+  | Tensor_insert of expr * expr list * expr
+  | Gather_tensor of expr * expr * expr * expr * expr
   | Counter of string
 
 type channel = Local | Cross
@@ -48,14 +56,16 @@ type instruction =
   | Store of expr * expr list * expr
   | Masked_store of expr * expr list * expr * expr * packing
   | Copy of expr * expr
+  | Copy_tensor of expr * expr
   | Fill of expr * expr
   | Indirect_load of expr * expr * expr * expr * expr
   | Indirect_store of expr * expr * expr * expr
+  | Scatter_tensor of expr * expr * expr * expr
   | Nd2nz of expr * expr
   | Mmad of expr * expr * expr * expr * int * int * int * bool
   | Fixpipe_row_split of expr * expr * expr
 and loop = {
-  index : string; lo : expr; hi : expr; step : expr;
+  index : string; index_type : dtype; lo : expr; hi : expr; step : expr;
   carried : (string * expr) list; body : instruction list; yield : expr list;
 }
 
