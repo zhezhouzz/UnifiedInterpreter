@@ -86,6 +86,7 @@
  (deps
   flash_attention_mutation_test.exe
   fixtures/flash_attention_mutations.json
+  ../scripts/ir_mutation_dataset.py
   ../artifacts/flash_attention/ir/hfusion_level.mlir
   ../artifacts/flash_attention/ir/attention_hivm_compute.mlir
   ../scripts/attention_frontend.py

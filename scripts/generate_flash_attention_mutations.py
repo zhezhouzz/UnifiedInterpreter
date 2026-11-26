@@ -2,20 +2,16 @@
 """Export the archived FlashAttention IR mutations and their analytic oracles."""
 
 import argparse
-import difflib
 import hashlib
 import json
 import subprocess
 import tempfile
 from pathlib import Path
 
+from ir_mutation_dataset import write_json, write_mutation
+
 
 SPEC = Path("attention_test/fixtures/flash_attention_mutations.json")
-
-
-def write_json(path, data):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, allow_nan=False) + "\n", encoding="utf-8")
 
 
 def expand_input(pattern, config):
@@ -43,15 +39,6 @@ def expand_expected(expected, config):
         "O": [row] * config["N"],
         "log_sum_exp": [expected["log_sum_exp"]] * config["N"],
     }
-
-
-def mutate(source, edits, case_id):
-    for edit in edits:
-        before, after = edit["before"], edit["after"]
-        if source.count(before) != 1 or before == after:
-            raise ValueError(f"{case_id}: expected a unique, changing IR anchor: {before!r}")
-        source = source.replace(before, after, 1)
-    return source
 
 
 def generate(root, output):
@@ -84,17 +71,7 @@ def generate(root, output):
         for stage, source in sources.items():
             case_id = f"{stage}-{mutation['id']}"
             edits = mutation["edits"][stage] + mutation.get("shared_edits", [])
-            mutant = mutate(source, edits, case_id)
-            ir, patch = f"cases/{case_id}.mlir", f"cases/{case_id}.diff"
-            (output / ir).parent.mkdir(parents=True, exist_ok=True)
-            (output / ir).write_text(mutant, encoding="utf-8")
-            diff = difflib.unified_diff(
-                source.splitlines(keepends=True),
-                mutant.splitlines(keepends=True),
-                fromfile=baselines[stage]["ir"],
-                tofile=ir,
-            )
-            (output / patch).write_text("".join(diff), encoding="utf-8")
+            ir, patch = write_mutation(output, case_id, source, baselines[stage]["ir"], edits)
             cases.append({
                 "id": case_id,
                 "stage": stage,
