@@ -40,3 +40,22 @@ Core 转换保留调度所需的标量计算、循环和分支、函数调用、
 当向量函数生成间接访存所用的掩码和偏移时，转换器将这些指令编译为 `Core_lang.Device.program`。每条候选 trace 使用相应顺序下的寄存器值和内存值计算实际访问的位区间。源级 trace 用原始 `func.call` 的位置标识向量任务的提交和完成。[向量函数与间接访存转换](../lib/hivm/mlir_indexed_kernel.ml) · [访问区间和回放](../lib/device_races.ml)
 
 `complete` 表示完成了当前模型对给定输入的分析。遇到尚未建模的操作或调度所需的数据时，分析保留可执行的前缀。找到能够按两种相反顺序回放的冲突端点时返回 `race`；缺少这样的前缀时返回 `unknown` 并给出原因。
+
+全量测试直接读取目录登记的 84 个 benchmark 在两个 IR 层的源文件，校验源码摘要，分别运行 BFS 和 SMT，回放 Core 前缀，并逐事件核对源函数、操作路径、调用和完成顺序。运行以下命令，环境变量 `BISHENGIR_OPT` 需指向本机的编译器可执行文件。[测试脚本](../scripts/check_mlir_matrix.py) · [启动输入](../scripts/mlir_benchmark_launch.py) · [逐项结果](../benchmarks/results/scheduler-mlir-matrix.csv)
+
+```sh
+dune build bin/main.exe
+.venv-attention/bin/python -B scripts/check_mlir_matrix.py \
+  --bishengir-opt "$BISHENGIR_OPT" --output _build/scheduler-mlir-matrix --jobs 8 --timeout 300
+```
+
+测试要求每份报告的状态为 `complete`。每对竞争都需要回放两条前缀，两个后端需要给出相同的源操作端点。CV 场景 1 的启动配置包含两个稀疏索引位置，两个位置均按本次模型给出的索引初始化。[场景 1 启动输入](../scripts/scheduler_scene.py)
+
+84 个 benchmark 在 HFusion 和 HIVM 两层分别通过 BFS 和 SMT 的全程序分析，共 336 次。下表给出四个 HIVM 用例在本次启动输入下的结果。两个后端分别得到表中的竞争数量，并各自回放了最后一列所列的前缀数。
+
+| HIVM benchmark | 竞争事件对 | 每种后端回放的 trace 前缀 |
+| --- | ---: | ---: |
+| `cv/scene1/correct` | 68 | 136 |
+| `cv/scene1/error` | 68 | 136 |
+| `vectorlayout/fail` | 29 | 58 |
+| `vectorlayout/ok` | 33 | 66 |

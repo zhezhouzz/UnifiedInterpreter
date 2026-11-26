@@ -13,7 +13,7 @@ def endpoints(doc):
 
 def verify_locations(module, doc):
     fmt = doc["format"]
-    full_path = fmt == "ir-race-1" or (fmt == "hivm-race-1" and doc["inputs"].get("ast_format") == "hivm-module-1")
+    full_path = fmt == "ir-race-1" or (fmt == "hivm-race-1" and doc["inputs"].get("ast_format") in ("hivm-module-1","mlir-module-1"))
     def locate(entry, path):
         body = module["functions"][entry.removeprefix("@")]["regions"][0][0]["body"]
         i = 0
@@ -40,6 +40,7 @@ def verify_locations(module, doc):
     for race in doc["races"]:
         for key in ("forward","reverse"):
             pending = {}
+            submitted = set()
             for event in race[key]:
                 entry = entries[event["stream"]]
                 for frame in event.get("calls", []):
@@ -49,16 +50,19 @@ def verify_locations(module, doc):
                 op = locate(entry, event["path"])
                 if entry != event["entry"] or op["opcode"] != event["opcode"]:
                     raise ValueError(f"wrong source location {event}")
+                if op["opcode"] in ("memref.alloc", "memref.alloca") or event.get("action") == "allocate":
+                    raise ValueError(f"address allocation consumed a scheduler event: {event}")
                 if "callee" in event and op["properties"]["callee"] != event["callee"]:
                     raise ValueError("incorrect vector function")
                 phase = event["phase"]
                 if phase in ("submit","complete"):
                     for task in event.get("tasks", [event]):
                         ident = event["stream"], (task["id"] if "id" in task else task["task"])
-                        where = entry, event["path"], event["iterations"], task["pipe"]
+                        where = entry, event["path"], event["iterations"], event.get("calls", []), event.get("part"), task["pipe"]
                         if phase == "submit":
-                            if ident in pending:
+                            if ident in submitted:
                                 raise ValueError("duplicate submission")
+                            submitted.add(ident)
                             pending[ident] = where
                         elif pending.pop(ident) != where:
                             raise ValueError("completion differs from submission")

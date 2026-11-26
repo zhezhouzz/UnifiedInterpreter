@@ -56,7 +56,7 @@ All 84 benchmarks support both BFS and SMT at both IR stages. Use
 and two prefixes in which the conflicting accesses complete in opposite orders.
 The interpreter can pass its AST to the [shared OCaml scheduler](lib/scheduler/ir_scheduler.mli).
 See the [trace guide](docs/scheduler-traces.md) and the
-[results for every benchmark, stage and backend](benchmarks/results/scheduler-matrix.csv).
+[BFS and SMT results for each parsed HFusion and HIVM source](benchmarks/results/scheduler-mlir-matrix.csv).
 The tensor frontend also supports symbolic loop counts, for example
 `race run strided-output --hfusion --backend symbolic`.
 
@@ -205,7 +205,11 @@ catalog, the concrete BFS and SMT backends, and symbolic loop counts.
 For execution on the original HIVM OCaml AST, see the
 [trace interface and fifo-copy example](docs/trace-interpreter.md).
 Use `race mlir FILE` to parse HFusion or HIVM MLIR and analyze a concrete launch.
-See the [MLIR input and launch guide](docs/mlir-to-core.md).
+From OCaml, pass the same parsed module and launch parameters to
+`Ir_scheduler.generate_mlir` to obtain source-level trace prefixes.
+See the [interpreter interface](docs/scheduler-traces.md), the
+[MLIR input and launch guide](docs/mlir-to-core.md) and the
+[per-benchmark BFS and SMT results](benchmarks/results/scheduler-mlir-matrix.csv).
 
 Use an OCaml 5 switch:
 
