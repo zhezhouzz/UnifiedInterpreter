@@ -3,7 +3,7 @@ def scene_inputs(request, module):
     q, heads, dim = model["query_length"], 16, 128
     slots = 2
     sizes = [8, 4096, q*heads*dim*2, slots*128*dim*2, slots*128*dim*2,
-             slots*128*dim*2, 4, q*heads*dim*2, slots*4, 8, 8, 4, 4]
+             slots*128*dim*2, slots*4, q*heads*dim*2, slots*4, 8, 8, 4, 4]
     args = [dict(storage=f"gm:{i}", bytes=size) for i, size in enumerate(sizes)]
     args.extend([1, heads, dim, 1, 0.125, heads*dim, dim, 128*dim, dim, dim, 128*dim,
                  dim, dim, 1, 1, 1, heads*dim, dim, slots, 1, 1, 1])
@@ -24,7 +24,7 @@ def scene_inputs(request, module):
         raise ValueError("missing sparse attention kernel entry")
     memory = {"gm:9": {"0": 0, "32": q}, "gm:10": {"0": 0, "32": model["active_rows"]},
               "gm:11": {"0": model["key_length"]}, "gm:12": {"0": model["key_length"]-1},
-              "gm:6": {"0": model["sparse_index"]},
+              "gm:6": {str(i*32): model["sparse_index"] for i in range(slots)},
               "gm:8": {str(model["sparse_index"]*32): model["physical_page"]}}
     return {"grid": [1, 1, 1], "instances": sorted(instances, key=lambda s: s["stream"]),
             "model": model, "memory": memory, "initial_default": 0,

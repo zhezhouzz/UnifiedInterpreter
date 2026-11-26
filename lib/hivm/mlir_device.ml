@@ -32,8 +32,14 @@ let contains (launch : Launch.t) predicate =
     predicate op || List.exists (List.exists (block predicate)) op.regions) b.body in
   List.exists (fun (s : Launch.stream) -> block predicate s.ast) launch.streams
 
+let indexed_kernel launch =
+  not launch.Launch.hfusion &&
+  contains launch (fun op -> List.mem op.opcode ["hivm.hir.indirect_load";"hivm.hir.indirect_store"]) &&
+  contains launch (fun op -> op.opcode="func.call" && Shared.attribute op "hivm.vector_function"<> `Null)
+
 let required (launch : Launch.t) =
   let contains = contains launch in
+  indexed_kernel launch ||
   contains (fun op -> List.mem op.opcode indexed_ops) &&
   not (contains (fun op -> op.opcode="func.call" ||
          (launch.hfusion && List.mem op.opcode ["linalg.matmul";"hfusion.elemwise_binary"])))
@@ -133,6 +139,12 @@ let lower_with_launch ast (launch : Launch.t) =
   let memory = Hashtbl.create 12 in
   List.iter (seed memory) launch.storages;
   let bindings = launch_bindings ast launch memory in
+  if indexed_kernel launch then (
+    let k = Mlir_indexed_kernel.compile ast launch memory bindings in
+    let name = String.concat "," (List.map (fun (s : Launch.stream) -> s.entry) launch.streams) in
+    {ast_digest=ast.digest;launch;program=D.{name;register_bytes=256;streams=k.streams};memory;
+     bindings=bindings@k.constants;sources=k.sources;readonly=k.readonly;immutable_views=k.immutable_views})
+  else
   let register_bytes = ref 256 in
   let stream (stream : Launch.stream) =
     let types = Hashtbl.create 32 and owned_tensors = Hashtbl.create 8 and pipes = ref [] in
