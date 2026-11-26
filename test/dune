@@ -61,6 +61,8 @@
  (name test_mlir_lowering)
  (modules test_mlir_lowering)
  (deps (source_tree ../examples/kernels)
+       ../benchmarks/ir-pairs/issue316/ordered/hfusion.mlir
+       ../benchmarks/ir-pairs/issue316/missing-ready/hfusion.mlir
        fixtures/hivm_mmad_parts.mlir fixtures/hfusion_carried_indirect.mlir fixtures/dynamic_slices.mlir
        ../scripts/mlir_frontend.py ../scripts/scheduler_affine.py ../scripts/attention_frontend.py
        ../scripts/attention_dialects.py ../requirements-attention.txt)

@@ -13,6 +13,7 @@ module {
       %3 = arith.muli %arg3, %c1024 : index
       %subview = memref.subview %arg0[%3] [1024] [1] : memref<?xf16> to memref<1024xf16, strided<[1], offset: ?>>
       linalg.copy ins(%subview : memref<1024xf16, strided<[1], offset: ?>>) outs(%2 : memref<1024xf16>)
+      hfusion.barrier
       linalg.elemwise_unary {fun = #linalg.unary_fn<exp>} ins(%2 : memref<1024xf16>) outs(%arg1 : memref<1024xf16>)
     }
     return

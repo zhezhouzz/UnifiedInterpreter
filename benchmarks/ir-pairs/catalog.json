@@ -418,7 +418,7 @@
       "origin": "computation-projection",
       "hfusion": {
         "path": "benchmarks/ir-pairs/issue316/ordered/hfusion.mlir",
-        "sha256": "81a03de1d2fc3ad05e1cb733df9184de421bd01b9285f704584aa1e183ee3a3c"
+        "sha256": "3181e269019f153da19b70428ce13f954081d7077267a948fb786f7af61b31fb"
       },
       "hivm": {
         "path": "examples/kernels/issue316_vexp_hivm.mlir",

@@ -69,7 +69,7 @@ fixture/zero-step,hfusion,complete,0,complete,0
 fixture/zero-step,hivm,complete,0,complete,0
 flash-attention,hfusion,complete,0,complete,0
 flash-attention,hivm,complete,0,complete,0
-issue316/missing-ready,hfusion,complete,0,complete,0
+issue316/missing-ready,hfusion,complete,9,complete,9
 issue316/missing-ready,hivm,complete,5,complete,5
 issue316/ordered,hfusion,complete,0,complete,0
 issue316/ordered,hivm,complete,0,complete,0

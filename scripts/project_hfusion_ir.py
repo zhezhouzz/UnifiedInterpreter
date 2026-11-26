@@ -64,7 +64,12 @@ def project(opt, source, benchmark):
             if name in SYNC:
                 if op.results or op.regions:
                     raise ValueError(f"unexpected synchronization signature: {name}")
-                Rewriter.erase_op(op)
+                if (benchmark == "issue316/ordered" and name == "hivm.hir.wait_flag"
+                        and str(op.properties["set_pipe"]) == "#hivm.pipe<PIPE_MTE2>"
+                        and str(op.properties["wait_pipe"]) == "#hivm.pipe<PIPE_V>"):
+                    Rewriter.replace_op(op, UnregisteredOp.with_name("hfusion.barrier").create())
+                else:
+                    Rewriter.erase_op(op)
             elif name in ("hivm.hir.pointer_cast", "hivm.hir.get_sub_block_idx"):
                 result, = op.results
                 if name == "hivm.hir.pointer_cast":

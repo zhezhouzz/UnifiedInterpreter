@@ -20,6 +20,8 @@ dune exec unified-interpreter -- race pairs cv/scene1/error --json
 
 在计算版本中，原来由 `pointer_cast` 指定的设备存储和 `get_sub_block_idx` 取得的编号可由函数参数传入。目录的 `extra_arguments` 按函数记录参数位置，位置从零开始。`local-memory` 给出地址空间、字节偏移和视图类型。执行时，同一设备实例中指向同一段存储的视图需要共享底层内存。`mix-handoff` 的 CC 输入是该用例的 256 个逻辑 f32 元素，`indirect-atomic` 保留逐元素掩码、间接下标、原子加法和旧值写回。两个仅在同步上不同的 HIVM 变体可以得到相同的 HFusion 计算。
 
+#316 的两个 HFusion 版本每轮都向选中的缓冲区复制输入，随后计算指数并写入共同的输出。`ordered` 在复制和计算之间执行 `hfusion.barrier`，等待本核此前的任务完成。`missing-ready` 的循环体没有屏障。HIVM 的 `ordered` 通过指定管线和事件编号表达等待，HFusion 的屏障同步整个核。[HFusion ordered](../benchmarks/ir-pairs/issue316/ordered/hfusion.mlir) · [HFusion missing-ready](../benchmarks/ir-pairs/issue316/missing-ready/hfusion.mlir)
+
 ## CV 精度用例
 
 | benchmark | HFusion | HIVM |

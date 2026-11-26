@@ -66,18 +66,49 @@ let check_locations ast report =
   ) (races report)
 
 let issue316 () =
-  let configuration = launch {|{"arguments":[{"shape":[3072]},null,3]}|} in
-  List.iter (fun (file,count) ->
-    let ast = parse ("../examples/kernels/" ^ file ^ ".mlir") in
+  List.iter (fun (stage,file,count) ->
+    let configuration = `Assoc ["stage",`String stage;"arguments",`List [
+        `Assoc ["shape",`List [`Int 3072]];`Null;`Int 3]] in
+    let ast = parse file in
     let lowered = H.lower_mlir ~configuration ast in
     List.iter (fun backend ->
       let core = H.analyze_mlir ~backend lowered in
+      assert (field "status" core=`String "complete");
       assert (List.length (races core)=count && H.replay_mlir lowered core=2*count);
       let hivm = H.analyze_mlir ~backend ~hivm:true lowered in
       assert (List.length (races hivm)=count);
       check_locations ast hivm
     ) Bug_traces.[Search;Solve]
-  ) ["issue316_vexp_hivm",0;"issue316_missing_ready_hivm",5]
+  ) ["hivm","../examples/kernels/issue316_vexp_hivm.mlir",0;
+     "hivm","../examples/kernels/issue316_missing_ready_hivm.mlir",5;
+     "hfusion","../benchmarks/ir-pairs/issue316/ordered/hfusion.mlir",0;
+     "hfusion","../benchmarks/ir-pairs/issue316/missing-ready/hfusion.mlir",9]
+
+let issue316_barrier_scope () =
+  let ast = parse "../benchmarks/ir-pairs/issue316/ordered/hfusion.mlir" in
+  let configuration = launch {|{"stage":"hfusion","streams":[
+    {"entry":"issue316_vexp","block":0,"arguments":[{"shape":[1024]},{"storage":"shared"},1]},
+    {"entry":"issue316_vexp","block":1,"arguments":[{"shape":[1024]},{"storage":"shared"},1]}
+  ]}|} in
+  let lowered = H.lower_mlir ~allow_prefix:false ~configuration ast in
+  List.iter (fun backend ->
+    let core = H.analyze_mlir ~backend lowered in
+    assert (H.replay_mlir lowered core=2);
+    let source = H.project_mlir lowered core in
+    check_locations ast source;
+    match races source with
+    | [race] ->
+        List.iter (fun order ->
+          let steps = J.to_list (field order race) in
+          List.iter (fun stream ->
+            let events = List.filter_map (fun e ->
+              if field "stream" e=`Int stream then Some (J.to_string (field "opcode" e),
+                J.to_string (field "phase" e)) else None) steps in
+            assert (events=["linalg.copy","submit";"linalg.copy","complete";
+              "hfusion.barrier","execute";"linalg.elemwise_unary","submit";
+              "linalg.elemwise_unary","complete"])) [0;1]) ["forward";"reverse"]
+    | _ -> failwith "expected one race between the two cores writing the shared output"
+  ) Bug_traces.[Search;Solve]
 
 let nested_async_calls () =
   let ast=parse_inline "nested.mlir" {|module {
@@ -437,6 +468,6 @@ let ub_scalar_readback () =
   | exception Invalid_argument msg -> assert (String.starts_with ~prefix:"a concurrent" msg)
 
 let () =
-  examples (); issue316 (); nested_async_calls (); reject_foreign_trace (); carried_views (); dynamic_slices (); indexed (); masked_vector (); scheduled_mask ();
+  examples (); issue316 (); issue316_barrier_scope (); nested_async_calls (); reject_foreign_trace (); carried_views (); dynamic_slices (); indexed (); masked_vector (); scheduled_mask ();
   hfusion_indirect (); cross_flag (); generic_matrix (); unsupported (); unsupported_device_geometry ();
   counter_and_local_snapshot (); debug_conflict (); dense_float_bits (); ub_scalar_readback ()

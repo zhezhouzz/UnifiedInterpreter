@@ -9,6 +9,7 @@ from xdsl.parser import Parser
 from scheduler_affine import SemiAffineMaps, affine
 
 from export_vectorlayout_ast import encode_function
+from mlir_frontend import export_module
 from project_hfusion_ir import compile_ir
 
 
@@ -79,14 +80,18 @@ def main():
     dest = root / "benchmarks/scheduler/modules"
     dest.mkdir(parents=True, exist_ok=True)
     written = set()
-    for case in pairs.values():
+    for name, case in pairs.items():
         for stage in ("hfusion", "hivm"):
             item = case[stage]
             digest = item["sha256"]
             if digest in written:
                 continue
             data = (root / item["path"]).read_bytes()
-            doc = export(args.opt, data)
+            if stage == "hfusion" and name.startswith("issue316/"):
+                doc = export_module(data.decode(), item["path"])
+                doc["source_sha256"] = sha256(data).hexdigest()
+            else:
+                doc = export(args.opt, data)
             if doc["source_sha256"] != digest:
                 raise ValueError(item["path"])
             path = dest / (digest + ".json")
