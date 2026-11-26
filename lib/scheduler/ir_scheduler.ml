@@ -9,6 +9,15 @@ let field k x = J.member k x
 let integers x = List.map J.to_int (J.to_list x)
 let stage_name = function HFusion -> "hfusion" | HIVM -> "hivm"
 
+let generate_mlir ?entry ?(configuration=`Assoc []) stage backend ast =
+  let expected=`String (stage_name stage) in
+  (match field "stage" configuration with `Null -> () | stage when stage=expected -> ()
+   | _ -> invalid_arg "IR stage and launch stage differ");
+  let configuration=`Assoc (("stage",expected)::List.remove_assoc "stage" (J.to_assoc configuration)) in
+  let lowered=Hivm_trace.lower_mlir ?entry ~configuration ast in
+  let backend=match backend with P.Bfs -> Unified_interpreter.Bug_traces.Search | Smt -> Solve in
+  Hivm_trace.analyze_mlir ~backend ~hivm:true lowered
+
 let compile request =
   let module Parser = Attention_runtime.Parser in
   let root = match Sys.getenv_opt "ATTENTION_ROOT" with
@@ -45,6 +54,13 @@ let generate ?n ?kv_heads ?timeout_ms ~name backend = function
       let b = match backend with P.Bfs -> Hfusion_trace.Bfs | Smt -> Smt in
       let doc = Hfusion_trace.generate ?n:(Option.map Z.of_int n) ?timeout_ms b p |> Hfusion_trace.to_json in
       `Assoc (("benchmark",`String name)::J.to_assoc doc)
+  | Module (stage,ast,launch) when ast.format="mlir-module-1" &&
+      (field "kind" launch=`Null || (field "kind" launch=`String "explicit" &&
+       field "instances" (field "value" launch)=`Null)) ->
+      let configuration=match field "kind" launch with `String "explicit" -> field "value" launch
+        | `Null -> launch | _ -> invalid_arg "parsed MLIR requires concrete launch parameters" in
+      let doc=generate_mlir ~configuration stage backend ast in
+      `Assoc (("benchmark",`String name)::List.remove_assoc "benchmark" (J.to_assoc doc))
   | Module (stage,ast,launch) ->
       let events,rules,pairs,inputs,status = prepare ?n name stage ast launch in
       let trace xs = `List (List.map (Array.get events) xs) in

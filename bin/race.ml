@@ -5,7 +5,7 @@ let run argv =
   let command=ref [] and root=ref "benchmarks/litao" and backend=ref "bfs" in
   let n=ref None and save=ref None and timeout=ref 5000 and heads=ref 1 and json=ref false in
   let ast=ref None and hivm=ref false in
-  let entry=ref None and launch=ref None and replay=ref None and syntax=ref None in
+  let entry=ref None and launch=ref None and replay=ref None and project=ref None and syntax=ref None in
   let set_syntax s =
     if !syntax<>None then raise (Arg.Bad "choose one MLIR input syntax");
     syntax := Some s in
@@ -23,6 +23,7 @@ let run argv =
     "--generic",Arg.Unit (fun () -> set_syntax Hivm_trace.Module_ast.Generic)," read generic MLIR assembly";
     "--bishengir-opt",Arg.String (fun path -> set_syntax (Hivm_trace.Module_ast.BiSheng path)),"PATH normalize vendor assembly";
     "--replay",Arg.String (fun path -> replay := Some path),"FILE verify a Core report from this MLIR and launch";
+    "--project",Arg.String (fun path -> project := Some path),"FILE project a saved Core report onto the input MLIR AST";
     "--save",Arg.String (fun p -> save:=Some p),"FILE write JSON report"]
     (fun s -> command:=s::!command) "race list | run NAME | mlir FILE | replay REPORT";
   let print doc=Yojson.Safe.to_channel stdout doc;print_newline () in
@@ -37,7 +38,7 @@ let run argv =
   | ["mlir";file] ->
       if !n<>None || !ast<>None || !json || !heads<>1 then
         raise (Arg.Bad "use --launch to supply MLIR arguments and configuration");
-      if !replay<>None && (!save<>None || !hivm) then
+      if !replay<>None && (!save<>None || !hivm || !project<>None) then
         raise (Arg.Bad "choose --replay or report generation");
       let mode = match !backend with "bfs" -> Bug_traces.Search | "smt" -> Solve
         | _ -> raise (Arg.Bad "MLIR analysis requires a concrete backend") in
@@ -48,9 +49,11 @@ let run argv =
       (match !replay with
        | Some path -> Printf.printf "%s replayed=%d\n" file
            (Hivm_trace.replay_mlir lowered (Yojson.Safe.from_file path))
-       | None -> emit file (Hivm_trace.analyze_mlir ~backend:mode ~hivm:!hivm lowered))
+       | None -> emit file (match !project with
+           | Some path -> Hivm_trace.project_mlir lowered (Yojson.Safe.from_file path)
+           | None -> Hivm_trace.analyze_mlir ~backend:mode ~hivm:!hivm lowered))
   | _ ->
-      if !entry<>None || !launch<>None || !replay<>None || !syntax<>None then
+      if !entry<>None || !launch<>None || !replay<>None || !project<>None || !syntax<>None then
         raise (Arg.Bad "MLIR options require race mlir FILE");
       let catalog=Race_benchmarks.catalog !root in
       let directory = Filename.concat (Filename.dirname !root) "hivm" in

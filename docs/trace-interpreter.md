@@ -1,6 +1,6 @@
 # 用 scheduler 的 trace 执行 HIVM OCaml AST
 
-本文描述 `hivm-race-1`。张量计算用例和 CV 场景 1 的模块 trace 使用 `ir-race-1`。[两层共用的入口和模块 trace](scheduler-traces.md)
+本文描述已登记 HIVM 程序的 `hivm-race-1`。直接传入解析所得的 OCaml 模块 AST 时，HFusion 和 HIVM 共用模块接口。[模块接口和 fifo-copy 示例](scheduler-traces.md)
 
 ## 1. scheduler 的输入
 
@@ -25,9 +25,9 @@ scheduler 返回 `H.report`，对应的 JSON 格式为 `hivm-race-1`。`benchmar
 - `first` 和 `second` 是两次目标访存各自生效的事件。
 - `forward` 和 `reverse` 的类型都是 `event list`，各自给出包含这对竞争事件的合法执行前缀。`forward` 先经过 `first`，以 `second` 结束。`reverse` 先经过 `second`，以 `first` 结束。前缀结束时，程序可能还有后续指令或已提交但尚未完成的任务。
 
-每个事件包含指令位置、`phase` 和 `action`。位置在 OCaml 中是 `event.location`，在 JSON 中展开为 `stream`、`entry`、`path`、`opcode`、`part` 和 `iterations`。`phase` 表示提交、完成或立即执行，`tasks` 列出的每个任务有 `id` 和 `pipe`。`action` 表示计算、分配、通知、等待或屏障。`signals` 中的每项包含接收流 `receiver`、源管线 `source`、目标管线 `target`、`flag` 编号和跨流标记 `cross`。等待事件还可以带发送流列表 `senders`。[事件类型](../lib/hivm/hivm_trace.mli#L5) · [JSON 字段](../lib/hivm/hivm_trace.ml#L398)
+每个事件包含指令位置、`phase` 和 `action`。位置在 OCaml 中是 `event.location`，在 JSON 中展开为 `stream`、`entry`、`path`、`opcode`、`part` 和 `iterations`。事件位于被调用的函数内时，`calls` 按调用顺序给出各调用点的 `entry`、`path` 和 `iterations`。`phase` 表示提交、完成或立即执行，`tasks` 列出的每个任务有 `id` 和 `pipe`。`action` 表示计算或访存、通知、等待或屏障。`signals` 中的每项包含接收流 `receiver`、源管线 `source`、目标管线 `target`、`flag` 编号和跨流标记 `cross`。等待事件还可以带发送流列表 `senders`。[事件类型](../lib/hivm/hivm_trace.mli#L5) · [JSON 字段](../lib/hivm/hivm_trace.ml#L431)
 
-`status` 为 `"complete"` 或 `"race"` 时可以逐对回放。`races = []` 表示没有可回放的前缀。`"no-race"` 表示没有数据竞争，`"unknown"` 表示尚无判定，原因见 `reason`。[报告状态](../lib/hivm/hivm_trace.ml#L418)
+`status` 为 `"complete"` 或 `"race"` 时可以逐对回放。`races = []` 表示没有可回放的前缀。`"no-race"` 表示没有数据竞争，`"unknown"` 表示尚无判定，原因见 `reason`。[报告状态](../lib/hivm/hivm_trace.mli#L24)
 
 ## 3. interpreter 如何利用 trace
 
@@ -45,19 +45,21 @@ let instruction ast (event : H.event) =
   H.Module_ast.resolve ast ~entry:loc.entry loc.origin.path
 ```
 
-每次查看一个事件，按 `phase` 决定推进指定流还是完成待执行的任务。处理完该事件后再读取下一项。
+每次查看一个事件，按 `phase` 决定推进指定流还是完成待执行的任务。沿 AST 遇到 `memref.alloc` 或 `memref.alloca` 时，解释器按当前实参分配缓冲区、绑定 SSA 结果，trace 游标保持原位。到达事件指定的动作并执行后，才读取下一项。
 
 | JSON 的 `phase` | 解释器执行的动作 |
 | --- | --- |
 | `submit` · `Submit tasks` | 沿指定流的 AST 执行到本次调度动作。途中按正常语义执行算术、视图构造、循环和分支。到达目标后求出实参，为 `tasks` 中的每个 `id` 保存指令、阶段、管线、标量值和缓冲区引用。访存计算留到完成时执行。 |
 | `complete` · `Complete task` | 取出 `tasks[0].id` 对应的已提交任务，执行它的当前阶段并移除任务。此时读取缓冲区的当前内容并写回结果。提交该任务的流保持当前位置，即使它已经越过原指令，也能完成这个任务。 |
-| `execute` · `Execute pipe` | 沿指定流执行普通指令，到达目标后立即执行当前动作。`tasks` 为空，`synchronous_pipe` 给出管线或 `null`。例如标量 `memref.store` 立即写入内存，分配动作立即产生可供后续指令使用的缓冲区。 |
+| `execute` · `Execute pipe` | 沿指定流执行普通指令，到达目标后立即执行当前动作。`tasks` 为空，`synchronous_pipe` 给出管线或 `null`。例如标量 `memref.store` 立即写入内存。 |
 
-`path` 从入口函数体开始，所有下标从零计数。模块路径依次给出指令下标，以及嵌套的 region、block、子指令下标。单函数路径逐层给出 `body` 和 `region` 中的指令下标。`iterations` 是从外到内的循环轮次，从零开始，实际循环变量由 AST 求值。`scf.while` 每次进入 `do` 区域计一轮。[模块定位](../lib/hivm/hivm_module.ml#L43) · [单函数定位](../lib/hivm/hivm_trace.ml#L13)
+`path` 从事件的 `entry` 函数体开始，所有下标从零计数。模块路径依次给出指令下标，以及嵌套的 region、block、子指令下标。单函数路径逐层给出 `body` 和 `region` 中的指令下标。`iterations` 是当前函数从外到内的循环轮次，从零开始，实际循环变量由 AST 求值。`scf.while` 每次进入 `do` 区域计一轮。[模块定位](../lib/hivm/hivm_module.mli) · [单函数定位](../lib/hivm/hivm_trace.ml#L13)
 
-`compute` 执行计算或访存，`allocate` 执行分配。遇到 `func.call` 时通过节点的 `properties["callee"]` 找到函数，在当前动作生效时执行函数体。`set` 为 `signals` 中的每一项发出通知，`wait` 消耗对应通知。等待事件带有 `senders` 时，从列出的每个发送流各消耗一次通知。对于 `barrier`，每次提交和完成的管线由当前事件的 `tasks` 指定。[同步动作与调用示例](../test/test_vectorlayout_hivm.ml#L11)
+`compute` 执行计算或访存。事件指向异步 `func.call` 时，通过节点的 `properties["callee"]` 找到函数，在任务完成时执行函数体。事件带有 `calls` 时，沿这些普通调用进入目标函数。例如在 `fixture/shared-allocation` 中，流 0 进入 `@reserve` 后自行执行 `memref.alloc`，到达将描述符写入共享槽的 `memref.store` 时消费 `execute` 事件。随后流 1 的任务可以通过共享槽访问该缓冲区。[共享分配示例](../benchmarks/ir-pairs/fixture/shared-allocation/hivm.mlir)
 
-同一条指令的一次执行可以对应多个事件。用 `(stream, entry, path, iterations)` 关联这次执行的中间结果，用 `part` 区分阶段。例如 `mmadL1` 的 `load` 阶段搬运矩阵，`compute` 阶段使用已搬运的数据，其间的同步按各自事件执行。同一个屏障也可能按管线分别提交。[复合指令的回放示例](../test/test_vectorlayout_hivm.ml)
+`set` 为 `signals` 中的每一项发出通知，`wait` 消耗对应通知。等待事件带有 `senders` 时，从列出的每个发送流各消耗一次通知。对于 `barrier`，每次提交和完成的管线由当前事件的 `tasks` 指定。[同步动作与调用示例](../test/test_vectorlayout_hivm.ml#L11)
+
+同一条指令的一次执行可以对应多个事件。用 `(stream, calls, entry, path, iterations)` 关联这次执行的中间结果，用 `part` 区分阶段。JSON 省略 `calls` 时按空列表处理。例如 `mmadL1` 的 `load` 阶段搬运矩阵，`compute` 阶段使用已搬运的数据，其间的同步按各自事件执行。同一个屏障也可能按管线分别提交。[复合指令的回放示例](../test/test_vectorlayout_hivm.ml)
 
 **前缀执行完毕后，两次竞争访问都已发生。** 如果只需要观察这对访问，interpreter 可以在此返回当前状态。如果需要完整 trace，就从该状态继续，保留各流的程序位置、SSA 值、内存、同步状态和待完成任务。后续可以采用任意合法的调度方式运行至执行结束，将后续事件按发生顺序追加到该前缀。
 

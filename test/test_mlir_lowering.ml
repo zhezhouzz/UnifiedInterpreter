@@ -79,6 +79,64 @@ let issue316 () =
     ) Bug_traces.[Search;Solve]
   ) ["issue316_vexp_hivm",0;"issue316_missing_ready_hivm",5]
 
+let nested_async_calls () =
+  let ast=parse_inline "nested.mlir" {|module {
+    func.func @inner(%a: memref<1xi32>, %b: memref<1xi32>) {
+      memref.copy %a, %b : memref<1xi32> to memref<1xi32>
+      return
+    }
+    func.func @outer(%a: memref<1xi32>, %b: memref<1xi32>) {
+      func.call @inner(%a, %b) : (memref<1xi32>, memref<1xi32>) -> ()
+      return
+    }
+    func.func @main(%a: memref<1xi32>, %b: memref<1xi32>) {
+      %zero = arith.constant 0 : index
+      %one = arith.constant 1 : index
+      %two = arith.constant 2 : index
+      scf.for %i = %zero to %two step %one {
+        func.call @outer(%a, %b) : (memref<1xi32>, memref<1xi32>) -> ()
+        func.call @outer(%a, %b) : (memref<1xi32>, memref<1xi32>) -> ()
+      }
+      return
+    }
+  }|} in
+  let configuration=launch {|{"stage":"hfusion","arguments":[null,null]}|} in
+  let lowered=H.lower_mlir ~entry:"main" ~configuration ast in
+  List.iter (fun backend ->
+    let source=H.analyze_mlir ~hivm:true ~backend lowered in
+    let core=H.analyze_mlir ~backend lowered in
+    assert (source=H.project_mlir lowered core);
+    let method_=match backend with Bug_traces.Search -> Precedence.Bfs | Solve -> Smt in
+    let from_ast=Ir_scheduler.generate_mlir ~entry:"main" ~configuration HFusion method_ ast in
+    assert (source=from_ast);
+    assert (List.length (races source)=6 && H.replay_mlir lowered core=12);
+    check_locations ast source;
+    let identity event =
+      assert (field "entry" event=`String "@inner" && field "iterations" event=`List []);
+      assert (field "phase" event=`String "complete");
+      let task=List.hd (J.to_list (field "tasks" event)) in
+      assert (field "pipe" task=`String "HFUSION_ASYNC");
+      match J.to_list (field "calls" event) with
+      | [caller;inner] -> assert (field "iterations" inner=`List []);
+          field "path" caller,field "iterations" caller
+      | _ -> failwith "expected both source calls" in
+    let ids=List.concat_map (fun race -> List.map (fun k -> identity (field k race)) ["first";"second"]) (races source) in
+    assert (List.length (List.sort_uniq compare ids)=4)
+  ) Bug_traces.[Search;Solve]
+
+let reject_foreign_trace () =
+  let create operand=parse_inline "copy.mlir" (Printf.sprintf {|func.func @copy(%s) {
+    memref.copy %%a, %%b : memref<1xi32> to memref<1xi32>
+    memref.copy %%a, %%b : memref<1xi32> to memref<1xi32>
+    return
+  }|} operand) |> H.lower_mlir in
+  let report=H.analyze_mlir ~backend:Search (create "%a: memref<1xi32>, %b: memref<1xi32>") in
+  assert (List.length (races report)=1);
+  let different=create "%b: memref<1xi32>, %a: memref<1xi32>" in
+  match H.project_mlir different report with
+  | _ -> failwith "accepted a report for different source operands"
+  | exception Invalid_argument _ -> ()
+
 let carried_views () =
   let ast = parse_inline "carried.mlir" {|module {
   func.func @other() { return }
@@ -379,6 +437,6 @@ let ub_scalar_readback () =
   | exception Invalid_argument msg -> assert (String.starts_with ~prefix:"a concurrent" msg)
 
 let () =
-  examples (); issue316 (); carried_views (); dynamic_slices (); indexed (); masked_vector (); scheduled_mask ();
+  examples (); issue316 (); nested_async_calls (); reject_foreign_trace (); carried_views (); dynamic_slices (); indexed (); masked_vector (); scheduled_mask ();
   hfusion_indirect (); cross_flag (); generic_matrix (); unsupported (); unsupported_device_geometry ();
   counter_and_local_snapshot (); debug_conflict (); dense_float_bits (); ub_scalar_readback ()

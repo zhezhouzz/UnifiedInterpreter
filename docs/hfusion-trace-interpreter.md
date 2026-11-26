@@ -1,6 +1,6 @@
 # 在 HFusion AST 上使用 scheduler trace
 
-本文介绍单函数张量 AST 的 `hfusion-race-1` 接口。模块 AST 的 `ir-race-1` 接口支持跨函数调用和多个 region。[两层共用的入口和模块 trace](scheduler-traces.md)
+本文介绍单函数张量 AST 的 `hfusion-race-1` 接口。直接传入解析所得的 OCaml 模块 AST 时，使用支持跨函数调用和多个 region 的模块接口。[两层共用的模块接口](scheduler-traces.md)
 
 ## 1. scheduler 的输入
 
@@ -28,7 +28,7 @@
 ## 3. interpreter 如何利用 trace
 
 1. 为每个实例保留程序位置、循环轮次和 SSA 环境。共享分配对应同一份内存。执行第二条前缀前，重新建立初始状态。
-2. 读取下一个 trace 事件，选择它指定的实例。沿该实例的正常控制流执行，直到 `scheduling_point prepared ~stream ~path` 为真。核对当前路径、opcode 和循环轮次，执行整条指令，再消费该事件。
+2. 读取下一个 trace 事件，选择它指定的实例。沿该实例的正常控制流执行，遇到 `memref.alloc` 时自行分配缓冲区并绑定 SSA 结果，trace 游标保持原位。当 `scheduling_point prepared ~stream ~path` 为真时，核对当前路径、opcode 和循环轮次，执行整条指令，再消费该事件。
 3. `bufferization.to_tensor` 创建的是可引用原内存的张量视图。带 `restrict` 时，建立别名约束本身是一个调度点。使用该视图的张量指令才读取数据。`memref.copy` 在同一条指令内读取源视图并写入目标视图，`bufferization.materialize_in_destination` 写入目标视图。普通索引计算和只处理自有张量的计算由解释器自行执行。[指令执行函数](../attention/runner.ml) · [缓冲区与张量的内存语义](../rocq/HFusion/Semantics/Memory.v)
 4. 前缀结束时保留所有实例的当前位置和内存。如果需要完整执行，可继续使用任意合法调度，直到程序结束。`replay` 可以检查单条前缀，`verify_race` 可以核对两条前缀及其竞争端点。[接口](../lib/hfusion/hfusion_trace.mli)
 

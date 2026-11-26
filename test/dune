@@ -64,7 +64,7 @@
        fixtures/hivm_mmad_parts.mlir fixtures/hfusion_carried_indirect.mlir fixtures/dynamic_slices.mlir
        ../scripts/mlir_frontend.py ../scripts/scheduler_affine.py ../scripts/attention_frontend.py
        ../scripts/attention_dialects.py ../requirements-attention.txt)
- (libraries hivm_trace unified_interpreter attention_runtime yojson))
+ (libraries hivm_trace ir_scheduler unified_interpreter attention_runtime yojson))
 
 (rule
  (alias runtest)
