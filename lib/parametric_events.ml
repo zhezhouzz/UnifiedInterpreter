@@ -40,7 +40,7 @@ let compile ctx family n =
       match command with
       | End -> [], yes
       | Return _ -> [], bool ctx false
-      | Yield _ | Branch_values _ | For_values _ ->
+      | Yield _ | Branch_values _ | For_values _ | While_values _ | Call_values _ | Block_counter _ | Peer_sync _ | Core_barrier _ ->
           raise (Unsupported "SSA region results require a concrete launch")
       | Scalar (x,op,vs,next) ->
           let v = eval ctx (args vs) (family.scalar stream.id op) in

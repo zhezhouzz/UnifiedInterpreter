@@ -40,17 +40,18 @@ let encode ?timeout_ms schedule =
      | Unallocated -> Solver.add solver [Boolean.mk_not ctx present.(n)]
      | Allocated_after reserves -> List.iter (requires n) reserves);
     match node.phase with
-    | Emit { action; previous } ->
-        Option.iter (requires n) previous;
+    | Emit { action; predecessors } ->
+        List.iter (requires n) predecessors;
         (match action with Scalar_wait k -> flag_event k false n
-         | Immediate (Set keys) -> List.iter (fun k -> flag_event k true n) keys | _ -> ())
+         | Immediate (Set keys) -> List.iter (fun k -> flag_event k true n) keys
+         | Immediate (Wait_peers keys) -> List.iter (fun k -> flag_event k false n) keys | _ -> ())
     | Finish { item; submit; earlier; _ } ->
         requires n submit;
         List.iter (fun a -> match item, item_at schedule a with
-          | (Set _ | Bar), _ | _, (Wait _ | Bar) -> requires n a
+          | (Set _ | Bar), _ | _, (Wait _ | Wait_peers _ | Bar) -> requires n a
           | _ -> ()) earlier;
         (match item with Set keys -> List.iter (fun k -> flag_event k true n) keys
-         | Wait k -> flag_event k false n | _ -> ())
+         | Wait k -> flag_event k false n | Wait_peers keys -> List.iter (fun k -> flag_event k false n) keys | _ -> ())
   ) schedule.nodes;
   let alternating sends waits =
     (* 同一发送流中的置位在队首完成。同一 key 的等待也按顺序消费。

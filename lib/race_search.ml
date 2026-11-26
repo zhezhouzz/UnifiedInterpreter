@@ -38,18 +38,19 @@ let precedence schedule =
     let s,w = Option.value ~default:([],[]) (Hashtbl.find_opt flags k) in
     Hashtbl.replace flags k (if sends then n::s,w else s,n::w) in
   let item n = function Set keys -> List.iter (fun k -> touch k true n) keys
-    | Wait k -> touch k false n | Operation _ | Bar -> () in
+    | Wait k -> touch k false n | Wait_peers keys -> List.iter (fun k -> touch k false n) keys
+    | Operation _ | Bar -> () in
   Array.iteri (fun n node ->
     (match schedule.allocations.(n) with Unallocated -> require n (-1)
      | Allocated_after reserves -> List.iter (require n) reserves);
     match node.phase with
-    | Emit {action;previous} ->
-        Option.iter (require n) previous;
+    | Emit {action;predecessors} ->
+        List.iter (require n) predecessors;
         (match action with Scalar_wait k -> touch k false n | Immediate x -> item n x | _ -> ())
     | Finish {item=x;submit;earlier;_} ->
         require n submit; item n x;
         List.iter (fun a -> match x,item_at schedule a with
-          | (Set _ | Bar),_ | _,(Wait _ | Bar) -> require n a | _ -> ()) earlier
+          | (Set _ | Bar),_ | _,(Wait _ | Wait_peers _ | Bar) -> require n a | _ -> ()) earlier
   ) schedule.nodes;
   if Hashtbl.fold (fun _ (s,_) many -> many ||
       List.length (List.sort_uniq compare (List.map (fun n -> schedule.nodes.(n).id.stream) s)) > 1)

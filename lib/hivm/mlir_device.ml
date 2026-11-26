@@ -104,7 +104,8 @@ let launch_bindings ast (launch : Launch.t) memory =
             let ty = Mem.shaped ast type_name in
             let element = dtype ty.element in
             let bank = V.Allocation (List.nth launch.storages i).name in
-            let bit = Mem.dimension (Z.mul (Z.of_int (D.bits element)) b.offset) in
+            let bit = Mem.dimension (Z.add (Z.mul (Z.of_int 8) (Z.of_int b.base_bytes))
+                                       (Z.mul (Z.of_int (D.bits element)) b.offset)) in
             let shape = Array.of_list b.shape and strides = Array.of_list (List.map Z.to_int b.strides) in
             let view = V.{bank;ty=element;bit;shape;strides} in
             if ty.kind=M.Vector then (

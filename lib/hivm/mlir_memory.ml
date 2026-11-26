@@ -3,11 +3,11 @@ open Unified_interpreter
 open Core_lang
 module M = Hivm_module
 
-let integer = function
+let integer value = match demand value with
   | VInt n -> n | VBool b -> if b then Z.one else Z.zero
   | _ -> invalid_arg "expected an integer operand"
 
-let buffer = function VBuffer b -> b | _ -> invalid_arg "expected a tensor or memref"
+let buffer = function VBuffer b | VTensor (b,_) -> b | _ -> invalid_arg "expected a tensor or memref"
 
 let dimension n =
   if Z.sign n < 0 || not (Z.fits_int n) then invalid_arg "invalid dimension or storage size";
@@ -20,6 +20,7 @@ let shaped ast name = match type_of ast name with
   | M.Shaped ty -> ty | _ -> invalid_arg ("expected a shaped type, got " ^ name)
 
 let element_bytes ast ty = match type_of ast ty.M.element with
+  | M.Shaped {kind=Memref;_} -> 8
   | M.Integer bits | M.Float bits when bits > 0 && (bits mod 8 = 0 || bits = 1) -> (bits+7)/8
   | _ -> invalid_arg ("unsupported storage element type " ^ ty.element)
 
@@ -51,13 +52,16 @@ let size b =
       Z.add lo (Z.min Z.zero delta), Z.add hi (Z.max Z.zero delta))
       (b.offset, b.offset) b.shape b.strides in
     if Z.sign first < 0 then invalid_arg "view starts before its backing storage";
-    dimension (Z.mul (Z.succ last) (z b.element_bytes))
+    dimension (Z.add (z b.base_bytes) (Z.mul (Z.succ last) (z b.element_bytes)))
 
 let validate b =
-  if size b > b.bytes then invalid_arg "view exceeds its backing storage";
+  let required=size b in
+  if required > b.bytes then invalid_arg (Printf.sprintf "view ends at byte %d of a %d-byte allocation" required b.bytes);
   b
 
-let descriptor ast ty shape ?offset ?layout () =
+let descriptor ast ty =
+  let element_bytes=element_bytes ast ty in
+  fun shape ?offset ?layout () ->
   let shape = constrain_shape ty.M.shape shape in
   let choose name fixed supplied = match fixed,supplied with
     | Some a,Some b when not (Z.equal a b) -> invalid_arg (name ^ " disagrees with the MLIR type")
@@ -75,7 +79,7 @@ let descriptor ast ty shape ?offset ?layout () =
           | Some given -> List.map2 (fun fixed value -> choose "stride" fixed (Some value)) declared given in
         choose "offset" (Option.map z fixed) offset, strides
     | Opaque_layout -> invalid_arg "unsupported memref layout" in
-  {storage=None; bytes=0; offset; shape; strides; element_bytes=element_bytes ast ty}
+  {storage=None; bytes=0; base_bytes=0; offset; shape; strides; element_bytes}
 
 let adopt template = function
   | VView cells ->
@@ -85,10 +89,13 @@ let adopt template = function
   | _ -> invalid_arg "expected a reserved allocation"
 
 let at b indices =
-  let offset = List.fold_left2 (fun pos (index,dim) stride ->
-    if Z.sign index<0 || Z.geq index (z dim) then invalid_arg "index outside the shaped view";
+  if List.length indices<>List.length b.shape then invalid_arg "unexpected memory index rank";
+  if List.exists2 (fun i n -> Z.sign i<0 || Z.geq i (z n)) indices b.shape then
+    {b with storage=Some Invalid_address;base_bytes=0;offset=Z.zero;shape=[];strides=[];bytes=b.element_bytes}
+  else
+  let offset = List.fold_left2 (fun pos index stride ->
     Z.add pos (Z.mul index stride)
-  ) b.offset (List.combine indices b.shape) b.strides in
+  ) b.offset indices b.strides in
   validate {b with offset; shape=[]; strides=[]}
 
 let addresses b =
@@ -99,12 +106,12 @@ let addresses b =
   | Some storage ->
       let width = b.element_bytes in
       if b.strides = strides b.shape then
-        let base = dimension (Z.mul b.offset (z width)) in
+        let base = dimension (Z.add (z b.base_bytes) (Z.mul b.offset (z width))) in
         List.init (size b - base) (fun i -> storage,base+i)
       else
         let rec visit offset acc dims strides = match dims,strides with
           | [],[] ->
-              let start = dimension (Z.mul offset (z width)) in
+              let start = dimension (Z.add (z b.base_bytes) (Z.mul offset (z width))) in
               List.rev_append (List.init width (fun i -> storage,start+i)) acc
           | size::shape,step::strides ->
               let rec next i offset acc =

@@ -55,13 +55,15 @@ let view = function View v -> v | _ -> invalid_arg "symbolic view expected"
 let slice ctx storage offset length = {guard = bool ctx true; storage; offset; length}
 
 let lift_storage ctx = function
+  | Invalid_address -> raise (Unsupported "invalid concrete memory access")
   | Input x -> External x
   | Allocated id -> Local (id.stream, id.site, List.map (int ctx) id.iterations)
 
 let lift ctx = function
   | VInt n -> Integer (num ctx n) | VBool b -> Boolean (bool ctx b)
   | VFloat x -> Float x | VEvent f -> Flag (int ctx f)
-  | VBuffer _ -> raise (Unsupported "strided MLIR buffers require a concrete launch")
+  | VBuffer _ | VTensor _ -> raise (Unsupported "strided MLIR buffers require a concrete launch")
+  | VMemory_read _ | VDeferred _ | VLanes _ -> raise (Unsupported "memory and vector values require concrete execution")
   | VView xs ->
       (* 相邻地址合并为区间，保持原有视图顺序。 *)
       let rec runs acc = function

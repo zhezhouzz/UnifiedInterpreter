@@ -50,7 +50,7 @@ let core_sites body =
     match cmd with
     | C.Return _ | End | Yield _ -> rest
     | Scalar (_, _, _, cmd) -> next cmd
-    | Branch _ | Branch_values _ -> invalid "paired conditional needs an explicit HIVM branch region mapping at %s"
+    | Branch _ | Branch_values _ | While_values _ | Call_values _ | Block_counter _ | Peer_sync _ | Core_barrier _ -> invalid "paired control flow needs an explicit source mapping at %s"
                     (path_name (List.rev site))
     | For (_, _, _, _, body, cmd) | For_values (_, _, _, _, _, _, body, cmd) ->
         walk (0 :: site) (List.rev site :: loops) body (walk (1 :: site) loops cmd rest)
@@ -276,9 +276,11 @@ let catalog_pair ~root name (launch : Race_benchmarks.launch) (ast : Module_ast.
       let child i cmd = walk (site @ [i]) cmd in
       match cmd with
       | C.End | Return _ | Yield _ -> ()
-      | Scalar (_,_,_,rest) -> child 0 rest
+      | Scalar (_,_,_,rest) | Block_counter (_,rest) | Peer_sync (_,_,_,_,_,rest) | Core_barrier rest -> child 0 rest
       | For (_,_,_,_,body,rest) | For_values (_,_,_,_,_,_,body,rest) -> child 0 body; child 1 rest
       | Branch (_,a,b,rest) | Branch_values (_,_,a,b,rest) -> child 0 a; child 1 b; child 2 rest
+      | While_values (_,_,_,a,b,rest) -> child 0 a; child 1 b; child 2 rest
+      | Call_values (_,_,_,a,rest) -> child 0 a; child 1 rest
       | Alloc (_,_,_,rest) ->
           bind site (fun code attr -> code="memref.alloc" || code="func.call" && attr "callee"=Some "@reserve");
           child 0 rest
@@ -338,7 +340,9 @@ let export_races ~pipes ~entries ~source schedule witnesses =
     target=(match k.target with ScalarEnd -> S | Data p -> pipe p);flag=k.flag;cross=k.block} in
   let action = function
     | C.Operation _ -> Compute | Bar -> Barrier
-    | Set keys -> Set (List.map signal keys) | Wait k -> Wait (signal k) in
+    | Set keys -> Set (List.map signal keys) | Wait k -> Wait (signal k)
+    | Wait_peers (k::_ as keys) -> Wait_all (List.map (fun (p:C.key) -> Option.get p.sender) keys,signal k)
+    | Wait_peers [] -> invalid "cross-core wait without a sender" in
   let at (id : C.occurrence) phase action =
     Option.map (fun origin ->
       {location={stream=id.stream;entry=List.assoc id.stream entries;

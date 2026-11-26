@@ -2,7 +2,7 @@ open Stdlib
 open Unified_interpreter.Core_lang
 module Mem = Mlir_memory
 
-let boolean = function
+let boolean value = match demand value with
   | VBool b -> b | VInt n when Z.equal n Z.zero || Z.equal n Z.one -> Z.equal n Z.one
   | _ -> invalid_arg "expected an i1 condition"
 

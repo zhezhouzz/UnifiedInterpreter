@@ -61,6 +61,9 @@ let exhaustive ~loop_bound p =
                      let size = Option.fold ~none:(length+1) ~some:(fun (_,n) -> min n (length+1))
                        (Hashtbl.find_opt directions (a,id)) in Hashtbl.replace directions (a,id) (hits,size)) completed;
                  advance ~completed:((id,fp)::completed) queues tokens)
+           | Immediate (Wait_peers ks) ->
+               if List.for_all (fun k -> List.mem k tokens) ks then
+                 advance queues (List.filter (fun k -> not (List.mem k ks)) tokens)
            | Immediate (Wait _ | Bar) -> invalid_arg "unexpected scalar operation"
            | Reserve (_, view) -> advance ~allocated:(view @ allocated) queues tokens
            | Control -> advance queues tokens)
@@ -87,10 +90,12 @@ let exhaustive ~loop_bound p =
                  ) completed;
                  finish ((id, fp) :: completed) tokens
              | Wait k -> if List.mem k tokens then finish completed (List.filter ((<>) k) tokens)
+             | Wait_peers ks -> if List.for_all (fun k -> List.mem k tokens) ks then
+                 finish completed (List.filter (fun k -> not (List.mem k ks)) tokens)
              | Set ks -> if earlier = [] && List.for_all (fun k -> not (List.mem k tokens)) ks then
                            finish completed (ks @ tokens)
              | Bar -> if earlier = [] then finish completed tokens);
-            match item with Bar | Wait _ -> () | _ -> choose ((id, item) :: earlier) rest
+            match item with Bar | Wait _ | Wait_peers _ -> () | _ -> choose ((id, item) :: earlier) rest
       in choose [] items
     ) queues
   in

@@ -89,7 +89,10 @@ let bind ?entry ?(configuration=`Assoc []) ast =
           | `Null -> Mem.dimensions ty.shape [] | j -> List.map J.to_int (J.to_list j) in
         let offset = optional z_of_json (J.member "offset" json) in
         let layout = optional (fun j -> List.map z_of_json (J.to_list j)) (J.member "strides" json) in
-        let b = Mem.descriptor ast ty shape ?offset ?layout () in
+        let descriptor = Mem.descriptor ast ty shape ?offset ?layout () in
+        let base_bytes = value json "base_bytes" J.to_int 0 in
+        if base_bytes < 0 then invalid_arg "negative backing storage base";
+        let b = {descriptor with base_bytes} in
         let name = value json "storage" J.to_string (Printf.sprintf "stream%d.arg%d" stream position) in
         let initial = optional (fun j -> ty.element,J.to_list j) (J.member "initial" json) in
         let declared = optional J.to_int (J.member "bytes" json) in
@@ -152,7 +155,8 @@ let inputs launch =
     | VFloat x -> `Assoc ["float",`Float x]
     | VBuffer ({storage=Some (Input i);_} as b) ->
         `Assoc ["storage",`String (List.nth launch.storages i).name;"bytes",`Int b.bytes;
-                "shape",json_ints b.shape;"offset",json_int b.offset;"strides",list json_int b.strides]
+                "shape",json_ints b.shape;"base_bytes",`Int b.base_bytes;
+                "offset",json_int b.offset;"strides",list json_int b.strides]
     | _ -> invalid_arg "invalid launch argument" in
   let bindings (s : stream) =
     `Assoc ["stream",`Int s.id;"arguments",list (fun (_,v) -> argument v) s.arguments] in
