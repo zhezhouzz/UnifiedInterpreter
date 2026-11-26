@@ -128,9 +128,13 @@ let witness ?timeout_ms schedule first second =
   Option.bind (List.find_opt matches schedule.pairs)
     (fun pair -> solve_pair (encode ?timeout_ms schedule) schedule pair)
 
-let generate schedule =
+let general schedule =
   let enc = encode schedule in
   let races = List.filter_map (solve_pair enc schedule) schedule.pairs in
   let truncated = List.exists (function
     | None -> true | Some n -> Option.is_some (check enc [enc.present.(n)])) schedule.cutoffs in
   Result.{races; truncated}
+
+let generate schedule = match Race_search.precedence schedule with
+  | Some parents -> Race_search.from_predecessors Precedence.Smt schedule parents
+  | None -> general schedule

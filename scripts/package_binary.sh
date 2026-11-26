@@ -12,10 +12,13 @@ install -m 755 _build/default/bin/main.exe "$bundle/bin/unified-interpreter"
 install -m 755 _build/default/attention_cli/main.exe "$bundle/bin/attention"
 install -m 755 _build/default/kernel_cli/main.exe "$bundle/bin/kernel-example"
 cp scripts/attention_frontend.py scripts/attention_dialects.py \
+  scripts/scheduler_module.py scripts/scheduler_inputs.py scripts/scheduler_device.py scripts/scheduler_scene.py \
   scripts/bootstrap_attention.sh "$bundle/scripts/"
 cp requirements-attention.txt "$bundle/"
 cp docs/binary-distribution.md "$bundle/README.md"
 cp -R examples "$bundle/"
+mkdir -p "$bundle/benchmarks"
+cp -R benchmarks/hfusion benchmarks/ir-pairs benchmarks/scheduler benchmarks/hivm benchmarks/litao "$bundle/benchmarks/"
 cp artifacts/flash_attention/ir/hfusion_level.mlir \
   artifacts/flash_attention/ir/attention_hivm_compute.mlir \
   "$bundle/artifacts/flash_attention/ir/"

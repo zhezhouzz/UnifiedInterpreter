@@ -38,7 +38,11 @@ let run argv =
         | None -> Benchmark_traces.generate ?n:!n ~kv_heads:!heads ~timeout_ms:!timeout catalog method_ name
         | Some path ->
             let pairing = Hivm_trace.registered_file ~root:directory catalog name path in
-            Hivm_trace.to_json (Hivm_trace.generate ?n:!n ~kv_heads:!heads ~timeout_ms:!timeout method_ pairing) in
+            (match method_ with
+             | Concrete b -> Ir_scheduler.generate ?n:!n ~kv_heads:!heads ~timeout_ms:!timeout ~name
+                 (match b with Search -> Bfs | Solve -> Smt) (Device pairing)
+             | Symbolic -> Hivm_trace.to_json (Hivm_trace.generate ?n:!n ~kv_heads:!heads
+                                              ~timeout_ms:!timeout method_ pairing)) in
       (match !save with None -> print doc | Some path ->
         Out_channel.with_open_bin path (fun ch -> Yojson.Safe.to_channel ch doc);
         Printf.printf "%s %s %s pairs=%d\n" name !backend (J.to_string (J.member "status" doc))

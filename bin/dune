@@ -2,4 +2,4 @@
  (public_name unified-interpreter)
  (name main)
  (flags (:standard -open Stdlib))
- (libraries unified_interpreter hivm_trace))
+ (libraries unified_interpreter hivm_trace hfusion_trace ir_scheduler))

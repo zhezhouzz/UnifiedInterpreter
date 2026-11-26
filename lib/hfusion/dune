@@ -1,0 +1,4 @@
+(library
+ (name hfusion_trace)
+ (flags (:standard -open Stdlib))
+ (libraries unified_interpreter attention_runtime extracted_semantics z3 zarith yojson unix))

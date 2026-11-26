@@ -391,6 +391,14 @@ let generate ?n ?(kv_heads=1) ?(timeout_ms=5000) method_ = function
   | Core p -> generate_core ?n ~timeout_ms method_ p
   | Layout (variant,ast) -> Vectorlayout_hivm.generate ?n ~kv_heads ~timeout_ms method_ variant ast
 
+let core_inputs ?n = function
+  | Core p ->
+      let count = Z.of_int (Option.value ~default:p.launch.default_n n) in
+      let schedule = Race_report.schedule p.launch count in
+      let parameter = if p.launch.family.parameter=[] then None else Some count in
+      p.entries,parameter,p.inputs (Some schedule) parameter
+  | Layout _ -> invalid "expected a Core launch"
+
 let to_json report =
   let task (t : task) = `Assoc ["id",`Int t.id;"pipe",`String (pipe_name t.pipe)] in
   let signal s = `Assoc ["receiver",`Int s.receiver;"source",`String (pipe_name s.source);

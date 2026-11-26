@@ -75,6 +75,7 @@ let solve_component parents =
   done;
   {ancestors;order=Array.init size Fun.id;reachable=Array.make size true}
 
+
 let solve parents =
   let size = Array.length parents in
   let components = Array.init size Fun.id in
@@ -98,3 +99,27 @@ let solve parents =
           let bit=Z.trailing_zeros value in expand (Z.logand value (Z.pred value))
             (Z.logor acc (Z.shift_left Z.one ids.(bit))) in expand bits Z.zero)) ids) groups;
   {ancestors;order=Array.init size Fun.id;reachable=Array.make size true}
+
+type backend = Bfs | Smt
+
+let compile backend parents =
+  match backend with
+  | Bfs -> build parents
+  | Smt when Array.for_all Fun.id
+      (Array.mapi (fun i -> List.for_all (fun p -> p >= 0 && p < i)) parents) -> solve parents
+  | Smt ->
+      (* 不可达节点可能等待未发送的信号，或位于依赖环中。只给就绪节点编号。 *)
+      let topology = build parents in
+      let ids = topology.order in
+      let number = Array.make (Array.length parents) (-1) in
+      Array.iteri (fun i n -> number.(n) <- i) ids;
+      let solved = solve (Array.map (fun n -> List.map (Array.get number) parents.(n)) ids) in
+      let ancestors = Array.make (Array.length parents) Z.zero in
+      Array.iteri (fun i n ->
+        let bits = ref solved.ancestors.(i) in
+        while not (Z.equal !bits Z.zero) do
+          let p = Z.trailing_zeros !bits in
+          ancestors.(n) <- Z.logor ancestors.(n) (Z.shift_left Z.one ids.(p));
+          bits := Z.logand !bits (Z.pred !bits)
+        done) ids;
+      {topology with ancestors}

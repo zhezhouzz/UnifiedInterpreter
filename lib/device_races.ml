@@ -143,7 +143,7 @@ let compile_program ?(backend=Bug_traces.Search) program (input : Vectorlayout_i
       List.exists (fun r -> r.bank=bank) a.possible.reads) (Hashtbl.find banks steps.(a.node)))) sites;
   List.iter (fun i -> if Hashtbl.mem mutable_banks (Device_value.Global i) then
     invalid_arg "device launch metadata is writable") [4;5;6;7;8];
-  let graph = match backend with Bug_traces.Search -> Precedence.build parents | Solve -> Precedence.solve parents in
+  let graph = Precedence.compile (match backend with Bug_traces.Search -> Bfs | Solve -> Smt) parents in
   let locations = Array.of_list program.streams in
   let blocks = Array.map (function Host s | Finish (s,_) -> locations.(s).location.block) steps in
   let readers = Hashtbl.create 32 and writers = Hashtbl.create 32 in

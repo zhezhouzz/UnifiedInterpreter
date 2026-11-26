@@ -18,6 +18,8 @@ module Vectorlayout_input = Vectorlayout_input
 module Race_benchmarks = Race_benchmarks
 module Benchmark_traces = Benchmark_traces
 module Race_report = Race_report
+module Precedence = Precedence
+module Event_order = Event_order
 module Device_races = Device_races
 module Device_symbolic = Device_symbolic
 

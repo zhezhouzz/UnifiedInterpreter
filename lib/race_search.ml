@@ -60,11 +60,14 @@ let precedence schedule =
       Array.iteri (fun i n -> require n (at s i)) w;
       Array.iteri (fun i n -> if i >= schedule.capacity then require n (at w (i-schedule.capacity))) s
     ) flags;
-    Some (Precedence.build parents))
+    Some parents)
+
+let from_predecessors backend schedule parents =
+  let graph = Precedence.compile backend parents in
+  let truncated = List.exists (Option.fold ~none:true ~some:(Array.get graph.reachable)) schedule.cutoffs in
+  result schedule ~truncated (fun a b -> if Precedence.unordered graph a b then
+    Some (replay_indices schedule (Precedence.prefix graph a b)) else None)
 
 let generate schedule = match precedence schedule with
   | None -> enumerate schedule
-  | Some graph ->
-      let truncated = List.exists (Option.fold ~none:true ~some:(Array.get graph.reachable)) schedule.cutoffs in
-      result schedule ~truncated (fun a b -> if Precedence.unordered graph a b then
-        Some (replay_indices schedule (Precedence.prefix graph a b)) else None)
+  | Some parents -> from_predecessors Precedence.Bfs schedule parents

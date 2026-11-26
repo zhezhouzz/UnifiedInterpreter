@@ -42,8 +42,13 @@ let vectorlayout argv =
 
 let () = match Array.to_list Sys.argv with
   | [_] -> Demo.run_all ()
+  | _::"race"::"pairs"::args ->
+      (try Ir_pairs.run (Array.of_list ("race pairs"::args)) with
+       | Arg.Help message -> print_string message | Arg.Bad message -> prerr_endline message; exit 2)
   | _::"race"::args ->
-      (try Race.run (Array.of_list ("race"::args)) with
+      let run=if List.exists (fun a -> List.mem a ["--hfusion";"--hfusion-ast";"--hfusion-ir"]) args
+        then Hfusion_race.run else Race.run in
+      (try if not (Module_race.dispatch args) then run (Array.of_list ("race"::args)) with
        | Arg.Help message -> print_string message | Arg.Bad message -> prerr_string message;exit 2)
   | _::"vectorlayout"::args ->
       (try vectorlayout (Array.of_list ("vectorlayout"::args)) with

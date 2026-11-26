@@ -54,4 +54,5 @@ val registered_module : ?root:string -> (string * (unit -> Race_benchmarks.bench
 val ast_file : ?root:string -> string -> string
 val fixture_source : (string * (unit -> Race_benchmarks.benchmark)) list -> string -> string
 val generate : ?n:int -> ?kv_heads:int -> ?timeout_ms:int -> Benchmark_traces.method_ -> pairing -> report
+val core_inputs : ?n:int -> pairing -> (int * string) list * Z.t option * Yojson.Safe.t
 val to_json : report -> Yojson.Safe.t

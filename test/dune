@@ -1,4 +1,12 @@
 (test
+ (name test_hfusion_trace)
+ (modules test_hfusion_trace)
+ (flags (:standard -open Stdlib))
+ (deps ../examples/kernels/vector_add_hfusion.mlir ../benchmarks/hfusion/strided-output.mlir
+       ../scripts/attention_frontend.py ../scripts/attention_dialects.py)
+ (libraries hfusion_trace attention_runtime extracted_semantics))
+
+(test
  (name test_unified_interpreter)
  (modules test_unified_interpreter)
  (libraries unified_interpreter))
@@ -48,6 +56,12 @@
  (modules test_litao_races)
  (deps (source_tree ../benchmarks/litao))
  (libraries unified_interpreter yojson))
+
+(rule
+ (alias runtest)
+ (deps (source_tree ../benchmarks) (source_tree ../examples/kernels)
+       ../artifacts/flash_attention/ir/hfusion_level.mlir)
+ (action (run python3 %{dep:check_ir_pairs.py} %{exe:../bin/main.exe})))
 
 (rule
  (alias runtest)

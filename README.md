@@ -50,6 +50,22 @@ opam exec --switch=unified-interpreter -- dune exec kernel-example -- --kernel r
 See the [kernel walkthrough](docs/user-guide.md#9-运行两个小型-kernel) for inputs,
 expected results, trace output and the OCaml interface.
 
+All 84 benchmarks support both BFS and SMT at both IR stages. Use
+`race list --hfusion` or `race list --hivm` to inspect the catalog.
+`race run cv/scene1/error --hivm --backend smt` returns the launch inputs
+and two prefixes in which the conflicting accesses complete in opposite orders.
+The interpreter can pass its AST to the [shared OCaml scheduler](lib/scheduler/ir_scheduler.mli).
+See the [trace guide](docs/scheduler-traces.md) and the
+[results for every benchmark, stage and backend](benchmarks/results/scheduler-matrix.csv).
+The tensor frontend also supports symbolic loop counts, for example
+`race run strided-output --hfusion --backend symbolic`.
+
+Run `dune exec unified-interpreter -- race pairs` to list the HFusion and HIVM
+files for all 84 benchmark variants. For a single variant, use
+`race pairs cv/scene1/error --json`. The [IR catalog guide](docs/benchmark-ir-pairs.md)
+describes the original compiler snapshots, computation-only HFusion projections,
+and the command for verifying every pair with BiShengIR.
+
 Run the archived vectorlayout kernel as a concrete Core Lang device AST with
 `dune exec unified-interpreter -- vectorlayout --variant fail`. The
 [vectorlayout guide](docs/vectorlayout.md) describes the two kernel versions,

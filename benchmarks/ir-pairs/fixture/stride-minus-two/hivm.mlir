@@ -1,0 +1,34 @@
+module {
+  func.func @stream_0(%mem: memref<?xi32, #hivm.address_space<gm>>) {
+    %v1 = arith.constant true
+    %v2 = arith.constant false
+    %v3 = arith.constant 3 : i128
+    %v4 = arith.constant -1 : i128
+    %v5 = arith.constant -2 : i128
+    %v6:2 = scf.while (%v7 = %v3, %v8 = %v1) : (i128, i1) -> (i128, i1) {
+      %v11 = arith.cmpi sgt, %v7, %v4 : i128
+      %v12 = arith.andi %v11, %v8 : i1
+      scf.condition(%v12) %v7, %v8 : i128, i1
+    } do {
+    ^bb0(%v9: i128, %v10: i1):
+      %v13 = arith.constant 1 : i128
+      %v14 = arith.constant 1 : i128
+      %v15 = arith.index_cast %v13 : i128 to index
+      %v16 = arith.index_cast %v14 : i128 to index
+      func.call @write(%mem, %v16, %v15) {hivm.pipe = #hivm.pipe<PIPE_V>} : (memref<?xi32, #hivm.address_space<gm>>, index, index) -> () loc("site.0")
+      %v17 = arith.addi %v9, %v5 : i128
+      scf.yield %v17, %v1 : i128, i1
+    }
+    return
+  }
+  func.func private @write(%src: memref<?xi32, #hivm.address_space<gm>>, %s: index, %n: index) {
+    %z = arith.constant 0 : index
+    %one = arith.constant 1 : index
+    scf.for %j = %z to %n step %one {
+      %v18 = arith.addi %s, %j : index
+      %v19 = arith.constant 1 : i32
+      memref.store %v19, %src[%v18] : memref<?xi32, #hivm.address_space<gm>>
+    }
+    return
+  }
+}

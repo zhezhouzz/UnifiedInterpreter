@@ -1,5 +1,7 @@
 # 用 scheduler 的 trace 执行 HIVM OCaml AST
 
+本文描述 `hivm-race-1`。张量计算用例和 CV 场景 1 的模块 trace 使用 `ir-race-1`。[两层共用的入口和模块 trace](scheduler-traces.md)
+
 ## 1. scheduler 的输入
 
 **最终集成时，interpreter 将内存中的 HIVM OCaml AST 直接传给 scheduler。当前从文件读取 AST 仅用于 benchmark 测试。**

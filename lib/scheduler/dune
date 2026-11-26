@@ -1,0 +1,4 @@
+(library
+ (name ir_scheduler)
+ (flags (:standard -open Stdlib))
+ (libraries unified_interpreter hivm_trace hfusion_trace))

@@ -1,0 +1,6 @@
+benchmark,instances,bfs_pairs,smt_pairs,symbolic_status,symbolic_n
+vector-add,1,0,0,no-race,
+row-sum,1,0,0,no-race,
+flash-attention,20,0,0,no-race,
+flash-attention/duplicate-pid,2,2,2,race,
+strided-output,2,1,1,race,4
