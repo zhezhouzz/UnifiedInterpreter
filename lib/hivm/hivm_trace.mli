@@ -7,15 +7,19 @@ module Mlir_device = Mlir_device
 type pipe = Core_lang.Device.pipe = S | V | M | MTE1 | MTE2 | MTE3 | FIX
 type origin = { path : int list; opcode : string; part : string option }
 
-(** iterations 从外到内记录从零开始的轮次。 *)
-type location = { stream : int; entry : string; origin : origin; iterations : int list }
+type call_frame = { caller : string; call_path : int list; call_iterations : int list }
+
+(** entry 是当前指令所属函数。calls 从流入口开始记录调用位置。
+    iterations 从外到内记录当前函数中从零开始的循环轮次。 *)
+type location = { stream : int; entry : string; origin : origin; iterations : int list; calls : call_frame list }
 
 (** 同一报告内，同一动态任务的提交和完成使用相同的 id。 *)
 type task = { id : int; pipe : pipe }
 type signal = { receiver : int; source : pipe; target : pipe; flag : int; cross : bool }
-type action = Compute | Allocate | Set of signal list | Wait of signal
+type action = Compute | Set of signal list | Wait of signal
             | Wait_all of int list * signal | Barrier
 type phase = Submit of task list | Complete of task | Execute of pipe option
+  | Async_submit of int | Async_complete of int
 type event = { location : location; action : action; phase : phase }
 
 (** 两条前缀分别以 second 和 first 的访问结束，均可能保留待完成任务。 *)
@@ -55,11 +59,17 @@ val registered_module : ?root:string -> (string * (unit -> Race_benchmarks.bench
   string -> Module_ast.t -> pairing
 val ast_file : ?root:string -> string -> string
 val fixture_source : (string * (unit -> Race_benchmarks.benchmark)) list -> string -> string
+val benchmark_arguments : ?n:int -> string -> Race_benchmarks.launch ->
+  (int * string) list * Z.t option * Yojson.Safe.t
 val generate : ?n:int -> ?kv_heads:int -> ?timeout_ms:int -> Benchmark_traces.method_ -> pairing -> report
 val core_inputs : ?n:int -> pairing -> (int * string) list * Z.t option * Yojson.Safe.t
 val to_json : report -> Yojson.Safe.t
 
 type lowered_mlir = Core_mlir of Mlir.t | Device_mlir of Mlir_device.t
-val lower_mlir : ?entry:string -> ?configuration:Yojson.Safe.t -> Module_ast.t -> lowered_mlir
+val lower_mlir : ?entry:string -> ?configuration:Yojson.Safe.t -> ?allow_prefix:bool -> Module_ast.t -> lowered_mlir
 val analyze_mlir : backend:Bug_traces.backend -> ?hivm:bool -> lowered_mlir -> Yojson.Safe.t
+val project_mlir : lowered_mlir -> Yojson.Safe.t -> Yojson.Safe.t
 val replay_mlir : lowered_mlir -> Yojson.Safe.t -> int
+
+(** 为完整且前驱确定的 Core 程序导出源事件、可见前驱和候选竞争对。 *)
+val source_event_order : Mlir.t -> (Yojson.Safe.t * int list) array * (int * int) list

@@ -27,6 +27,7 @@ let consume ast first second events =
     | Submit tasks -> List.iter (fun (t:H.task) ->
         assert (not (Hashtbl.mem pending t.id)); Hashtbl.add pending t.id (identity,t.pipe)) tasks
     | Complete t -> assert (Hashtbl.find pending t.id=(identity,t.pipe)); Hashtbl.remove pending t.id
+    | Async_submit _ | Async_complete _ -> failwith "unexpected HFusion task in HIVM trace"
     | Execute _ -> ()) events;
   assert (List.filter (fun e -> e=first || e=second) events=[first;second]);
   assert (List.hd (List.rev events)=second)
@@ -79,13 +80,31 @@ let () =
   (match H.registered_module ~root catalog "litao/wrong-event/buggy" wrong with
    | exception Invalid_argument _ -> () | _ -> failwith "accepted the wrong HIVM variant");
   let shared="fixture/shared-allocation" in
-  let report=H.generate (Concrete Solve) (H.registered_file ~root catalog shared (H.ast_file ~root shared)) in
+  let ast=A.read (H.ast_file ~root shared) in
+  let pairing=H.registered_module ~root catalog shared ast in
+  List.iter (fun backend ->
+  let report=H.generate (Concrete backend) pairing in
   assert (report.races<>[]);
   let slots=List.map (fun b -> List.nth (J.member "arguments" b |> J.to_list) 1)
       (J.member "bindings" report.inputs |> J.to_list) in
   assert (slots=[`Assoc ["descriptor_slot",`String "allocation:0"];`Assoc ["descriptor_slot",`String "allocation:0"]]);
   List.iter (fun (r:H.race) -> List.iter (fun events ->
-    assert (List.exists (fun (e:H.event) -> e.action=Allocate && e.phase=Execute None &&
-      e.location.stream=0 && e.location.origin.opcode="func.call") events)) [r.forward;r.reverse]) report.races;
+    let slot_written = ref false in
+    List.iter (fun (e:H.event) ->
+      let loc=e.location in
+      if loc.stream=0 then (
+        assert (not !slot_written && e.action=Compute && e.phase=Execute (Some S));
+        let parent = match loc.calls with [frame] -> frame | _ -> failwith "expected one call" in
+        assert (parent.caller=List.assoc 0 report.streams && parent.call_iterations=[]);
+        let op=A.resolve ast ~entry:parent.caller parent.call_path in
+        assert (op.opcode="func.call" && List.assoc "callee" op.properties=loc.entry);
+        let store=A.resolve ast ~entry:loc.entry loc.origin.path in
+        let block=A.entry ast loc.entry in
+        let alloc=List.find (fun (op:A.operation) -> op.opcode="memref.alloc") block.body in
+        assert (store.opcode="memref.store" && List.hd store.operands=fst (List.hd alloc.results) &&
+                List.nth store.operands 1=fst (List.hd block.arguments));
+        slot_written := true)
+      else match e.phase with Complete _ -> assert !slot_written | _ -> ()) events;
+    assert !slot_written) [r.forward;r.reverse]) report.races) [Search;Solve];
   Printf.printf "HIVM catalog: %d programs, %d racy default inputs, %d pairs per backend, %d symbolic inputs\n"
     !count !racy !races !symbolic

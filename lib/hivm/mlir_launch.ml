@@ -24,6 +24,7 @@ type stream = {
 }
 
 type t = {
+  hfusion : bool;
   streams : stream list;
   storages : storage list;
   capacity : int;
@@ -53,6 +54,15 @@ let block_edge launch source _ target _ =
   List.mem (source,target) (Option.value launch.edges ~default:[])
 
 let bind ?entry ?(configuration=`Assoc []) ast =
+  let hfusion = match J.member "stage" configuration with
+    | `String "hfusion" -> true | `String "hivm" -> false
+    | `Null ->
+        let rec device (op : M.operation) =
+          String.starts_with ~prefix:"hivm." op.opcode ||
+          List.exists (fun (k,_) -> String.starts_with ~prefix:"hivm." k) op.attributes ||
+          List.exists (List.exists (fun (b : M.block) -> List.exists device b.body)) op.regions in
+        not (List.exists (fun (_,op) -> device op) ast.M.functions)
+    | _ -> invalid_arg "launch stage must be hfusion or hivm" in
   let capacity = value configuration "capacity" J.to_int 1 in
   if capacity < 1 then invalid_arg "launch capacity must be positive";
   let storages = Hashtbl.create 8 in
@@ -142,7 +152,7 @@ let bind ?entry ?(configuration=`Assoc []) ast =
     | `List [`Int a;`Int b] when a>=0 && b>=0 && a<>b && a<List.length streams && b<List.length streams -> a,b
     | _ -> invalid_arg "cross-stream edge must name two distinct launch stream indices") (J.to_list j))
     (J.member "edges" configuration) in
-  {streams;storages;capacity;edges}
+  {hfusion;streams;storages;capacity;edges}
 
 let json_int n = if Z.fits_int n then `Int (Z.to_int n) else `Intlit (Z.to_string n)
 let list f xs = `List (List.map f xs)

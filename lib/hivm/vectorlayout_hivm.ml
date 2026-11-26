@@ -102,7 +102,7 @@ let mappings ast stream =
     Hashtbl.add sites path origin) (device_sites stream) (source_sites ast name);
   sites
 
-let export_events ~entries ~location (model : R.model) races =
+let export_events ?(logical_async=fun _ -> false) ?(atomic=fun _ -> false) ~entries ~location (model : R.model) races =
   let streams = Array.of_list model.program.streams in
   let ids = Hashtbl.create (Array.length streams) in
   Array.iteri (fun i s -> Hashtbl.add ids s.D.location i) streams;
@@ -125,9 +125,16 @@ let export_events ~entries ~location (model : R.model) races =
         let host = List.map (fun id -> id,{location=location id;phase=Execute (Some S);action=Compute}) step.host in
         (match step.issued with None -> host | Some (id,sub) ->
           let task = {id=i;pipe=sub.queue} in
-          let issued = {location=location id;action=action sub.operation;phase=Submit [task]} in
-          Hashtbl.add pending (stream,sub.serial) (id,{issued with phase=Complete task});
-          host @ [id,issued])
+          let loc=location id in
+          let submit,complete=if logical_async loc.origin.opcode then Async_submit i,Async_complete i
+            else Submit [task],Complete task in
+          let issued = {location=loc;action=action sub.operation;phase=submit} in
+          if atomic loc.origin.opcode && sub.synchronous then (
+            Hashtbl.add pending (stream,sub.serial) (id,{issued with phase=Execute (Some sub.queue)});
+            host)
+          else (
+            Hashtbl.add pending (stream,sub.serial) (id,{issued with phase=complete});
+            host @ [id,issued]))
     | Finish (stream,serial) ->
         let key = stream,serial in
         let completion = Hashtbl.find pending key in
@@ -137,7 +144,7 @@ let export_events ~entries ~location (model : R.model) races =
     let field k = J.member k json in
     let target node key =
       let site = List.find (fun site -> R.identity_json site=field key) model.by_node.(node) in
-      snd (List.find (fun (id,e) -> id=site.id && match e.phase with Submit _ -> false | _ -> true) steps.(node)) in
+      snd (List.find (fun (id,e) -> id=site.id && match e.phase with Submit _ | Async_submit _ -> false | _ -> true) steps.(node)) in
     match Race_report.numbers (field "nodes") with
     | [a;b] ->
         let first = target a "first" and second = target b "second" in
@@ -167,7 +174,7 @@ let export ast (model : R.model) races =
       let offset = pid-s.location.block in
       if offset<0 || offset mod 28<>0 then invalid_arg "invalid block loop induction value";
       offset/28::rest in
-    {stream=id.stream;entry=entries.(id.stream);origin;iterations} in
+    {stream=id.stream;entry=entries.(id.stream);origin;iterations;calls=[]} in
   export_events ~entries ~location model races
 
 let generate ?n ~kv_heads ~timeout_ms method_ variant ast =

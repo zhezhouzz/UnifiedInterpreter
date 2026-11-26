@@ -12,25 +12,28 @@ type source = {
   origin : Hivm_event.origin;
   span : Source.span option;
   synthetic : bool;
+  frames : (string * int list * int * string) list;
 }
 
 type t = {
-  ast : M.t;
+  ast_digest : string;
   launch : Launch.t;
   program : C.program;
   sources : ((int * int list) * source) list;
   operation_names : string array;
 }
 
-let error (op : M.operation) reason =
-  let message = op.opcode ^ ": " ^ reason in
-  match op.span with Some span -> Source.fail span message | None -> invalid_arg message
+let error (op : M.operation) =
+  let code=op.opcode and span=op.span in
+  fun reason -> let message=code ^ ": " ^ reason in
+  match span with Some span -> Source.fail span message | None -> invalid_arg message
 
-let checked op f =
+let checked op =
+  let fail=error op in fun f ->
   try f () with
-  | Invalid_argument message | J.Type_error (message,_) -> error op message
-  | Not_found -> error op "missing operand, type, or attribute"
-  | Z.Overflow -> error op "integer exceeds the supported address range"
+  | Invalid_argument message | J.Type_error (message,_) -> fail message
+  | Not_found -> fail "missing operand, type, or attribute"
+  | Z.Overflow -> fail "integer exceeds the supported address range"
 
 let attribute (op : M.operation) name =
   Option.value (List.assoc_opt name op.decoded) ~default:`Null
@@ -59,6 +62,8 @@ let prepend ?point make rest =
   {command=make rest.command; points}
 
 type registry = {
+  banks : ((int * C.Device.core option * string),int) Hashtbl.t;
+  initial : bytes array;
   scalars : (C.value list -> C.value) Queue.t;
   accesses : (string * (C.value list -> C.footprint)) Queue.t;
 }
@@ -71,6 +76,12 @@ type context = {
   registry : registry;
   mutable next : int;
   mutable pipes : C.Device.pipe list;
+  entry : string;
+  parents : string list;
+  depth : int;
+  rotation : int option;
+  partial : bool;
+  uses_async : bool ref;
 }
 
 let fresh ctx = let id=ctx.next in ctx.next <- id+1; id
@@ -78,7 +89,8 @@ let fresh ctx = let id=ctx.next in ctx.next <- id+1; id
 let register queue value = let id=Queue.length queue in Queue.add value queue; id
 
 let scalar ctx op id arguments evaluate =
-  let f = register ctx.registry.scalars (fun args -> checked op (fun () -> evaluate args)) in
+  let protect=checked op in
+  let f = register ctx.registry.scalars (fun args -> protect (fun () -> evaluate args)) in
   prepend (fun next -> C.Scalar (id,f,arguments,next))
 
 let type_name ctx id = Hashtbl.find ctx.types id
@@ -95,7 +107,22 @@ let unary f = function [x] -> f x | _ -> invalid_arg "expected one operand"
 let binary f = function [a;b] -> f a b | _ -> invalid_arg "expected two operands"
 
 let point ?part ?(synthetic=false) path (op : M.operation) =
-  {origin={path;opcode=op.opcode;part};span=op.span;synthetic}
+  {origin={path;opcode=op.opcode;part};span=op.span;synthetic;frames=[]}
+
+let validate_sources ast launch sources =
+  let sites=Hashtbl.create (List.length sources) in
+  List.iter (fun ((stream,site),p) ->
+    if Hashtbl.mem sites (stream,site) then invalid_arg "duplicate origin for a Core site";
+    Hashtbl.add sites (stream,site) ();
+    let initial=(List.find (fun (s : Launch.stream) -> s.id=stream) launch.Launch.streams).entry in
+    let entry=List.fold_left (fun entry (caller,path,depth,callee) ->
+      let call=M.resolve ast ~entry path in
+      if entry<>caller || depth<0 || call.opcode<>"func.call" || attribute call "callee"<>`String callee then
+        invalid_arg "invalid source call frame";
+      callee) initial p.frames in
+    if (M.resolve ast ~entry p.origin.path).opcode<>p.origin.opcode then
+      invalid_arg "Core site and source operation disagree") sources;
+  sources
 
 let pipe_id = function
   | C.Device.S -> C.scalar_pipe | V -> 0 | MTE2 -> 1 | MTE3 -> 2
@@ -108,12 +135,90 @@ let use_pipe ctx pipe =
 let accessed read write = {C.reads=read;writes=write}
 let bytes value = Mem.addresses (Mem.buffer value)
 
-let read_values = List.concat_map (function C.VBuffer b -> Mem.addresses b | _ -> [])
+let read_values = List.concat_map (function C.VBuffer b | VTensor (b,_) -> Mem.addresses b | _ -> [])
 
-let issue ctx (op : M.operation) point pipe args footprint =
-  let pipe = use_pipe ctx pipe in
-  let f = register ctx.registry.accesses (op.opcode,fun args -> checked op (fun () -> footprint args)) in
+let initial_bytes ast (s : Launch.storage) =
+  match s.initial with None -> Bytes.empty | Some (ty,values) ->
+  let width,encode = match Mem.type_of ast ty with
+    | M.Integer bits -> max 1 ((bits+7)/8),Launch.z_of_json
+    | M.Float 16 when ty="bf16" -> 2,(fun v ->
+        let n = Int32.bits_of_float (J.to_number v) in
+        let rounded = Int32.add n (Int32.add 0x7fffl (Int32.logand 1l (Int32.shift_right_logical n 16))) in
+        Z.of_int32 (Int32.shift_right_logical rounded 16))
+    | M.Float 16 -> 2,(fun v -> Z.of_int64 (Device_value.half_bits (J.to_number v)))
+    | M.Float 32 -> 4,(fun v -> Z.of_int32 (Int32.bits_of_float (J.to_number v)))
+    | M.Float 64 -> 8,(fun v -> Z.of_int64 (Int64.bits_of_float (J.to_number v)))
+    | _ -> invalid_arg ("unsupported initial storage type " ^ ty) in
+  let data = Bytes.create (width * List.length values) in
+  List.iteri (fun i v -> let n = encode v in
+    for byte=0 to width-1 do Bytes.set_uint8 data (width*i+byte) (Z.to_int (Z.extract n (8*byte) 8)) done) values;
+  data
+
+let local_cells ctx = function
+  | (C.Allocated _,_)::_ -> true
+  | (C.Input i,_)::_ -> i >= List.length ctx.launch.storages
+  | (C.Invalid_address,_)::_ | [] -> false
+
+let load_value ctx ty =
+  let contents=ctx.registry.initial in
+  match Mem.type_of ctx.ast ty with
+  | M.Shaped {kind=M.Memref;_} -> (fun cells -> C.VBuffer (Effect.perform (C.Load_descriptor (List.hd cells))))
+  | scalar_type -> fun cells ->
+      let initial = lazy (
+        let n,_ = List.fold_left (fun (n,shift) (storage,offset) ->
+          let byte = match storage with
+            | C.Input i when i<Array.length contents ->
+                let data=contents.(i) in if offset<Bytes.length data then Bytes.get_uint8 data offset else 0
+            | _ -> raise (C.Prefix_boundary "a device memory value controls subsequent scheduling") in
+          Z.logor n (Z.shift_left (Z.of_int byte) shift),shift+8) (Z.zero,0) cells in
+        match scalar_type with
+        | M.Integer bits -> Scalar.int bits n
+        | M.Float 16 when ty="bf16" -> C.VFloat (Int32.float_of_bits (Int32.shift_left (Z.to_int32 n) 16))
+        | M.Float 16 -> C.VFloat (Device_value.half_float (Z.to_int n))
+        | M.Float 32 -> C.VFloat (Int32.float_of_bits (Z.to_int32 (Z.signed_extract n 0 32)))
+        | M.Float 64 -> C.VFloat (Int64.float_of_bits (Z.to_int64 (Z.signed_extract n 0 64)))
+        | _ -> invalid_arg ("unsupported scalar load of " ^ ty)) in
+      (if local_cells ctx cells then
+           (match Effect.perform (C.Capture_local (cells,ty)) with
+            | Some value -> C.VDeferred (lazy (Effect.perform (C.Use_local cells); C.demand value))
+            | None -> C.VMemory_read (cells,initial))
+       else C.VMemory_read (cells,initial))
+
+let indirect_atomic ctx path op rest =
+  if attribute op "symbol"<>`String "__builtin_indirect_atomic" ||
+     attribute op "extra_attr"<>`String "operate=add" ||
+     attribute op "gm_addr_args_indices"<>`List [`Int 0] then
+    invalid_arg "unsupported custom operation";
+  let offsets_type=(shaped ctx (List.nth op.M.operands 1)).element
+  and mask_type=(shaped ctx (List.nth op.operands 3)).element in
+  let mask_value=load_value ctx mask_type and offset_value=load_value ctx offsets_type in
+  let footprint = function
+    | [base;offsets;values;mask;out] ->
+        let base=Mem.buffer base and offsets=Mem.buffer offsets and mask=Mem.buffer mask
+        and values=Mem.buffer values and out=Mem.buffer out in
+        let lanes = match mask.shape with [n] when offsets.shape=[n] && values.shape=[n] && out.shape=[n] -> n
+          | _ -> invalid_arg "incompatible indirect atomic lane shapes" in
+        let reads = ref (Mem.addresses mask) and writes = ref [] in
+        for i=0 to lanes-1 do
+          let lane b = Mem.addresses (Mem.at b [Z.of_int i]) in
+          if not (Z.equal (Mem.integer (mask_value (lane mask))) Z.zero) then (
+            let index = Mem.integer (offset_value (lane offsets)) in
+            let target=Mem.addresses (Mem.at base [index]) in
+            reads := List.rev_append (lane offsets @ lane values @ target) !reads;
+            writes := List.rev_append (target @ lane out) !writes)
+        done; accessed !reads !writes
+    | _ -> invalid_arg "expected four inputs and one destination for indirect atomic add" in
+  let pipe=Launch.pipe (enum (attribute op "hivm.pipe")) in
+  let id=register ctx.registry.accesses (op.opcode,footprint) in
+  prepend ~point:(point path op) (fun next -> C.Issue(use_pipe ctx pipe,id,values op.operands,next)) rest
+
+let issue_on ctx (op : M.operation) point pipe args footprint =
+  if pipe=C.async_pipe then ctx.uses_async := true;
+  let protect=checked op in
+  let f = register ctx.registry.accesses (op.opcode,fun args -> protect (fun () -> footprint args)) in
   prepend ~point (fun rest -> C.Issue (pipe,f,args,rest))
+
+let issue ctx op point pipe = issue_on ctx op point (use_pipe ctx pipe)
 
 let allocate ctx op point ~space id arguments descriptor rest =
   let spec = fresh ctx and storage = fresh ctx and size = fresh ctx in
@@ -131,6 +236,61 @@ let space = function
   | Some "#hivm.address_space<cc>" -> 5
   | Some "#hivm.address_space<ub>" -> 6
   | _ -> 0
+
+let device_bank ctx core bank =
+  let key=ctx.stream.location.block,core,bank in
+  match Hashtbl.find_opt ctx.registry.banks key with
+  | Some i -> i
+  | None -> let i=List.length ctx.launch.storages + Hashtbl.length ctx.registry.banks in
+      Hashtbl.add ctx.registry.banks key i; i
+
+let pointer ctx op rest =
+  let id = result op in
+  let ty = shaped ctx id in
+  let make_view=Mem.descriptor ctx.ast ty in
+  let bank = match ty.space with
+    | Some name when space ty.space>=2 -> name
+    | _ -> invalid_arg "pointer_cast requires a device storage space" in
+  let location = ctx.stream.location in
+  let core = if space ty.space=6 then Some location.core else None in
+  let storage = device_bank ctx core bank in
+  let count=match attribute op "operandSegmentSizes" with
+    | `List [`Int count;`Int _] -> count
+    | `Null -> List.length op.operands - List.length (List.filter Option.is_none ty.shape)
+    | _ -> invalid_arg "invalid pointer operand segments" in
+  if count<1 then invalid_arg "missing device address";
+  let operands=values op.operands in
+  let args=if count=1 then operands else (match ctx.rotation with Some id -> var id::operands
+    | None -> invalid_arg "pointer with multiple buffers requires an enclosing loop") in
+  scalar ctx op id args (fun inputs ->
+      let slot,operands=if count=1 then 0,inputs else match inputs with
+        | counter::xs -> Z.to_int (Z.erem (Scalar.unsigned 64 (Mem.integer counter)) (Z.of_int count)),xs
+        | [] -> assert false in
+      let base=List.nth operands slot and dims=List.drop count operands in
+        let b = make_view (Mem.dimensions ty.shape dims) () in
+        let b = {b with storage=Some (C.Input storage);base_bytes=Mem.dimension (Mem.integer base)} in
+        C.VBuffer {b with bytes=Mem.size b}) rest
+
+let affine op =
+  let map = attribute op "map" in
+  let opcode=op.M.opcode in
+  let dims = J.to_int (J.member "dimensions" map) in
+  fun operands ->
+  let args = Array.of_list (List.map Mem.integer operands) in
+  if Array.length args <> dims + J.to_int (J.member "symbols" map) then invalid_arg "affine map arity";
+  let rec eval = function
+    | `List [`String "d";`Int i] -> args.(i)
+    | `List [`String "s";`Int i] -> args.(dims+i)
+    | `List [`String op;x;y] ->
+        let a=eval x and b=eval y in
+        (match op with "+" -> Z.add a b | "*" -> Z.mul a b | "mod" -> Z.erem a b
+         | "floordiv" -> Z.fdiv a b | "ceildiv" -> Z.cdiv a b | _ -> invalid_arg "unknown affine operator")
+    | literal -> Launch.z_of_json literal in
+  match List.map eval (J.to_list (J.member "results" map)) with
+  | [x] -> C.VInt x
+  | x::xs when opcode="affine.min" -> C.VInt (List.fold_left Z.min x xs)
+  | x::xs when opcode="affine.max" -> C.VInt (List.fold_left Z.max x xs)
+  | _ -> invalid_arg "unexpected affine result arity"
 
 let constant ctx op id =
   let value = attribute op "value" in
@@ -181,21 +341,24 @@ let slice_attributes op =
   integers (attribute op "static_offsets"), integers (attribute op "static_sizes"),
   integers (attribute op "static_strides")
 
-let check_view ast ty b =
-  let expected = Mem.descriptor ast ty b.C.shape ~offset:b.offset ~layout:b.strides () in
-  if expected.element_bytes<>b.element_bytes then invalid_arg "view changes element width";
-  Mem.validate b
+let like_buffer ctx ty =
+  let make=Mem.descriptor ctx.ast ty in unary (fun v -> make (Mem.buffer v).shape ())
 
 let lower_view ctx (op : M.operation) rest =
   let id = result op in
   let ty = shaped ctx id in
+  let make=Mem.descriptor ctx.ast ty and width=Mem.element_bytes ctx.ast ty in
+  let check_view b =
+    let expected = make b.C.shape ~offset:b.offset ~layout:b.strides () in
+    if expected.element_bytes<>b.element_bytes then invalid_arg "view changes element width";
+    Mem.validate b in
   let eval = match op.opcode with
     | "memref.subview" ->
         let static = slice_attributes op in
         (function source::dynamic ->
           let offsets,sizes,steps = mixed static dynamic in
           let b = Mem.subview (Mem.buffer source) ~offsets ~sizes ~steps ty.shape in
-          C.VBuffer (check_view ctx.ast ty b)
+          C.VBuffer (check_view b)
         | _ -> invalid_arg "missing source view")
     | "memref.reinterpret_cast" ->
         let static = slice_attributes op in
@@ -203,16 +366,16 @@ let lower_view ctx (op : M.operation) rest =
           let old = Mem.buffer source in
           (match mixed static dynamic with
            | [offset],shape,layout ->
-               let b = Mem.descriptor ctx.ast ty shape ~offset ~layout () in
+               let b = make shape ~offset ~layout () in
                if b.element_bytes<>old.element_bytes then invalid_arg "reinterpret changes element width";
-               C.VBuffer (Mem.validate {b with storage=old.storage;bytes=old.bytes})
+               C.VBuffer (Mem.validate {b with storage=old.storage;bytes=old.bytes;base_bytes=old.base_bytes})
            | _ -> invalid_arg "expected one reinterpret offset")
         | _ -> invalid_arg "missing source view")
-    | "memref.cast" -> unary (fun source -> C.VBuffer (check_view ctx.ast ty (Mem.buffer source)))
+    | "memref.cast" -> unary (fun source -> C.VBuffer (check_view (Mem.buffer source)))
     | "bufferization.to_tensor" | "bufferization.to_memref" | "bufferization.to_buffer" ->
         unary (fun source ->
           let b = Mem.buffer source in ignore (Mem.constrain_shape ty.shape b.shape);
-          if Mem.element_bytes ctx.ast ty<>b.element_bytes then invalid_arg "view changes element width";
+          if width<>b.element_bytes then invalid_arg "view changes element width";
           source)
     | _ -> invalid_arg "unsupported view operation" in
   scalar ctx op id (values op.operands) eval rest
@@ -233,9 +396,24 @@ let reshape ctx (op : M.operation) rest =
         shape
       else (if dynamic<>[] then invalid_arg "unexpected collapse arguments";
             List.map (fun group -> Mem.dimension (product (List.map (List.nth b.shape) group))) groups) in
-    if b.strides <> Mem.strides b.shape then invalid_arg "reshape of a noncontiguous view";
     ignore (Mem.constrain_shape ty.shape shape);
-    C.VBuffer (Mem.validate {b with shape;strides=Mem.strides shape})
+    let strides=if expand then
+        List.concat (List.map2 (fun stride axes ->
+          List.map (Z.mul stride) (Mem.strides (List.map (List.nth shape) axes))) b.strides groups)
+      else List.map (fun axes ->
+        let active=List.filter (fun axis -> List.nth b.shape axis>1) axes in
+        let last=List.hd (List.rev (if active=[] then axes else active)) in
+        let stride=List.nth b.strides last in
+        let expected=List.map (Z.mul stride) (Mem.strides (List.map (List.nth b.shape) axes)) in
+        if not (List.for_all2 (fun axis step -> List.nth b.shape axis<=1 || List.nth b.strides axis=step) axes expected)
+        then invalid_arg "reshape merges discontinuous dimensions"; stride) groups in
+    let view = Mem.validate {b with shape;strides} in
+    (match source with C.VTensor (_,cell) ->
+       C.VTensor (view,fun at ->
+         let linear=List.fold_left2 (fun n width i -> n*width+i) 0 shape at in
+         let _,coords=List.fold_right (fun width (n,is) -> n/width,n mod width::is) b.shape (linear,[]) in
+         cell coords)
+     | _ -> C.VBuffer view)
   | _ -> invalid_arg "missing reshape input" in
   scalar ctx op id (values op.operands) eval rest
 
@@ -243,6 +421,21 @@ let copy = binary (fun source target ->
   let a = Mem.buffer source and b = Mem.buffer target in
   if a.shape<>b.shape || a.element_bytes<>b.element_bytes then invalid_arg "copy shape or element width differs";
   accessed (Mem.addresses a) (Mem.addresses b))
+
+let nz_rectangle view rows columns =
+  match view.C.shape with
+  | [cols;row_blocks;inner_r;inner_c] when inner_r>0 && inner_c>0 &&
+      rows<=row_blocks*inner_r && columns<=cols*inner_c ->
+      if rows=row_blocks*inner_r && columns=cols*inner_c then Mem.addresses view else
+      List.concat_map (fun r -> List.concat_map (fun c ->
+        Mem.addresses (Mem.at view (List.map Z.of_int [c/inner_c;r/inner_r;r mod inner_r;c mod inner_c])))
+        (List.init columns Fun.id)) (List.init rows Fun.id)
+  | _ -> invalid_arg "NZ view does not contain the requested tile"
+
+let nd2nz = binary (fun source target ->
+  let src=Mem.buffer source and dst=Mem.buffer target in
+  match src.shape with [r;c] -> accessed (Mem.addresses src) (nz_rectangle dst r c)
+  | _ -> invalid_arg "nd2nz requires a two-dimensional input")
 
 let tensor_slice ctx path (op : M.operation) rest =
   let id = result op in
@@ -256,14 +449,14 @@ let tensor_slice ctx path (op : M.operation) rest =
       let offsets,sizes,steps = mixed static dynamic in
       C.VBuffer (Mem.subview (Mem.buffer source) ~offsets ~sizes ~steps ty.shape)
     | _ -> invalid_arg "missing tensor source" in
-    let descriptor = unary (fun v -> Mem.descriptor ctx.ast ty (Mem.buffer v).shape ()) in
+    let descriptor = like_buffer ctx ty in
     scalar ctx op view (values op.operands) to_view
       (allocate ctx op temp ~space:0 id [var view] descriptor
          (issue ctx op whole S [var view;var id] copy rest)))
   else match op.operands with
     | source::destination::dynamic ->
         let source_shape = (shaped ctx source).shape in
-        let descriptor = unary (fun v -> Mem.descriptor ctx.ast ty (Mem.buffer v).shape ()) in
+        let descriptor = like_buffer ctx ty in
         let footprint = function src::dst::out::dynamic ->
           let offsets,sizes,steps = mixed static dynamic in
           let src = Mem.buffer src and dst = Mem.buffer dst in
@@ -282,16 +475,21 @@ let tensor_slice ctx path (op : M.operation) rest =
 let linalg_ops = ["linalg.fill";"linalg.transpose";"linalg.broadcast";"linalg.matmul";
   "linalg.elemwise_binary";"linalg.elemwise_unary";"linalg.reduce"]
 
-let hfusion_ops = ["hfusion.cast";"hfusion.elemwise_binary";"hfusion.compare";
+let hfusion_ops = ["hfusion.arange";"hfusion.cast";"hfusion.elemwise_binary";"hfusion.compare";
   "hfusion.select";"hfusion.bitcast"]
 
 let vector_ops = ["hivm.hir.vadd";"hivm.hir.vsub";"hivm.hir.vmul";"hivm.hir.vdiv";
   "hivm.hir.vexp";"hivm.hir.vln";"hivm.hir.vcast";"hivm.hir.vbrc";"hivm.hir.vreduce";
   "hivm.hir.vand";"hivm.hir.vshr";"hivm.hir.vmin";"hivm.hir.vmax";
-  "hivm.hir.vcmp";"hivm.hir.vsel";"hivm.hir.vabs"]
+  "hivm.hir.vcmp";"hivm.hir.vsel";"hivm.hir.vabs";"hivm.hir.vtranspose"]
 
 let dps_operands (op : M.operation) =
   let destinations = match attribute op "operandSegmentSizes" with
+    | `List [`Int 1;`Int 1;`Int 1] when op.opcode="hfusion.arange" -> 1
+    | `List [`Int 1;`Int 1;`Int 0;`Int 0;`Int 0;`Int 0;`Int 0;`Int 0;`Int 0;`Int 0;`Int 1]
+        when op.opcode="hivm.hir.matmul" && List.length op.operands=3 -> 1
+    | `List (`Int inputs::`Int 1::optional) when List.mem op.opcode vector_ops &&
+          List.for_all ((=) (`Int 0)) optional && inputs+1=List.length op.operands -> 1
     | `List [`Int inputs;`Int n] when inputs+n=List.length op.operands -> n
     | `List [`Int 1;`Int 1;`Int 1;`Int 1;`Int 1;`Int 1;`Int 1;`Int 0;`Int 0;`Int 0]
       when op.opcode="hivm.hir.mmadL1" && List.length op.operands=7 -> 1
@@ -301,15 +499,118 @@ let dps_operands (op : M.operation) =
   match List.rev op.operands with dst::ins -> List.rev ins,dst
   | _ -> invalid_arg "missing destination operand"
 
+let tensor_cell ctx element =
+  let load=load_value ctx element in fun v at -> match v with
+  | C.VTensor (_,read) -> read at
+  | VBuffer b -> load (Mem.addresses (Mem.at b (List.map Z.of_int at)))
+  | scalar -> scalar
+
+let computed_tensor ctx (op : M.operation) inputs =
+  let opcode=op.opcode and attrs=op.decoded in
+  let field name=enum (List.assoc name attrs) in
+  let element=Mem.type_of ctx.ast (shaped ctx (result op)).element in
+  let readers=Array.of_list (List.map (fun id ->
+    let ty=match type_of ctx id with M.Shaped t -> t.element | _ -> type_name ctx id in
+    tensor_cell ctx ty) inputs) in
+  let axes=if opcode="linalg.broadcast" then List.map Z.to_int (integers (attribute op "dimensions")) else [] in
+  let sign=List.exists (List.exists (fun (block : M.block) ->
+    List.exists (fun (o : M.operation) -> o.opcode="arith.extsi") block.body)) op.regions in
+  fun vs ->
+  match List.rev vs with
+  | out::args ->
+      let args=List.rev args in
+      let b=Mem.buffer out in
+      let read i at = C.demand (readers.(i) (List.nth args i) at) in
+      let scalar at = match opcode with
+        | "linalg.fill" -> read 0 []
+        | "hfusion.arange" ->
+            let initial,steps = match args with
+              | origin::steps when List.length steps=List.length at -> Mem.integer origin,steps
+              | steps when List.length steps=List.length at -> Z.zero,steps
+              | _ -> invalid_arg "range operands do not match tensor rank" in
+            C.VInt (List.fold_left2 (fun n step i -> Z.add n (Z.mul (Mem.integer step) (Z.of_int i))) initial steps at)
+        | "linalg.broadcast" ->
+            read 0 (List.filter_map Fun.id (List.mapi (fun i x -> if List.mem i axes then None else Some x) at))
+        | "hfusion.select" -> read (if Scalar.boolean (read 0 at) then 1 else 2) at
+        | "hfusion.compare" ->
+            let a=read 0 at and b=read 1 at in
+            let compare op_float op_int = match a,b with
+              | C.VFloat x,C.VFloat y -> op_float x y | _ -> op_int (Mem.integer a) (Mem.integer b) in
+            C.VBool (match field "compare_fn" with "veq" -> compare (=) Z.equal | "vne" -> not (compare (=) Z.equal)
+              | "vlt" -> compare (<) Z.lt | "vle" -> compare (<=) Z.leq | "vge" -> compare (>=) Z.geq
+              | "vgt" -> compare (>) Z.gt | f -> invalid_arg ("unsupported comparison " ^ f))
+        | "hfusion.cast" when field "cast"="cast_signed" ->
+            (match element,read 0 at with
+             | M.Integer width,C.VBool b ->
+                 Scalar.int width (if not b then Z.zero else if sign then Z.minus_one else Z.one)
+             | M.Integer width,C.VInt n -> Scalar.int width n
+             | _ -> raise (C.Prefix_boundary "unsupported cast in a scheduling operand"))
+        | "linalg.elemwise_binary" | "hfusion.elemwise_binary" ->
+            let code = match field "fun" with
+              | "add" -> "arith.addi" | "sub" -> "arith.subi" | "mul" -> "arith.muli"
+              | "shrsi" -> "arith.shrsi" | "vand" -> "arith.andi" | "vor" -> "arith.ori"
+              | "max_signed" -> "arith.maxsi" | "min_signed" -> "arith.minsi"
+              | f -> raise (C.Prefix_boundary ("unsupported scheduling operand " ^ f)) in
+            (match element with M.Integer width ->
+               Scalar.integer_binary code width (read 0 at) (read 1 at)
+             | _ -> raise (C.Prefix_boundary "floating-point tensor arithmetic controls scheduling"))
+        | _ -> raise (C.Prefix_boundary (opcode ^ " tensor value controls scheduling")) in
+      C.VTensor (b,scalar)
+  | _ -> invalid_arg "missing result tensor"
+
+let indirect ctx path (op : M.operation) rest =
+  let load = op.opcode="hfusion.indirect_load" in
+  let base,offsets,mask,data,destination = match load,op.generic,op.operands with
+    | true,true,[base;offsets;out;mask;other] | true,false,[base;offsets;mask;other;out] ->
+        base,offsets,mask,other,Some out
+    | false,true,[base;offsets;data;mask] | false,false,[data;offsets;mask;base] ->
+        base,offsets,mask,data,None
+    | _ -> invalid_arg "invalid indirect memory operands" in
+  let mask_cell=tensor_cell ctx (shaped ctx mask).element and offset_cell=tensor_cell ctx (shaped ctx offsets).element in
+  let is_active m at = not (Z.equal Z.zero (Mem.integer (mask_cell m at))) in
+  let address b o at =
+    let index=Mem.integer (offset_cell o at) in
+    Mem.addresses (Mem.at (Mem.buffer b) [index]) in
+  let footprint = function b::o::m::v::output ->
+    let shape=(Mem.buffer m).shape in
+    if List.exists (fun a -> (Mem.buffer a).shape<>shape) (o::v::output) then invalid_arg "indirect tensor shapes differ";
+    let reads=ref (bytes m) and writes=ref (read_values output) in
+    let cell x at=Mem.addresses (Mem.at (Mem.buffer x) (List.map Z.of_int at)) in
+    let rec visit rev = function
+      | n::dims -> for i=0 to n-1 do visit (i::rev) dims done
+      | [] -> let at=List.rev rev in
+        if is_active m at then (
+          reads := List.rev_append (cell o at) !reads;
+          let target = address b o at in
+          if load then reads := List.rev_append target !reads else (
+            reads := List.rev_append (cell v at) !reads; writes := List.rev_append target !writes))
+        else if load then reads := List.rev_append (cell v at) !reads in
+    visit [] shape; accessed !reads !writes
+    | _ -> invalid_arg "missing indirect operands" in
+  let args=values [base;offsets;mask;data] in
+  match destination with
+  | None -> issue_on ctx op (point path op) C.async_pipe args footprint rest
+  | Some dst ->
+      let id=result op and ty=shaped ctx (result op) in
+      let descriptor=like_buffer ctx ty and read=load_value ctx ty.element and other_cell=tensor_cell ctx ty.element in
+      allocate ctx op (point ~part:"tensor allocation" ~synthetic:true path op) ~space:0 id [var dst] descriptor
+        (issue ctx op (point path op) S (args@[var id]) footprint
+           (scalar ctx op id (args@[var id]) (function
+             | [b;o;m;other;out] -> C.VTensor (Mem.buffer out,fun at ->
+                 if is_active m at then read (address b o at)
+                 else other_cell other at)
+             | _ -> invalid_arg "missing gather destination") rest))
+
 let dps ctx path (op : M.operation) rest =
   let inputs,destination = dps_operands op in
   let rec pure_node (node : M.operation) =
-    if node.opcode<>"linalg.yield" && not (String.starts_with ~prefix:"arith." node.opcode)
+    if not (List.mem node.opcode ["linalg.yield";"linalg.index"]) && not (String.starts_with ~prefix:"arith." node.opcode)
        && not (List.mem node.opcode ["math.exp";"math.log";"math.sqrt";"math.absf"]) then
       error node "unsupported effect in a structured computation region";
     List.iter (List.iter (fun b -> List.iter pure_node b.M.body)) node.regions in
   List.iter (List.iter (fun b -> List.iter pure_node b.M.body)) op.regions;
-  let reads_init args = match op.opcode,args with
+  let opcode=op.opcode in
+  let reads_init args = match opcode,args with
     | "hivm.hir.mmadL1",_::_::initialize::_ -> not (Scalar.boolean initialize)
     | ("linalg.matmul" | "linalg.reduce"),_ -> true
     | _ -> false in
@@ -325,18 +626,24 @@ let dps ctx path (op : M.operation) rest =
       let ty = shaped ctx id in
       if ty.kind<>M.Tensor || (shaped ctx destination).kind<>M.Tensor then
         invalid_arg "expected tensor result and tensor destination";
-      let descriptor = unary (fun init -> Mem.descriptor ctx.ast ty (Mem.buffer init).shape ()) in
+      let descriptor = like_buffer ctx ty in
       let storage = point ~part:"tensor allocation" ~synthetic:true path op in
       allocate ctx op storage ~space:0 id [var destination] descriptor
-        (issue ctx op origin S (values (inputs @ [destination;id])) footprint rest)
+        (issue ctx op origin S (values (inputs @ [destination;id])) footprint
+          (scalar ctx op id (values (inputs @ [id])) (computed_tensor ctx op inputs) rest))
   | [] ->
       if (shaped ctx destination).kind<>M.Memref then invalid_arg "expected a memref destination";
-      let pipe = if List.mem op.opcode vector_ops then C.Device.V else C.Device.S in
-      issue ctx op origin pipe (values (inputs @ [destination;destination])) footprint rest
+      let pipe = if op.opcode="hivm.hir.vbrc" && space (shaped ctx destination).space=2 then use_pipe ctx C.Device.MTE2
+        else if List.mem op.opcode vector_ops then use_pipe ctx C.Device.V
+        else if ctx.launch.hfusion then C.async_pipe else C.scalar_pipe in
+      issue_on ctx op origin pipe (values (inputs @ [destination;destination])) footprint rest
   | _ -> invalid_arg "multiple destination results are unsupported"
 
 let matrix_macro ctx path (op : M.operation) rest =
-  let inputs,destination = dps_operands op in
+  let inputs,destination,events=match attribute op "operandSegmentSizes" with
+    | `List [`Int 1;`Int 1;`Int 1;`Int 1;`Int 1;`Int 1;`Int 1;`Int 7;`Int 0;`Int 0] ->
+        List.take 6 op.operands,List.nth op.operands 6,List.drop 7 op.operands
+    | _ -> let ins,dst=dps_operands op in ins,dst,[] in
   match inputs with
   | [a;b;init;m;k;n] ->
       let tile rows columns value =
@@ -365,10 +672,33 @@ let matrix_macro ctx path (op : M.operation) rest =
       let transfer = use_pipe ctx MTE1 and matrix = use_pipe ctx M in
       let sync stage mode = prepend ~point:(part stage)
           (fun next -> C.Sync (mode,transfer,C.Data matrix,handoff,next)) in
-      issue ctx op (part "load") MTE1 (values [a;b;m;k;n]) load
-        (sync "signal_loaded" LocalSet
-           (sync "wait_loaded" LocalWait
-              (issue ctx op (part "compute") M (values [init;m;n;destination]) compute rest)))
+      let flag stage mode from_ to_ id rest =
+        prepend ~point:(part stage) (fun next -> C.Sync(mode,from_,C.Data to_,id,next)) rest in
+      let optional stage mode from_ to_ operand rest =
+        let enabled=fresh ctx and event=fresh ctx in
+        let yes=scalar ctx op event [var operand] (unary (fun v -> C.VEvent (Mem.dimension (Mem.integer v))))
+          (flag stage mode from_ to_ (var event) (terminal C.End)) in
+        scalar ctx op enabled [var operand] (unary (fun v -> C.VBool (not (Z.equal (Mem.integer v) Z.minus_one))))
+          {command=C.Branch(var enabled,yes.command,C.End,rest.command);points=child 0 yes @ child 2 rest} in
+      let wrap before after finish rest =
+        before (issue ctx op (part "load") MTE1 (values [a;b;m;k;n]) load
+          (after (sync "signal_loaded" LocalSet
+             (sync "wait_loaded" LocalWait
+                (issue ctx op (part "compute") M (values [init;m;n;destination]) compute (finish rest)))))) in
+      (match events with
+       | [] -> wrap Fun.id Fun.id Fun.id rest
+       | [wa;wb;sa;sb;db;back0;back1] ->
+           let dma=use_pipe ctx MTE2 and back=C.Literal (C.VEvent 0) in
+           let code=wrap
+             (fun body -> optional "wait_a" LocalWait dma transfer wa
+                 (optional "wait_b" LocalWait dma transfer wb (flag "wait_matrix" LocalWait matrix transfer back body)))
+             (fun body -> optional "release_a" LocalSet transfer dma sa (optional "release_b" LocalSet transfer dma sb body))
+             (flag "release_matrix" LocalSet matrix transfer back) rest in
+           scalar ctx op (fresh ctx) (values [db;back0;back1]) (fun vs ->
+             if not (List.for_all (fun v -> Z.equal (Mem.integer v) Z.minus_one) vs) then
+               raise (C.Prefix_boundary "matrix transfer uses explicit double buffering");
+             C.VBool true) code
+       | _ -> invalid_arg "invalid matrix synchronization arguments")
   | _ -> invalid_arg "unsupported matrix macro operands"
 
 let synchronization ctx path (op : M.operation) rest =
@@ -385,7 +715,15 @@ let synchronization ctx path (op : M.operation) rest =
   let source = use_pipe ctx (Launch.pipe (enum (attribute op source))) in
   let target = match Launch.pipe (enum (attribute op target)) with
     | C.Device.S -> C.ScalarEnd | p -> C.Data (use_pipe ctx p) in
-  let emit flag = prepend ~point:(point path op) (fun next -> C.Sync (mode,source,target,flag,next)) rest in
+  let send=mode=C.BlockSet in
+  let peers=if cross then List.filter_map (fun (s:Launch.stream) ->
+    let edge=if send then ctx.stream.id,s.id else s.id,ctx.stream.id in
+    if List.mem edge (Option.get ctx.launch.edges) then Some s else None) ctx.launch.streams else [] in
+  let paired=peers<>[] && List.for_all (fun (s:Launch.stream) ->
+    s.location.block=ctx.stream.location.block && (s.location.core=C.Device.Cube)<>(ctx.stream.location.core=C.Device.Cube)) peers in
+  let emit flag = prepend ~point:(point path op) (fun next -> if paired then
+    C.Peer_sync (send,List.map (fun (s:Launch.stream) -> s.id) peers,source,target,flag,next)
+    else C.Sync (mode,source,target,flag,next)) rest in
   let event n =
     let n = Mem.dimension n in
     C.VEvent n in
@@ -401,17 +739,129 @@ let synchronization ctx path (op : M.operation) rest =
       emit (C.Literal (event (Z.of_string number)))
   | _ -> invalid_arg "expected one static or dynamic event id"
 
-let rec lower_block ctx path (block : M.block) =
+let function_types (block : M.block) =
+  let types = Hashtbl.create 32 in
+  let rec visit (b : M.block) =
+    List.iter (fun (id,ty) -> Hashtbl.add types id ty) b.arguments;
+    List.iter (fun (op : M.operation) ->
+      List.iter (fun (id,ty) -> Hashtbl.add types id ty) op.results;
+      List.iter (List.iter visit) op.regions) b.body in
+  visit block;
+  types,Hashtbl.fold (fun id _ n -> max (id+1) n) types 0
+
+let rec lower_block ?(loop_body=false) ctx path (block : M.block) =
   let operations = List.mapi (fun i op -> i,op) block.body in
-  List.fold_right (fun (i,op) rest -> checked op (fun () -> lower_op ctx (path @ [i]) op rest))
-    operations (terminal C.End)
+  let counters = List.filter_map (fun (_,op) ->
+    if op.M.opcode="hivm.hir.multi_buffer_counter" then (
+      if ctx.depth=0 || op.operands<>[] || bits ctx (result op)<>64 then
+        error op "expected an i64 counter inside a loop";
+      Some (result op)) else None) operations in
+  let rec rotates (op:M.operation) =
+    if op.opcode="hivm.hir.pointer_cast" then (match attribute op "operandSegmentSizes" with
+      | `List [`Int n;_] -> n>1
+      | _ -> List.length op.operands > 1+List.length (List.filter Option.is_none (shaped ctx (result op)).shape))
+    else not (List.mem op.opcode ["scf.for";"scf.while"]) &&
+      List.exists (List.exists (fun (b:M.block) -> List.exists rotates b.body)) op.regions in
+  let counters=if counters=[] && loop_body && List.exists rotates block.body then [fresh ctx] else counters in
+  let rotation=match counters with id::_ -> Some id | [] -> ctx.rotation in
+  let inner={ctx with rotation} in
+  let code=List.fold_right (fun (i,op) rest ->
+    try checked op (fun () -> lower_op inner (path @ [i]) op rest) with
+    | Source.Error (span,message) when ctx.partial ->
+        let reason=Source.describe span ^ ": " ^ message in
+        scalar inner op (fresh inner) [] (fun _ -> raise (C.Prefix_boundary reason)) (terminal C.End))
+    operations (terminal C.End) in
+  ctx.next<-inner.next; ctx.pipes<-inner.pipes;
+  if counters=[] then code else prepend (fun rest -> C.Block_counter (counters,rest)) code
 
 and lower_op ctx path (op : M.operation) rest =
   let args = values op.operands and origin = point path op in
-  let block region b = lower_block ctx (path @ [region;0]) b in
+  let block region b =
+    let nested = List.mem op.opcode ["scf.for";"scf.while"] in
+    let inner = {ctx with depth=ctx.depth + Bool.to_int nested} in
+    let code = lower_block ~loop_body:nested inner (path @ [region;0]) b in
+    ctx.next <- inner.next; ctx.pipes <- inner.pipes; code in
   match op.opcode,op.operands,op.regions with
-  | "func.return",_,_ -> terminal (C.Return args)
-  | "scf.yield",_,_ -> terminal (C.Yield args)
+  | "hivm.hir.multi_buffer_counter",[],[] -> rest
+  | "hivm.hir.debug",[_],[] when attribute op "debugtype"=`String "print" ->
+      issue ctx op origin S args (fun vs -> accessed (read_values vs) []) rest
+  | ("vector.transfer_read"|"vector.transfer_write"|"ave.hir.masked_store"|"ave.hir.vload"|"ave.hir.store_with_stride"),_,_ ->
+      let read=op.results<>[] in
+      let transfer result_index=Mlir_vector.transfer ~result_index ~ast:ctx.ast ~types:ctx.types ~op
+          ~load_value:(load_value ctx) () in
+      let reads=List.mapi (fun i (id,_) -> id,transfer i) op.results in
+      let rest=List.fold_right (fun (id,fn) -> scalar ctx op id args (fun vs -> (snd (fn vs)) ())) reads rest in
+      let footprints=if read then List.map snd reads else [transfer 0] in
+      issue ctx op origin S args (fun vs ->
+        let cells=List.concat_map (fun fn -> fst (fn vs)) footprints in
+        if read then accessed cells [] else accessed [] cells) rest
+  | "ave.hir.plt",[v],[] ->
+      (match op.results with [(mask,_);(remainder,_)] ->
+        let width=Mlir_vector.length (Mlir_vector.dimensions (shaped ctx mask)) in
+        scalar ctx op mask [var v] (unary (fun n -> C.VLanes (Array.init width (fun i ->
+          C.VBool (Z.lt (Z.of_int i) (Mem.integer n))))))
+          (scalar ctx op remainder [var v] (unary (fun n -> C.VInt (Z.sub (Mem.integer n) (Z.of_int width)))) rest)
+       | _ -> invalid_arg "invalid predicate result count")
+  | "ave.hir.vintlv",[a;b],[] ->
+      (match op.results with [(lo,_);(hi,_)] ->
+        let width=Mlir_vector.length (Mlir_vector.dimensions (shaped ctx lo)) in
+        let half start=binary (fun a b -> C.VLanes (Array.init width (fun i ->
+          Mlir_vector.lane (if i mod 2=0 then a else b) (start+i/2)))) in
+        scalar ctx op lo (values [a;b]) (half 0) (scalar ctx op hi args (half (width/2)) rest)
+       | _ -> invalid_arg "invalid interleave result count")
+  | _,_,_ when (match op.results with [id,_] -> (match type_of ctx id with
+      | M.Shaped {kind=Vector;_} -> true | _ -> false) | _ -> false) ->
+      scalar ctx op (result op) args (Mlir_vector.compute ~ast:ctx.ast ~types:ctx.types ~op) rest
+  | "hivm.hir.custom",_,_ -> indirect_atomic ctx path op rest
+  | "hivm.hir.pointer_cast",_,_ -> pointer ctx op rest
+  | "memref.extract_strided_metadata",[src],_ ->
+      let rank=List.length (shaped ctx src).shape in
+      if List.length op.results<>2+2*rank then invalid_arg "invalid strided metadata result count";
+      List.fold_right (fun (i,(id,_)) -> scalar ctx op id args (unary (fun v ->
+        let b=Mem.buffer v in
+        if i=0 then C.VBuffer {b with shape=[];strides=[];offset=Z.zero}
+        else C.VInt (if i=1 then b.offset else if i<2+rank then Z.of_int (List.nth b.shape (i-2))
+                    else List.nth b.strides (i-2-rank)))))
+        (List.mapi (fun i x -> i,x) op.results) rest
+  | ("affine.min" | "affine.max" | "affine.apply"),_,_ ->
+      scalar ctx op (result op) args (affine op) rest
+  | "annotation.mark",_,_ when op.results=[] -> rest
+  | "hivm.hir.set_mask_norm",[],_ | "hivm.hir.set_ctrl",[],_ ->
+      issue ctx op origin S [] (fun _ -> accessed [] []) rest
+  | "hfusion.print",_,_ -> issue ctx op origin S args (fun args -> accessed (read_values args) []) rest
+  | ("hfusion.indirect_load" | "hfusion.indirect_store"),_,_ -> indirect ctx path op rest
+  | "func.return",_,_ -> terminal (if ctx.parents=[] then C.Return args else C.Yield args)
+  | ("scf.yield" | "scf.condition"),_,_ -> terminal (C.Yield args)
+  | "func.call",_,_ ->
+      let entry = J.to_string (attribute op "callee") in
+      let parents = ctx.entry::ctx.parents in
+      if List.mem entry parents then invalid_arg ("recursive call to " ^ entry);
+      let body = M.entry ctx.ast entry in
+      let types,next = function_types body in
+      let inner = {ctx with entry;parents;depth=0;types;next;rotation=None} in
+      let callee = lower_block inner [] body in
+      ctx.pipes <- inner.pipes;
+      let task = match attribute op "hivm.pipe",attribute op "vector_function",attribute op "hivm.vector_function" with
+        | `Null,`Null,`Null -> None
+        | pipe,_,_ ->
+            if op.results<>[] then invalid_arg "asynchronous call with SSA results";
+            let pipe = if pipe=`Null then C.Device.V else Launch.pipe (enum pipe) in
+            let id = register ctx.registry.accesses (op.opcode,fun _ -> invalid_arg "call footprint is evaluated by its body") in
+            Some (use_pipe ctx pipe,id) in
+      let params = List.map2 (fun (id,_) arg -> id,arg) body.arguments args in
+      let points = match task with
+        | Some _ -> [[],origin]
+        | None ->
+            let frame = ctx.entry,path,ctx.depth,entry in
+            List.map (fun (p,s) -> 0::p,{s with frames=frame::s.frames}) callee.points in
+      {command=C.Call_values (params,List.map fst op.results,task,callee.command,rest.command);
+       points=points @ child 1 rest}
+  | "scf.while",_,[[before];[after]] ->
+      let initial = List.map2 (fun (id,_) arg -> id,arg) before.arguments args in
+      let test = block 0 before and body = block 1 after in
+      {command=C.While_values (initial,List.map fst after.arguments,List.map fst op.results,
+                               test.command,body.command,rest.command);
+       points=child 0 test @ child 1 body @ child 2 rest}
   | "scf.if",[test],[[yes];[no]] ->
       let yes = block 0 yes and no = block 1 no in
       let ids = List.map fst op.results in
@@ -433,10 +883,11 @@ and lower_op ctx path (op : M.operation) rest =
            scalar ctx op stride [var step] (unary (fun v ->
              if Z.sign (Mem.integer v)<=0 then invalid_arg "scf.for step must be positive"; v)) loop
        | _ -> invalid_arg "mismatched loop-carried values")
-  | ("memref.alloc" | "tensor.empty"),_,_ ->
+  | ("memref.alloc" | "memref.alloca" | "tensor.empty"),_,_ ->
       let id = result op in
       let ty = shaped ctx id in
-      let descriptor dims = Mem.descriptor ctx.ast ty (Mem.dimensions ty.shape dims) () in
+      let make=Mem.descriptor ctx.ast ty in
+      let descriptor dims = make (Mem.dimensions ty.shape dims) () in
       let origin = if ty.kind=M.Tensor then {origin with synthetic=true} else origin in
       allocate ctx op origin ~space:(space ty.space) id args descriptor rest
   | ("memref.subview" | "memref.reinterpret_cast" | "memref.cast" | "bufferization.to_tensor"
@@ -444,55 +895,128 @@ and lower_op ctx path (op : M.operation) rest =
   | ("tensor.expand_shape" | "tensor.collapse_shape" | "memref.expand_shape" | "memref.collapse_shape"),_,_ ->
       reshape ctx op rest
   | ("tensor.extract_slice" | "tensor.insert_slice"),_,_ -> tensor_slice ctx path op rest
+  | "tensor.extract",src::_,_ ->
+      let cells = function src::indices -> Mem.addresses (Mem.at (Mem.buffer src) (List.map Mem.integer indices))
+        | _ -> invalid_arg "missing tensor source" in
+      let cell=tensor_cell ctx (shaped ctx src).element in
+      issue ctx op origin S args (fun vs -> accessed (cells vs) [])
+        (scalar ctx op (result op) args (function v::indices ->
+           C.VDeferred (lazy (cell v (List.map (fun i -> Z.to_int (Mem.integer i)) indices)))
+           | _ -> invalid_arg "missing tensor source") rest)
+  | "tensor.insert",_::dst::indices,_ ->
+      let id = result op in
+      let ty = shaped ctx id in
+      let descriptor=like_buffer ctx ty and cell=tensor_cell ctx ty.element in
+      let footprint = function dst::out::indices ->
+        let b = Mem.buffer dst in
+        let replaced = Mem.addresses (Mem.at b (List.map Mem.integer indices)) in
+        accessed (List.filter (fun a -> not (List.mem a replaced)) (Mem.addresses b)) (bytes out)
+        | _ -> invalid_arg "missing tensor.insert destination" in
+      allocate ctx op (point ~part:"tensor allocation" ~synthetic:true path op) ~space:0 id [var dst] descriptor
+        (issue ctx op origin S (values (dst::id::indices)) footprint
+           (scalar ctx op id (var id::args) (function out::value::dst::indices ->
+              let inserted=List.map (fun v -> Mem.dimension (Mem.integer v)) indices in
+              C.VTensor (Mem.buffer out,fun at -> if at=inserted then value else cell dst at)
+            | _ -> invalid_arg "missing tensor.insert operand") rest))
   | ("memref.dim" | "tensor.dim"),_,_ ->
       scalar ctx op (result op) args (binary (fun b axis ->
         let length = List.nth (Mem.buffer b).shape (Mem.dimension (Mem.integer axis)) in
         C.VInt (Z.of_int length))) rest
-  | ("memref.copy" | "bufferization.materialize_in_destination"),_,_ ->
+  | ("linalg.copy" | "memref.copy"),[_;_],_ when op.results=[] ->
+      issue_on ctx op origin (if ctx.launch.hfusion then C.async_pipe else C.scalar_pipe) args copy rest
+  | "bufferization.materialize_in_destination",_,_ ->
       issue ctx op origin S args copy rest
   | "hivm.hir.load",[_;_],_ when op.results=[] -> issue ctx op origin MTE2 args copy rest
+  | "hivm.hir.load",[src;dst;_;left],_ when op.results=[] &&
+      attribute op "operandSegmentSizes"=`List [`Int 1;`Int 1;`Int 1;`Int 1;`Int 0;`Int 0] &&
+      enum (attribute op "pad_mode")="PadValue" ->
+      issue ctx op origin MTE2 (values [src;dst;left]) (function
+        | [src;dst;left] when Z.sign (Mem.integer left)>=0 -> accessed (bytes src) (bytes dst)
+        | _ -> invalid_arg "invalid padded load") rest
+  | "hivm.hir.nd2nz",[_;_],_ when op.results=[] -> issue ctx op origin MTE2 args nd2nz rest
+  | "hivm.hir.copy",[src;dst],_ when op.results=[] ->
+      let pipe=match space (shaped ctx src).space,space (shaped ctx dst).space with
+        | 6,2 -> C.Device.MTE3 | 6,6 -> V | _ -> invalid_arg "unsupported device copy address spaces" in
+      issue ctx op origin pipe args copy rest
+  | "hivm.hir.fixpipe",[src;dst],_ when op.results=[] &&
+      attribute op "dual_dst_mode"=`String "#hivm.fixpipe_dual_dst_mode<ROW_SPLIT>" ->
+      if space (shaped ctx src).space<>5 || space (shaped ctx dst).space<>6 then
+        invalid_arg "row split expects a CC input and UB destinations";
+      let targets=List.init 2 (fun i -> C.Input (device_bank ctx (Some (C.Device.Vector i)) "#hivm.address_space<ub>")) in
+      issue ctx op origin FIX args (binary (fun src dst ->
+        let src=Mem.buffer src and dst=Mem.buffer dst in
+        match dst.shape with [r;c] ->
+          accessed (nz_rectangle src (2*r) c)
+            (List.concat_map (fun bank -> Mem.addresses {dst with storage=Some bank}) targets)
+        | _ -> invalid_arg "row split requires a two-dimensional destination")) rest
+  | "hivm.hir.load",[src;dst;_],_ when op.results=[] &&
+      attribute op "operandSegmentSizes"=`List [`Int 1;`Int 1;`Int 1;`Int 0;`Int 0;`Int 0] &&
+      enum (attribute op "pad_mode")="PadValue" ->
+      issue ctx op origin MTE2 (values [src;dst]) copy rest
   | "hivm.hir.store",[_;_],_ when op.results=[] -> issue ctx op origin MTE3 args copy rest
+  | "hivm.hir.fixpipe",[src;dst],_ when op.results=[] &&
+         attribute op "dual_dst_mode"=`Null && (shaped ctx src).shape=(shaped ctx dst).shape ->
+      issue ctx op origin FIX args copy rest
   | ("hivm.hir.load" | "hivm.hir.store"),[source;destination],_ when op.results<>[] ->
       let id = result op in
       let ty = shaped ctx id in
-      let descriptor = unary (fun v -> Mem.descriptor ctx.ast ty (Mem.buffer v).shape ()) in
+      let descriptor=like_buffer ctx ty in
       let storage = point ~part:"tensor allocation" ~synthetic:true path op in
       allocate ctx op storage ~space:0 id [var destination] descriptor
         (issue ctx op origin S (values [source;id]) copy rest)
-  | "memref.store",_::_,_ ->
-      let footprint = function _::dst::indices ->
-        accessed [] (Mem.addresses (Mem.at (Mem.buffer dst) (List.map Mem.integer indices)))
+  | "memref.store",_::dst::_,_ ->
+      let ty=(shaped ctx dst).element in
+      let element=Mem.type_of ctx.ast ty in
+      let footprint = function v::dst::indices ->
+        let cells = Mem.addresses (Mem.at (Mem.buffer dst) (List.map Mem.integer indices)) in
+        (match element,v with
+         | M.Shaped {kind=Memref;_},C.VBuffer b -> Effect.perform (C.Store_descriptor (List.hd cells,b))
+         | (M.Integer _ | M.Float _),_ when local_cells ctx cells ->
+             Effect.perform (C.Store_local (cells,ty,v))
+         | _ -> ());
+        accessed [] cells
       | _ -> invalid_arg "missing scalar store operands" in
       issue ctx op origin S args footprint rest
+  | "memref.load",_::_,_ ->
+      let read=load_value ctx (type_name ctx (result op)) in
+      let cells = function src::indices ->
+        Mem.addresses (Mem.at (Mem.buffer src) (List.map Mem.integer indices))
+        | _ -> invalid_arg "missing scalar load operands" in
+      issue ctx op origin S args (fun vs -> accessed (cells vs) [])
+        (scalar ctx op (result op) args (fun vs -> read (cells vs)) rest)
+  | "memref.atomic_rmw",_::dst::_,_ ->
+      let read=load_value ctx (shaped ctx dst).element in
+      let cells = function _::target::indices -> Mem.addresses (Mem.at (Mem.buffer target) (List.map Mem.integer indices))
+        | _ -> invalid_arg "missing atomic operands" in
+      issue ctx op origin S args (fun vs -> let cells=cells vs in accessed cells cells)
+        (scalar ctx op (result op) args (fun vs -> read (cells vs)) rest)
   | ("hivm.hir.set_flag" | "hivm.hir.wait_flag" | "hivm.hir.sync_block_set" | "hivm.hir.sync_block_wait"),_,_ ->
       synchronization ctx path op rest
+  | "hfusion.barrier",[],[] ->
+      prepend ~point:origin (fun rest -> C.Core_barrier rest) rest
   | "hivm.hir.pipe_barrier",[],_ ->
       let pipe = match enum (attribute op "pipe") with
         | "PIPE_ALL" -> C.All | name -> C.Pipe (use_pipe ctx (Launch.pipe name)) in
       prepend ~point:origin (fun rest -> C.Barrier (pipe,rest)) rest
   | "hivm.hir.get_block_idx",[],_ ->
-      scalar ctx op (result op) [] (fun _ -> C.VInt (Z.of_int ctx.stream.location.block)) rest
+      let value=C.VInt (Z.of_int ctx.stream.location.block) in
+      scalar ctx op (result op) [] (fun _ -> value) rest
   | "hivm.hir.get_sub_block_idx",[],_ ->
       let index = match ctx.stream.location.core with C.Device.Cube -> 0 | Vector n -> n in
       scalar ctx op (result op) [] (fun _ -> C.VInt (Z.of_int index)) rest
   | "hivm.hir.mmadL1",_,_ when op.results=[] -> matrix_macro ctx path op rest
   | opcode,_,_ when List.mem opcode linalg_ops || List.mem opcode hfusion_ops || List.mem opcode vector_ops ||
-                       (opcode="hivm.hir.mmadL1" && op.results<>[]) -> dps ctx path op rest
+                       (List.mem opcode ["hivm.hir.mmadL1";"hivm.hir.matmul"] && op.results<>[]) -> dps ctx path op rest
   | opcode,_,_ when String.starts_with ~prefix:"arith." opcode -> lower_arith ctx op rest
   | _ -> invalid_arg "unsupported operation for Core Language lowering"
 
-let lower_with_launch ast (launch : Launch.t) =
-  let registry = {scalars=Queue.create ();accesses=Queue.create ()} in
+let lower_with_launch ?(allow_prefix=false) ast (launch : Launch.t) =
+  let registry = {banks=Hashtbl.create 8;initial=Array.of_list (List.map (initial_bytes ast) launch.storages);
+                  scalars=Queue.create ();accesses=Queue.create ()} in
   let stream (s : Launch.stream) =
-    let types = Hashtbl.create 32 in
-    let rec visit (b : M.block) =
-      List.iter (fun (id,ty) -> Hashtbl.add types id ty) b.arguments;
-      List.iter (fun (op : M.operation) ->
-        List.iter (fun (id,ty) -> Hashtbl.add types id ty) op.results;
-        List.iter (List.iter visit) op.regions) b.body in
-    visit s.ast;
-    let next = Hashtbl.fold (fun id _ n -> max (id+1) n) types 0 in
-    let ctx = {ast;types;launch;stream=s;registry;next;pipes=[]} in
+    let types,next = function_types s.ast in
+    let ctx = {ast;types;launch;stream=s;registry;next;pipes=[];entry=s.entry;parents=[];depth=0;rotation=None;
+               partial=allow_prefix;uses_async=ref false} in
     let code = lower_block ctx [] s.ast in
     let pipes = match s.pipes with
       | Some pipes ->
@@ -501,14 +1025,18 @@ let lower_with_launch ast (launch : Launch.t) =
           pipes
       | None -> ctx.pipes in
     let pipes = List.filter ((<>) C.Device.S) pipes |> List.map pipe_id |> List.sort_uniq compare in
+    let pipes = if !(ctx.uses_async) then C.async_pipe::pipes else pipes in
     C.{id=s.id;params=s.arguments;pipes;body=code.command},
     List.map (fun (site,point) -> (s.id,site),point) code.points in
   let streams,sources = List.split (List.map stream launch.streams) in
   let scalars = Array.of_seq (Queue.to_seq registry.scalars) in
   let accesses = Array.of_seq (Queue.to_seq registry.accesses) in
+  let edges=Option.value launch.edges ~default:[] in
   let program = C.{streams;scalar_eval=(fun _ id -> scalars.(id));
-                   footprint=(fun _ _ id -> snd accesses.(id));block_edge=Launch.block_edge launch} in
-  {ast;launch;program;sources=List.concat sources;operation_names=Array.map fst accesses}
+                   footprint=(fun _ _ id -> snd accesses.(id));
+                   block_edge=(fun source _ target _ -> List.mem (source,target) edges)} in
+  {ast_digest=ast.digest;launch;program;sources=validate_sources ast launch (List.concat sources);
+   operation_names=Array.map fst accesses}
 
 let lower ?entry ?configuration ast =
   lower_with_launch ast (Launch.bind ?entry ?configuration ast)

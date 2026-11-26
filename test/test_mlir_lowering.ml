@@ -48,6 +48,15 @@ let check_locations ast report =
       assert (List.hd (List.rev events)=field last race);
       List.iter (fun event ->
         let entry = J.to_string (field "entry" event) in
+        let stream=List.nth (J.to_list (field "streams" report)) (J.to_int (field "stream" event)) in
+        let calls=match field "calls" event with `Null -> [] | xs -> J.to_list xs in
+        let leaf=List.fold_left (fun entry frame ->
+          assert (field "entry" frame=`String entry);
+          let path=List.map J.to_int (J.to_list (field "path" frame)) in
+          let op=H.Module_ast.resolve ast ~entry path in
+          assert (op.opcode="func.call"); List.assoc "callee" op.properties)
+          (J.to_string (field "entry" stream)) calls in
+        assert (entry=leaf);
         let path = List.map J.to_int (J.to_list (field "path" event)) in
         let op = H.Module_ast.resolve ast ~entry path in
         assert (`String op.opcode=field "opcode" event)
@@ -255,7 +264,9 @@ let unsupported () =
   memref.dealloc %buffer : memref<1xi32>
   return
 }|} in
-  match H.lower_mlir ast with
+  let report=H.analyze_mlir ~backend:Search ~hivm:true (H.lower_mlir ast) in
+  assert (field "status" report=`String "unknown" && races report=[]);
+  match H.lower_mlir ~allow_prefix:false ast with
   | _ -> failwith "unsupported operation passed lowering"
   | exception Attention_runtime.Source.Error (span,message) ->
       assert (span.file="unsupported.mlir" && span.start.line=2);
@@ -274,6 +285,100 @@ let unsupported_device_geometry () =
   | exception Invalid_argument message ->
       assert (String.starts_with ~prefix:"device-geometry.mlir:4:" message)
 
+let counter_and_local_snapshot () =
+  let ast=parse_inline "local-counter.mlir" {|module {
+  func.func @count(%output: memref<6xi32>) {
+    %lo = arith.constant 2 : index
+    %hi = arith.constant 8 : index
+    %step = arith.constant 2 : index
+    %zero = arith.constant 0 : index
+    %other = arith.constant 5 : index
+    %value = arith.constant 12 : i32
+    %slot = memref.alloca() : memref<1xindex>
+    %alias = "memref.cast"(%slot) : (memref<1xindex>) -> memref<?xindex>
+    scf.for %iv = %lo to %hi step %step {
+      %a = "hivm.hir.multi_buffer_counter"() : () -> i64
+      %b = "hivm.hir.multi_buffer_counter"() : () -> i64
+      %sum = arith.addi %a, %b : i64
+      %at = arith.index_cast %sum : i64 to index
+      memref.store %at, %slot[%zero] : memref<1xindex>
+      %snapshot = memref.load %alias[%zero] : memref<?xindex>
+      memref.store %other, %slot[%zero] : memref<1xindex>
+      memref.store %value, %output[%snapshot] : memref<6xi32>
+    }
+    return
+  }
+  func.func @main(%output: memref<6xi32>) {
+    func.call @count(%output) : (memref<6xi32>) -> ()
+    func.call @count(%output) : (memref<6xi32>) -> ()
+    return
+  }
+}|} in
+  let program=H.lower_mlir ~entry:"main" ~allow_prefix:false ast in
+  let core=match program with Core_mlir p->p | _->assert false in
+  let schedule=Race_report.Schedule.compile ~capacity:1 core.program in
+  let offsets=Array.to_list schedule.nodes |> List.filter_map (fun n->
+    match n.Race_report.Schedule.phase with
+    | Emit {action=Immediate (Operation (_, {writes=(C.Input 0,byte)::_;_}));_} -> Some byte
+    | _ -> None) in
+  assert (offsets=[0;8;16;0;8;16]);
+  List.iter (fun backend->let report=H.analyze_mlir ~backend program in
+    assert (field "status" report=`String "complete" && races report=[])) [Search;Solve]
+
+let debug_conflict () =
+  let ast=parse_inline "debug-read.mlir" {|func.func @main(%src: memref<4xi32>, %dst: memref<4xi32>) {
+    hivm.hir.load ins(%src : memref<4xi32>) outs(%dst : memref<4xi32>)
+    %v = memref.subview %dst[1] [2] [1] : memref<4xi32> to memref<2xi32, strided<[1], offset: 1>>
+    "hivm.hir.debug"(%v) {debugtype = "print", prefix = "values"} : (memref<2xi32, strided<[1], offset: 1>>) -> ()
+    return
+  }|} in
+  let program=H.lower_mlir ~allow_prefix:false ast in
+  List.iter (fun backend->
+    let report=H.analyze_mlir ~backend program in
+    assert (field "status" report=`String "complete" && H.replay_mlir program report=2);
+    let source=H.project_mlir program report in
+    check_locations ast source;
+    match races source with
+    | [r] ->
+        let endpoints=List.map (fun k->field k r) ["first";"second"] in
+        assert (List.exists (fun e->field "opcode" e=`String "hivm.hir.debug" &&
+          field "phase" e=`String "execute") endpoints)
+    | _->assert false) [Search;Solve]
+
+let dense_float_bits () =
+  let ast=parse_inline "hex-float.mlir" {|func.func @main() {
+    %v = arith.constant dense<[0xFF800000, 0x3F800000]> : vector<2xf32>
+    return
+  }|} in
+  let op=H.Module_ast.resolve ast ~entry:"@main" [0] in
+  assert (List.assoc "value" op.decoded=`List [`String "-inf";`String "1.0"])
+
+let ub_scalar_readback () =
+  let source competing = Printf.sprintf {|func.func @main(%%out: memref<2xi32>, %%incoming: memref<1xindex>) {
+    %%byte = arith.constant 32 : i64
+    %%zero = arith.constant 0 : index
+    %%one = arith.constant 1 : index
+    %%value = arith.constant 3 : i32
+    %%first = "hivm.hir.pointer_cast"(%%byte) : (i64) -> memref<1xindex, #hivm.address_space<ub>>
+    %%alias = "hivm.hir.pointer_cast"(%%byte) : (i64) -> memref<1xindex, #hivm.address_space<ub>>
+    memref.store %%one, %%first[%%zero] : memref<1xindex, #hivm.address_space<ub>>
+    %s
+    %%pos = memref.load %%alias[%%zero] : memref<1xindex, #hivm.address_space<ub>>
+    memref.store %%value, %%out[%%pos] : memref<2xi32>
+    return
+  }|} competing in
+  let lower variant =
+    H.lower_mlir ~allow_prefix:false (parse_inline "ub-scalar.mlir" (source variant)) in
+  let simple=lower "" in
+  List.iter (fun backend ->
+    let report=H.analyze_mlir ~backend simple in
+    assert (field "status" report=`String "complete" && races report=[])) [Search;Solve];
+  let concurrent=lower "hivm.hir.load ins(%incoming : memref<1xindex>) outs(%alias : memref<1xindex, #hivm.address_space<ub>>)" in
+  match H.analyze_mlir ~backend:Search concurrent with
+  | _ -> failwith "accepted a fixed address derived from a concurrent UB write"
+  | exception Invalid_argument msg -> assert (String.starts_with ~prefix:"a concurrent" msg)
+
 let () =
   examples (); issue316 (); carried_views (); dynamic_slices (); indexed (); masked_vector (); scheduled_mask ();
-  hfusion_indirect (); cross_flag (); generic_matrix (); unsupported (); unsupported_device_geometry ()
+  hfusion_indirect (); cross_flag (); generic_matrix (); unsupported (); unsupported_device_geometry ();
+  counter_and_local_snapshot (); debug_conflict (); dense_float_bits (); ub_scalar_readback ()

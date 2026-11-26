@@ -31,9 +31,14 @@ let read_ast file = decode_ast file (Yojson.Safe.from_file file)
 
 type binding = { core_site : int list; origin : origin }
 type stream_pair = { stream_id : int; program : Ast.program; bindings : binding list }
+type event_site =
+  | Ordinary
+  | Direct of origin
+  | Nested of Mlir.source
+  | In_call of { call_path : int list; callee : string; target : origin }
 type core_pairing = {
   name : string; launch : Race_benchmarks.launch; pipes : (int * pipe) list;
-  entries : (int * string) list; sites : (int * int list, origin) Hashtbl.t;
+  entries : (int * string) list; sites : (int * int list, event_site) Hashtbl.t;
   inputs : Race_report.Schedule.t option -> Z.t option -> Yojson.Safe.t;
 }
 type pairing = Core of core_pairing | Layout of Vectorlayout.variant * Module_ast.t
@@ -77,7 +82,7 @@ let operations (op : Ast.operation) =
   | "hivm.hir.sync_block_set" -> [None, Flag BlockSet]
   | "hivm.hir.sync_block_wait" -> [None, Flag BlockWait]
   | "hivm.hir.pipe_barrier" -> [None, Fence]
-  | "memref.alloc" -> [None, Allocation]
+  | "memref.alloc" | "memref.alloca" -> [None, Allocation]
   | "memref.store" -> work "scalarstore" S
   | "memref.load" -> work "scalarload" S
   | "scf.for" | "scf.yield" | "func.return" | "memref.cast" | "memref.subview"
@@ -168,7 +173,7 @@ let pair ~name ~(launch : Race_benchmarks.launch) ~pipes ~streams =
        | Handoff LocalWait,C.Sync (_,_,_,flag,_) when Hashtbl.find handoff_flags actual.path <> flag ->
            invalid "%s: different handoff flags at %s" name (path_name actual.path)
        | _ -> ());
-      Hashtbl.add sites (s.id,site) actual) static target;
+      Hashtbl.add sites (s.id,site) (match role with Allocation -> Ordinary | _ -> Direct actual)) static target;
     s.id, where.program.name) launch.family.streams in
   if List.length streams <> List.length entries then invalid "%s: extra stream mapping" name;
   Core {name;launch;pipes;entries;sites;inputs=(fun _ _ -> launch.fixture)}
@@ -246,6 +251,23 @@ let ast_file ?(root="benchmarks/hivm") name =
     | name -> name in
   Filename.concat root (stem ^ ".ast.json")
 
+(* @reserve 将新缓冲区的描述符写入共享槽。回放只调度函数体内的共享写入。 *)
+let allocation_site ast (origin : origin) (op : Module_ast.operation) =
+  match op.opcode with
+  | "memref.alloc" | "memref.alloca" -> Ordinary
+  | "func.call" when List.assoc_opt "callee" op.properties = Some "@reserve" ->
+      let callee = "@reserve" in
+      let block = Module_ast.entry ast callee in
+      let slot = fst (List.hd block.arguments) in
+      let stores = List.filter_map Fun.id (List.mapi (fun i (op : Module_ast.operation) ->
+        match op.opcode, op.operands with
+        | "memref.store", [_; dst; _] when dst = slot -> Some {path=[i];opcode=op.opcode;part=None}
+        | _ -> None) block.body) in
+      (match stores with
+       | [target] -> In_call {call_path=origin.path;callee;target}
+       | _ -> invalid "%s: expected one store to the shared descriptor slot" callee)
+  | code -> invalid "unexpected allocation operation %s" code
+
 let catalog_pair ~root name (launch : Race_benchmarks.launch) (ast : Module_ast.t) =
   let origin = match ast.catalog_origin with Some o when o.benchmark=name -> o
     | _ -> invalid "%s: AST benchmark differs" name in
@@ -265,12 +287,15 @@ let catalog_pair ~root name (launch : Race_benchmarks.launch) (ast : Module_ast.
     let bindings=List.assoc (String.sub entry 1 (String.length entry-1)) origin.sites in
     unique "Core site" (List.map fst bindings); unique "HIVM path" (List.map snd bindings);
     let seen=ref 0 in
-    let bind site check =
+    let bind site project =
       let path=List.assoc site bindings in
       let op=Module_ast.resolve ast ~entry path in
+      incr seen; Hashtbl.add sites (s.id,site) (project {path;opcode=op.opcode;part=None} op) in
+    let direct site check = bind site (fun origin op ->
       let attr key = List.assoc_opt key (op.attributes @ op.properties) in
-      if not (check op.opcode attr) then invalid "%s: incompatible HIVM operation at %s %s" name entry (path_name path);
-      incr seen; Hashtbl.add sites (s.id,site) {path;opcode=op.opcode;part=None} in
+      if not (check op.opcode attr) then
+        invalid "%s: incompatible HIVM operation at %s %s" name entry (path_name origin.path);
+      Direct origin) in
     let pip p = "#hivm.pipe<" ^ pipe_name (pipe_of pipes p) ^ ">" in
     let rec walk site cmd =
       let child i cmd = walk (site @ [i]) cmd in
@@ -282,11 +307,11 @@ let catalog_pair ~root name (launch : Race_benchmarks.launch) (ast : Module_ast.
       | While_values (_,_,_,a,b,rest) -> child 0 a; child 1 b; child 2 rest
       | Call_values (_,_,_,a,rest) -> child 0 a; child 1 rest
       | Alloc (_,_,_,rest) ->
-          bind site (fun code attr -> code="memref.alloc" || code="func.call" && attr "callee"=Some "@reserve");
+          bind site (allocation_site ast);
           child 0 rest
       | Issue (p,f,_,rest) ->
           let fn=launch.op_name f in
-          bind site (fun code attr ->
+          direct site (fun code attr ->
             if generated then code="func.call" && attr "hivm.pipe"=Some (pip p) &&
               List.mem (attr "callee") [Some ("@"^fn);Some ("@"^fn^"_shared")]
             else match fn with
@@ -295,13 +320,13 @@ let catalog_pair ~root name (launch : Race_benchmarks.launch) (ast : Module_ast.
               | _ -> code="hivm.hir."^fn);
           child 0 rest
       | Barrier (b,rest) ->
-          bind site (fun code attr -> code="hivm.hir.pipe_barrier" &&
+          direct site (fun code attr -> code="hivm.hir.pipe_barrier" &&
             attr "pipe"=Some (match b with All -> "#hivm.pipe<PIPE_ALL>" | Pipe p -> pip p)); child 0 rest
       | Sync (mode,p,q,_,rest) ->
           let short,src,dst = match mode with
             | LocalSet -> "set_flag","set_pipe","wait_pipe" | LocalWait -> "wait_flag","set_pipe","wait_pipe"
             | BlockSet -> "sync_block_set","tpipe","pipe" | BlockWait -> "sync_block_wait","tpipe","pipe" in
-          bind site (fun code attr -> code="hivm.hir."^short && attr src=Some (pip p) &&
+          direct site (fun code attr -> code="hivm.hir."^short && attr src=Some (pip p) &&
             attr dst=Some (match q with ScalarEnd -> "#hivm.pipe<PIPE_S>" | Data q -> pip q)); child 0 rest in
     walk [] s.body;
     if !seen<>List.length bindings then invalid "%s: unmatched Core sites in %s" name entry;
@@ -325,11 +350,22 @@ let fixture_source catalog name = match Benchmark_traces.find catalog name with
       Fixture_source.source name launch
   | _ -> invalid "%s has an archived source" name
 
-let export_races ~pipes ~entries ~source schedule witnesses =
+let benchmark_arguments ?n name (launch : Race_benchmarks.launch) =
+  let n = if launch.family.parameter=[] then None else Some (Z.of_int (Option.value n ~default:launch.default_n)) in
+  let config = if launch.fixture=`Null then `Null else J.member "launch" launch.fixture in
+  let entry id = match name,config with
+    | "fixture/hivm-two-loads",_ -> "@two_loads"
+    | ("issue316/ordered" | "issue316/missing-ready"),_ -> "@issue316_vexp"
+    | _,`Null -> Fixture_source.entry id
+    | _ -> "@" ^ J.to_string (List.nth (J.to_list (J.member "streams" config)) id) in
+  let entries = List.map (fun (s : C.stream) -> s.id,entry s.id) launch.family.streams in
+  let inputs = if legacy name then []
+    else if config<>`Null then Catalog_inputs.litao launch entries config n
+    else Catalog_inputs.fixture name launch (Race_report.schedule launch (Option.value n ~default:Z.zero)) n in
+  entries,n,`Assoc inputs
+
+let project_node ~pipes ~entries ~source schedule =
   let open Race_report.Schedule in
-  let index = Race_report.index schedule in
-  let conflicts = Hashtbl.create (List.length schedule.pairs) in
-  List.iter (fun p -> Hashtbl.add conflicts (p.a,p.b) p.addresses) schedule.pairs;
   let finish = Hashtbl.create 32 in
   Array.iteri (fun i node -> match node.phase with
     | Finish f -> Hashtbl.add finish (node.id,f.pipe) i
@@ -344,17 +380,42 @@ let export_races ~pipes ~entries ~source schedule witnesses =
     | Wait_peers (k::_ as keys) -> Wait_all (List.map (fun (p:C.key) -> Option.get p.sender) keys,signal k)
     | Wait_peers [] -> invalid "cross-core wait without a sender" in
   let at (id : C.occurrence) phase action =
-    Option.map (fun origin ->
-      {location={stream=id.stream;entry=List.assoc id.stream entries;
-                 origin;iterations=id.iterations};action;phase}) (source id.stream id.site) in
-  let convert = function
-    | C.Issued (_, Control) -> None
-    | Issued (id, Reserve _) -> at id (Execute None) Allocate
-    | Issued (id, Immediate item) -> at id (Execute (Some S)) (action item)
-    | Issued (id, Scalar_wait key) -> at id (Execute (Some S)) (Wait (signal key))
-    | Issued (id, Submit (p,item)) -> at id (Submit [task id p]) (action item)
-    | Issued (id, Fence ps) -> at id (Submit (List.map (task id) ps)) Barrier
-    | Done {id;pipe=p;item;_} -> at id (Complete (task id p)) (action item) in
+    let entry = List.assoc id.stream entries in
+    let event entry origin iterations calls =
+      Some {location={stream=id.stream;entry;origin;iterations;calls};action;phase} in
+    match source id.stream id.site with
+    | Ordinary -> None
+    | Direct origin -> event entry origin id.iterations []
+    | Nested source ->
+        let rec descend entry iterations calls = function
+          | [] -> event entry source.origin iterations (List.rev calls)
+          | (caller,call_path,depth,callee)::frames ->
+              if caller<>entry || depth>List.length iterations then invalid "invalid call origin";
+              let frame = {caller;call_path;call_iterations=List.take depth iterations} in
+              descend callee (List.drop depth iterations) (frame::calls) frames in
+        descend entry id.iterations [] source.frames
+    | In_call {call_path;callee;target} ->
+        event callee target [] [{caller=entry;call_path;call_iterations=id.iterations}] in
+  fun {id;phase} -> match phase with
+    | Emit {action=Control;_} -> None
+    | Emit {action=Reserve _;_} -> at id (Execute (Some S)) Compute
+    | Emit {action=Immediate Bar;_} -> at id (Execute None) Barrier
+    | Emit {action=Immediate item;_} -> at id (Execute (Some S)) (action item)
+    | Emit {action=Scalar_wait key;_} -> at id (Execute (Some S)) (Wait (signal key))
+    | Emit {action=Submit (p,item);_} when p=C.async_pipe ->
+        at id (Async_submit (Hashtbl.find finish (id,p))) (action item)
+    | Finish {pipe=p;item;_} when p=C.async_pipe ->
+        at id (Async_complete (Hashtbl.find finish (id,p))) (action item)
+    | Emit {action=Submit (p,item);_} -> at id (Submit [task id p]) (action item)
+    | Emit {action=Fence ps;_} -> at id (Submit (List.map (task id) ps)) Barrier
+    | Finish {pipe=p;item;_} -> at id (Complete (task id p)) (action item)
+
+let export_races ~pipes ~entries ~source schedule witnesses =
+  let open Race_report.Schedule in
+  let convert = project_node ~pipes ~entries ~source schedule in
+  let index = Race_report.index schedule in
+  let conflicts = Hashtbl.create (List.length schedule.pairs) in
+  List.iter (fun p -> Hashtbl.add conflicts (p.a,p.b) p.addresses) schedule.pairs;
   let export (w : Bug_traces.race_witness) =
     let rec last = function [x] -> x | _ :: xs -> last xs | [] -> invalid "empty race prefix" in
     let forward = w.first_then_second and reverse = w.second_then_first in
@@ -366,7 +427,7 @@ let export_races ~pipes ~entries ~source schedule witnesses =
       let ids = List.map index events in
       if replay_indices schedule ids <> events || List.filter (fun n -> n=a || n=b) ids <> [x;y]
       then invalid "invalid race prefix";
-      List.filter_map convert events in
+      List.filter_map (fun i -> convert schedule.nodes.(i)) ids in
     let forward = checked a b forward and reverse = checked b a reverse in
     {first=last reverse;second=last forward;forward;reverse} in
   List.map export witnesses
@@ -377,7 +438,7 @@ let generate_core ?n ~timeout_ms method_ pairing =
                                 inputs=pairing.inputs schedule n;status;races} in
   let parameter = launch.family.parameter <> [] in
   let export = export_races ~pipes:pairing.pipes ~entries:pairing.entries
-    ~source:(fun stream site -> Some (Hashtbl.find pairing.sites (stream,site))) in
+    ~source:(fun stream site -> Hashtbl.find pairing.sites (stream,site)) in
   match method_ with
   | Benchmark_traces.Concrete backend ->
       if n <> None && not parameter then invalid "fixed entry parameters";
@@ -407,24 +468,33 @@ let core_inputs ?n = function
       p.entries,parameter,p.inputs (Some schedule) parameter
   | Layout _ -> invalid "expected a Core launch"
 
-let to_json report =
+let encode_event =
   let task (t : task) = `Assoc ["id",`Int t.id;"pipe",`String (pipe_name t.pipe)] in
   let signal s = `Assoc ["receiver",`Int s.receiver;"source",`String (pipe_name s.source);
     "target",`String (pipe_name s.target);"flag",`Int s.flag;"cross",`Bool s.cross] in
-  let encode_event e =
+  fun e ->
     let l = e.location in
     let action, signals = match e.action with
-      | Compute -> "compute",[] | Allocate -> "allocate",[] | Barrier -> "barrier",[]
+      | Compute -> "compute",[] | Barrier -> "barrier",[]
       | Set ks -> "set",ks | Wait k | Wait_all (_,k) -> "wait",[k] in
     let phase, tasks, synchronous_pipe = match e.phase with
-      | Submit ts -> "submit",ts,None | Complete t -> "complete",[t],None
+      | Submit ts -> "submit",List.map task ts,None | Complete t -> "complete",[task t],None
+      | Async_submit id | Async_complete id ->
+          (match e.phase with Async_submit _ -> "submit" | _ -> "complete"),
+          [`Assoc ["id",`Int id;"pipe",`String "HFUSION_ASYNC"]],None
       | Execute p -> "execute",[],p in
     let senders = match e.action with Wait_all (ss,_) -> ["senders",ints ss] | _ -> [] in
+    let calls = match l.calls with
+      | [] -> []
+      | frames -> ["calls", `List (List.map (fun f -> `Assoc ["entry",`String f.caller;
+          "path",ints f.call_path;"iterations",ints f.call_iterations]) frames)] in
     `Assoc (["entry",`String l.entry;"stream",`Int l.stream;"path",ints l.origin.path;
             "opcode",`String l.origin.opcode;"part",optional (fun x -> `String x) l.origin.part;
             "iterations",ints l.iterations;"action",`String action;"phase",`String phase;
-            "tasks",`List (List.map task tasks);"signals",`List (List.map signal signals);
-            "synchronous_pipe",optional (fun p -> `String (pipe_name p)) synchronous_pipe] @ senders) in
+            "tasks",`List tasks;"signals",`List (List.map signal signals);
+            "synchronous_pipe",optional (fun p -> `String (pipe_name p)) synchronous_pipe] @ calls @ senders)
+
+let to_json report =
   let encoded = Hashtbl.create 256 in
   let event e = match Hashtbl.find_opt encoded e with
     | Some json -> json
@@ -440,10 +510,11 @@ let to_json report =
     "status",`String status;"races",`List (List.map race report.races)] @ details)
 
 let mlir_schedule (lowered : Mlir.t) =
-  Race_report.Schedule.compile ~capacity:lowered.launch.capacity lowered.program
+  Race_report.prefix_schedule ~capacity:lowered.launch.capacity lowered.program
 
-let mlir_inputs (ast : Module_ast.t) launch =
-  `Assoc (["ast_format",`String "mlir-module-1";"ast_digest",`String ast.digest] @
+let mlir_inputs digest launch =
+  `Assoc (["ast_format",`String "mlir-module-1";"ast_digest",`String digest;
+           "stage",`String (if launch.Mlir.Launch.hfusion then "hfusion" else "hivm")] @
           J.to_assoc (Mlir.Launch.inputs launch))
 
 let mlir_source (p : Mlir.source) =
@@ -464,27 +535,66 @@ let mlir_events (lowered : Mlir.t) (schedule : Race_report.Schedule.t) =
         `Assoc (J.to_assoc event @ ["origin",mlir_source p]) in
   `List (List.map2 annotate events (Array.to_list schedule.nodes))
 
-let analyze_core_mlir ~backend ~hivm (lowered : Mlir.t) =
+let mlir_entries (lowered : Mlir.t) =
+  List.map (fun (s : Mlir.Launch.stream) -> s.id,s.entry) lowered.launch.streams
+
+let mlir_projection (lowered : Mlir.t) =
+  let points = List.to_seq lowered.sources |> Hashtbl.of_seq in
+  let source stream site = match Hashtbl.find_opt points (stream,site) with
+    | Some p when p.synthetic || List.mem p.origin.opcode ["memref.alloc";"memref.alloca"] -> Ordinary
+    | Some p -> Nested p
+    | None -> invalid "missing source in lowered stream %d at %s" stream (path_name site) in
+  let pipes = List.map (fun p -> Mlir.pipe_id p,p) [S;V;M;MTE1;MTE2;MTE3;FIX] in
+  pipes,source
+
+let source_event_order (lowered : Mlir.t) =
+  let open Race_report.Schedule in
   let schedule = mlir_schedule lowered in
-  let witnesses = Race_report.witnesses backend schedule in
-  let entries = List.map (fun (s : Mlir.Launch.stream) -> s.id,s.entry) lowered.launch.streams in
-  let name = String.concat "," (List.map snd entries) and inputs = mlir_inputs lowered.ast lowered.launch in
+  if schedule.boundaries<>[] then invalid "incomplete module event graph";
+  let parents = match Race_report.predecessors schedule with
+    | Some parents -> parents | None -> invalid "module event graph requires deterministic prerequisites" in
+  let pipes,source = mlir_projection lowered in
+  let convert = project_node ~pipes ~entries:(mlir_entries lowered) ~source schedule in
+  let graph = Precedence.build parents in
+  let visible = ref [] and ids = Array.make (Array.length parents) None in
+  (* 跳过 Core 内部节点时，将它依赖的源事件传给后继。 *)
+  let frontier = Array.make (Array.length parents) [] and count = ref 0 in
+  Array.iter (fun i ->
+    let requirements = List.concat_map (Array.get frontier) parents.(i) |> List.sort_uniq Int.compare in
+    match convert schedule.nodes.(i) with
+    | None -> frontier.(i) <- requirements
+    | Some event ->
+        ids.(i) <- Some !count;
+        frontier.(i) <- [!count];
+        incr count;
+        visible := (encode_event event,requirements)::!visible) graph.order;
+  let pairs = List.filter_map (fun p -> match ids.(p.a),ids.(p.b) with
+    | Some a,Some b -> Some (a,b) | _ -> None) schedule.pairs in
+  Array.of_list (List.rev !visible),pairs
+
+let core_mlir_report ~(backend : Bug_traces.backend) ~hivm (lowered : Mlir.t) (schedule : Race_report.Schedule.t) races =
+  let status,label,details =
+    if schedule.boundaries=[] then Complete_search,"complete",[] else
+    if races<>[] then Race_found,"race",[] else
+      let reason=String.concat "\n" schedule.boundaries in Unknown reason,"unknown",["reason",`String reason] in
+  let entries = mlir_entries lowered in
+  let name = String.concat "," (List.map snd entries) and inputs = mlir_inputs lowered.ast_digest lowered.launch in
   if hivm then (
-    let points = List.to_seq lowered.sources |> Hashtbl.of_seq in
-    let source stream site = match Hashtbl.find_opt points (stream,site) with
-      | Some p when p.synthetic -> None
-      | Some p -> Some p.origin
-      | None -> invalid "missing source in lowered stream %d at %s" stream (path_name site) in
-    let pipes = List.map (fun p -> Mlir.pipe_id p,p) [S;V;M;MTE1;MTE2;MTE3;FIX] in
-    let races = export_races ~pipes ~entries ~source schedule witnesses.races in
-    to_json {benchmark=name;streams=entries;n=None;inputs;status=Complete_search;races})
+    let pipes,source = mlir_projection lowered in
+    let races = export_races ~pipes ~entries ~source schedule races in
+    to_json {benchmark=name;streams=entries;n=None;inputs;status;races})
   else
     let index = Race_report.index schedule in
-    `Assoc ["format",`String "core-race-1";"benchmark",`String name;
+    `Assoc (["format",`String "core-race-1";"benchmark",`String name;
             "backend",`String (match backend with Search -> "bfs" | Solve -> "smt");
-            "status",`String "complete";"capacity",`Int lowered.launch.capacity;
+            "status",`String label;"capacity",`Int lowered.launch.capacity;
             "inputs",inputs;"address_unit",`String "byte";"events",mlir_events lowered schedule;
-            "races",`List (List.map (Race_report.core_race schedule index) witnesses.races)]
+            "races",`List (List.map (Race_report.core_race schedule index) races)] @ details)
+
+let analyze_core_mlir ~backend ~hivm lowered =
+  let schedule=mlir_schedule lowered in
+  let witnesses=Race_report.witnesses backend schedule in
+  core_mlir_report ~backend ~hivm lowered schedule witnesses.races
 
 let verify_mlir_report report inputs capacity unit events =
   if J.member "format" report <> `String "core-race-1" || J.member "inputs" report <> inputs ||
@@ -495,17 +605,17 @@ let verify_mlir_report report inputs capacity unit events =
 
 let replay_core_mlir (lowered : Mlir.t) report =
   let schedule = mlir_schedule lowered in
-  let races = verify_mlir_report report (mlir_inputs lowered.ast lowered.launch) lowered.launch.capacity
+  let races = verify_mlir_report report (mlir_inputs lowered.ast_digest lowered.launch) lowered.launch.capacity
       "byte" (mlir_events lowered schedule) in
   List.iter (Race_report.replay_core schedule) races;
   2 * List.length races
 
 type lowered_mlir = Core_mlir of Mlir.t | Device_mlir of Mlir_device.t
 
-let lower_mlir ?entry ?configuration ast =
+let lower_mlir ?entry ?configuration ?(allow_prefix=true) ast =
   let launch = Mlir.Launch.bind ?entry ?configuration ast in
   if Mlir_device.required launch then Device_mlir (Mlir_device.lower_with_launch ast launch)
-  else Core_mlir (Mlir.lower_with_launch ast launch)
+  else Core_mlir (Mlir.lower_with_launch ~allow_prefix ast launch)
 
 let mlir_device_model ~backend (lowered : Mlir_device.t) =
   let points = List.to_seq lowered.sources |> Hashtbl.of_seq in
@@ -516,20 +626,21 @@ let mlir_device_model ~backend (lowered : Mlir_device.t) =
         location ^ p.origin.opcode ^ ": " ^ message
     | None -> (match List.rev path with
         | _::parent -> describe stream (List.rev parent) message | [] -> message) in
-  Device_races.compile_memory ~backend ~iteration_ordinals:true ~describe
+  Device_races.compile_memory ~backend ~iteration_ordinals:true ~describe ~readonly:lowered.readonly
+    ~immutable_views:lowered.immutable_views
     lowered.program lowered.memory lowered.bindings
 
-let analyze_device_mlir ~backend ~hivm (lowered : Mlir_device.t) =
-  let model = mlir_device_model ~backend lowered in
-  let races = Device_races.generate model in
-  let inputs = mlir_inputs lowered.ast lowered.launch and name = lowered.program.name in
+let device_mlir_report ~(backend : Bug_traces.backend) ~hivm (lowered : Mlir_device.t) model races =
+  let inputs = mlir_inputs lowered.ast_digest lowered.launch and name = lowered.program.name in
   if hivm then (
     let entries = Array.of_list (List.map (fun (s : Mlir.Launch.stream) -> s.entry) lowered.launch.streams) in
     let points = List.to_seq lowered.sources |> Hashtbl.of_seq in
     let location (id : Device_races.identity) =
-      let origin = (Hashtbl.find points (id.stream,id.path) : Mlir.source).origin in
-      {stream=id.stream;entry=entries.(id.stream);origin;iterations=id.loops} in
-    let streams,races = Vectorlayout_hivm.export_events ~entries ~location model races in
+        let origin = (Hashtbl.find points (id.stream,id.path) : Mlir.source).origin in
+      {stream=id.stream;entry=entries.(id.stream);origin;iterations=id.loops;calls=[]} in
+    let logical_async op=lowered.launch.hfusion && Mlir_device.bulk_operation op in
+    let atomic op=List.mem op ["hivm.hir.debug";"memref.store"] in
+    let streams,races = Vectorlayout_hivm.export_events ~logical_async ~atomic ~entries ~location model races in
     to_json {benchmark=name;streams;n=None;inputs;status=Complete_search;races})
   else
     let sources = List.map (fun ((stream,path),source) ->
@@ -542,13 +653,33 @@ let analyze_device_mlir ~backend ~hivm (lowered : Mlir_device.t) =
 
 let analyze_mlir ~backend ?(hivm=false) = function
   | Core_mlir p -> analyze_core_mlir ~backend ~hivm p
-  | Device_mlir p -> analyze_device_mlir ~backend ~hivm p
+  | Device_mlir p ->
+      let model=mlir_device_model ~backend p in
+      device_mlir_report ~backend ~hivm p model (Device_races.generate model)
+
+let project_mlir lowered report =
+  let backend=match J.member "backend" report with `String "bfs" -> Bug_traces.Search
+    | `String "smt" -> Solve | _ -> invalid "unknown backend in Core report" in
+  let source=match lowered with
+    | Core_mlir p ->
+        let schedule=mlir_schedule p in
+        let rows=verify_mlir_report report (mlir_inputs p.ast_digest p.launch) p.launch.capacity
+          "byte" (mlir_events p schedule) in
+        core_mlir_report ~backend ~hivm:true p schedule (List.map (Race_report.read_core_race schedule) rows)
+    | Device_mlir p ->
+        let model=mlir_device_model ~backend p in
+        let rows=verify_mlir_report report (mlir_inputs p.ast_digest p.launch) p.launch.capacity
+          "bit" (Device_races.events model) in
+        List.iter (Device_races.replay_witness model) rows;
+        device_mlir_report ~backend ~hivm:true p model rows in
+  if J.member "status" source<>J.member "status" report then invalid "inconsistent Core report status";
+  source
 
 let replay_mlir lowered report = match lowered with
   | Core_mlir p -> replay_core_mlir p report
   | Device_mlir p ->
       let model = mlir_device_model ~backend:Bug_traces.Search p in
-      let races = verify_mlir_report report (mlir_inputs p.ast p.launch) p.launch.capacity
+      let races = verify_mlir_report report (mlir_inputs p.ast_digest p.launch) p.launch.capacity
           "bit" (Device_races.events model) in
       List.iter (Device_races.replay_witness model) races;
       2 * List.length races

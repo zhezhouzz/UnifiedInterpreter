@@ -43,6 +43,7 @@ let consume ast (report : H.report) (race : H.race) =
           Hashtbl.add pending t.id (e.location,e.action,t.pipe)) tasks
       | Complete t -> assert (Hashtbl.find pending t.id = (e.location,e.action,t.pipe));
           apply_action e; Hashtbl.remove pending t.id
+      | Async_submit _ | Async_complete _ -> failwith "unexpected HFusion task in HIVM trace"
       | Execute _ -> apply_action e) events;
     assert (List.filter (fun e -> e=first || e=second) events = [first;second]);
     assert (List.hd (List.rev events)=second) in

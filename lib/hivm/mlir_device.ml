@@ -10,21 +10,33 @@ module Mem = Mlir_memory
 module J = Yojson.Safe.Util
 
 type t = {
-  ast : M.t;
+  ast_digest : string;
   launch : Launch.t;
   program : D.program;
   memory : V.memory;
   bindings : (string * V.value) list;
+  readonly : V.bank list;
+  immutable_views : string list;
   sources : ((int * int list) * Shared.source) list;
 }
 
 let indexed_ops = ["hivm.hir.indirect_load";"hivm.hir.indirect_store";
                    "hfusion.indirect_load";"hfusion.indirect_store";"vector.maskedstore"]
 
+let bulk_operation = function
+  | "linalg.fill" | "linalg.copy" | "memref.copy" | "hfusion.indirect_store" | "hfusion.indirect_load" -> true
+  | _ -> false
+
+let contains (launch : Launch.t) predicate =
+  let rec block predicate (b : M.block) = List.exists (fun (op : M.operation) ->
+    predicate op || List.exists (List.exists (block predicate)) op.regions) b.body in
+  List.exists (fun (s : Launch.stream) -> block predicate s.ast) launch.streams
+
 let required (launch : Launch.t) =
-  let rec block (b : M.block) = List.exists (fun (op : M.operation) ->
-    List.mem op.opcode indexed_ops || List.exists (List.exists block) op.regions) b.body in
-  List.exists (fun (s : Launch.stream) -> block s.ast) launch.streams
+  let contains = contains launch in
+  contains (fun op -> List.mem op.opcode indexed_ops) &&
+  not (contains (fun op -> op.opcode="func.call" ||
+         (launch.hfusion && List.mem op.opcode ["linalg.matmul";"hfusion.elemwise_binary"])))
 
 let dtype = function
   | "i1" -> D.I1 | "i8" -> I8 | "i16" -> I16 | "i32" -> I32 | "i64" | "index" -> I64
@@ -146,7 +158,7 @@ let lower_with_launch ast (launch : Launch.t) =
       let emit pipe command = use pipe; loc (D.Issue (pipe,op.opcode,[command])) in
       let memory_op pipe command =
         if op.results<>[] then invalid_arg "device memory operation requires bufferized operands";
-        emit pipe command in
+        emit (if launch.hfusion && bulk_operation op.opcode then D.V else pipe) command in
       match op.opcode,args,op.regions with
       | "func.return",[],_ | "scf.yield",[],_ -> empty
       | "scf.if",[test],[[yes];no] when op.results=[] ->
@@ -228,7 +240,7 @@ let lower_with_launch ast (launch : Launch.t) =
           let command = if Hashtbl.mem owned_tensors (List.hd op.operands) then D.Copy_tensor (src,dst)
             else D.Copy (src,dst) in
           memory_op S command
-      | "memref.copy",[src;dst],_ -> memory_op S (D.Copy (src,dst))
+      | ("memref.copy"|"linalg.copy"),[src;dst],_ -> memory_op S (D.Copy (src,dst))
       | "hivm.hir.load",[src;dst],_ -> memory_op MTE2 (D.Copy (src,dst))
       | "hivm.hir.store",[src;dst],_ -> memory_op MTE3 (D.Copy (src,dst))
       | "memref.store",element::target::indices,_ -> memory_op S (D.Store (target,indices,element))
@@ -236,14 +248,14 @@ let lower_with_launch ast (launch : Launch.t) =
       | ("hivm.hir.indirect_load" | "hfusion.indirect_load"),[source;offsets;a;b;c],_ ->
           let source_type = Mem.shaped ast (type_name (List.hd op.operands)) in
           if List.length source_type.shape<>1 then invalid_arg "indirect source must be one-dimensional";
-          let mask,other,destination = if op.generic && op.opcode="hivm.hir.indirect_load" then b,c,a else a,b,c in
+          let mask,other,destination = if op.generic then b,c,a else a,b,c in
           let pipe = if op.opcode="hivm.hir.indirect_load" then D.V else D.S in
           if op.results=[] then memory_op pipe (D.Indirect_load (source,offsets,mask,other,destination))
           else (
             let id = name (Shared.result op) in
             loc (D.Let (id,D.Gather_tensor (source,offsets,mask,other,destination))))
       | ("hivm.hir.indirect_store" | "hfusion.indirect_store"),[a;offsets;b;c],_ ->
-          let generic = op.generic && op.opcode="hivm.hir.indirect_store" in
+          let generic = op.generic in
           let destination_id = List.nth op.operands (if generic then 0 else 3) in
           let destination_type = Mem.shaped ast (type_name destination_id) in
           if List.length destination_type.shape<>1 then invalid_arg "indirect destination must be one-dimensional";
@@ -295,4 +307,5 @@ let lower_with_launch ast (launch : Launch.t) =
   let instructions,sources = List.split (List.map stream launch.streams) in
   let name = String.concat "," (List.map (fun (s : Launch.stream) -> s.entry) launch.streams) in
   let program = D.{name;register_bytes= !register_bytes;streams=instructions} in
-  {ast;launch;program;memory;bindings;sources=List.concat sources}
+  {ast_digest=ast.digest;launch;program;memory;bindings;readonly=[];immutable_views=[];
+   sources=Shared.validate_sources ast launch (List.concat sources)}

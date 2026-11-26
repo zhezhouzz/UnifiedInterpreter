@@ -25,6 +25,7 @@ let consume ast events =
     | Complete task ->
         assert (Hashtbl.find pending task.id = (identity,task.pipe));
         Hashtbl.remove pending task.id
+    | Async_submit _ | Async_complete _ -> failwith "unexpected HFusion task in HIVM trace"
     | Execute _ -> ()) events;
   Hashtbl.length pending
 
@@ -113,7 +114,8 @@ let issue316 () =
     assert (Z.gt (Option.get result.n) Z.zero && result.races <> []);
     let actions = List.concat_map (fun (r : H.race) ->
       ignore (check_pair missing r); r.forward @ r.reverse) result.races in
-    assert (List.exists (fun (e : H.event) -> e.action = Allocate) actions);
+    assert (List.for_all (fun (e : H.event) ->
+      not (List.mem (H.resolve missing e.location.origin.path).opcode ["memref.alloc";"memref.alloca"])) actions);
     assert (List.exists (fun (e : H.event) -> match e.action with
       | Wait k -> k.receiver = 0 && k.flag >= 0 && not k.cross | _ -> false) actions);
     assert (List.exists (fun (e : H.event) -> match e.action with Set (_::_) -> true | _ -> false) actions)
