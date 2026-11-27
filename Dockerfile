@@ -28,6 +28,14 @@ COPY . .
 RUN opam exec -- dune runtest \
     && opam exec -- sh scripts/package_binary.sh
 
+FROM builder AS offline-builder
+RUN apt-get update && apt-get install -y --no-install-recommends busybox-static bubblewrap time \
+    && rm -rf /var/lib/apt/lists/*
+ENV BISHENGIR_OPT=/opt/vendor/triton/backends/ascend/bishengir/bin/bishengir-opt
+RUN .venv-attention/bin/python -m pip install --no-deps --target /opt/vendor \
+    --index-url https://mirrors.huaweicloud.com/ascend/repos/pypi triton-ascend==3.6.0.post2 \
+    && opam exec -- .venv-attention/bin/python scripts/build_offline.py --bishengir-opt "$BISHENGIR_OPT"
+
 FROM ubuntu:24.04 AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive

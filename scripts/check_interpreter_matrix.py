@@ -8,6 +8,7 @@ import os
 import struct
 import subprocess
 import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -187,6 +188,7 @@ def main():
     parser.add_argument("--filter", default="")
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--scheduled", action="store_true", help="request and replay two traces in separate processes")
+    parser.add_argument("--offline", type=Path, help="test the release executable in an isolated network and filesystem")
     opts = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     exe = root / "_build/default/bin/main.exe"
@@ -233,15 +235,46 @@ def main():
         if stage == "hivm":
             for op in sorted(set(config.get("reads", {})) | set(config.get("read_sequence", {}))):
                 args.extend(["--inspect-input", "hivm.hir." + op])
+        if opts.offline:
+            cache = output / "cache"
+            cache.mkdir(exist_ok=True)
+            sandbox = ["bwrap", "--unshare-all", "--die-with-parent", "--clearenv",
+                       "--setenv", "HOME", "/home/user", "--setenv", "PATH", "/bin",
+                       "--dir", "/home/user", "--bind", cache, "/home/user/.cache",
+                       "--proc", "/proc", "--dev", "/dev", "--ro-bind", "/bin/busybox", "/bin/busybox",
+                       "--symlink", "busybox", "/bin/tar", "--symlink", "busybox", "/bin/gzip",
+                       "--ro-bind", "/lib64/ld-linux-x86-64.so.2", "/lib64/ld-linux-x86-64.so.2"]
+            for libname in ("libc", "libm", "libpthread", "libdl", "librt", "libutil", "libresolv", "libanl"):
+                for shared in Path("/lib/x86_64-linux-gnu").glob(libname + ".so.[0-9]"):
+                    sandbox.extend(["--ro-bind", shared, shared])
+            sandbox.extend(["--ro-bind", opts.offline.resolve(), "/interpreter", "--ro-bind", path, "/input.mlir",
+                            "--ro-bind", config_file, "/launch.json", "/interpreter", "run", "/input.mlir",
+                            "--launch", "/launch.json", "--stage", stage])
+            sandbox.extend(args[args.index("--inspect-input"):] if "--inspect-input" in args else [])
+            if not opts.scheduled:
+                start = time.perf_counter()
+                proc = subprocess.run(sandbox, capture_output=True, timeout=300, check=True)
+                elapsed = time.perf_counter() - start
+                result = json.loads(proc.stdout)
+                (folder / "result.json").write_bytes(proc.stdout)
+                check_result = verify_schedule(name, stage, launch, result, config, set())
+                return dict(benchmark=name, stage=stage, source_sha256=source["sha256"], status=result["status"],
+                            trace_sha256=result["schedule"]["hash"], wall_seconds=elapsed, check=check_result)
         if opts.scheduled:
             rows = []
             hashes = set()
+            targets = []
             with tempfile.TemporaryDirectory(dir=folder) as history:
+                command = [*args, "--trace-db", Path(history) / "history.sqlite"]
+                if opts.offline:
+                    command = [sandbox[0], "--bind", history, "/history", *sandbox[1:],
+                               "--trace-db", "/history/history.sqlite"]
                 for number in (1, 2):
                     row = dict(benchmark=name, stage=stage, source_sha256=source["sha256"], run=number, status="error", extent="",
                                reused="", hash="", events="", check="")
-                    proc = subprocess.run([*args, "--trace-db", Path(history) / "history.sqlite"],
-                                          env=env, capture_output=True, timeout=600)
+                    start = time.perf_counter()
+                    proc = subprocess.run(command, env=env, capture_output=True, timeout=600)
+                    row["wall_seconds"] = round(time.perf_counter() - start, 6)
                     (folder / f"stderr-{number}").write_bytes(proc.stderr)
                     if proc.returncode:
                         row["check"] = proc.stderr.decode().strip()
@@ -249,6 +282,7 @@ def main():
                         result = json.loads(proc.stdout)
                         (folder / f"result-{number}.json").write_bytes(proc.stdout)
                         trace = result["schedule"]
+                        targets.append(trace["targets"])
                         row.update(status=result["status"], extent=trace["extent"], reused=trace["reused"],
                                    hash=trace["hash"], events=len(trace["events"]))
                         try:
@@ -257,6 +291,12 @@ def main():
                             row.update(status="mismatch", check=str(error))
                         hashes.add(trace["hash"])
                     rows.append(row)
+            if len(targets) == 2 and all(targets):
+                comparison = "opposite" if targets[0] == targets[1][::-1] else "different targets or same order"
+            else:
+                comparison = "no paired race targets"
+            for row in rows:
+                row["race_order"] = comparison
             return rows
         proc = subprocess.run([*args, "--builtin"], env=env, capture_output=True, timeout=180)
         (folder / "stderr").write_bytes(proc.stderr)

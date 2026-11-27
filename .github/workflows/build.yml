@@ -47,6 +47,31 @@ jobs:
       - name: Build runtime image
         run: docker build --tag unified-interpreter:ci .
 
+      - name: Build standalone Linux executable
+        run: docker build --target offline-builder -t interpreter-offline-ci .
+
+      - name: Test standalone executable on the offline benchmark matrix
+        run: |
+          docker run --name offline-matrix --network none --privileged interpreter-offline-ci sh -ec '
+            .venv-attention/bin/python scripts/check_interpreter_matrix.py --offline _build/offline/unified-interpreter --scheduled \
+              --output _build/offline-validation --results _build/offline/results.csv --bishengir-opt "$BISHENGIR_OPT"
+          '
+          docker cp offline-matrix:/build/_build/offline _build/release/offline
+          docker rm offline-matrix
+          cd _build/release/offline
+          sha256sum unified-interpreter > unified-interpreter.sha256
+          tar -czf unified-interpreter-linux-x86_64.tar.gz unified-interpreter unified-interpreter.sha256
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: offline-interpreter-linux-x86_64
+          path: |
+            _build/release/offline/*.tar.gz
+            _build/release/offline/results.csv
+            docs/offline-executable.md
+          if-no-files-found: error
+          compression-level: 0
+
       - name: Verify container execution
         run: sh scripts/check_docker.sh unified-interpreter:ci
 
