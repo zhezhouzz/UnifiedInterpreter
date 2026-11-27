@@ -21,16 +21,22 @@ let generate ?n ?(kv_heads=1) ?(timeout_ms=5000) catalog method_ name =
       (match method_ with
        | Concrete backend ->
            let count=Option.value ~default:launch.default_n n in
-           let schedule=Race_report.schedule launch (Z.of_int count) in
-           report (Some count) "complete" (Race_report.core backend schedule) launch.fixture (details schedule)
+           let n=Z.of_int count in
+           let schedule,coverage,races=Historical_schedule.family ~timeout_ms ~input:n
+             ~capacity:launch.capacity backend launch.family in
+           let status,fields=Concrete_schedule.fields coverage in
+           let encode=Race_report.core_race ~full:(Concrete_schedule.full coverage) schedule (Race_report.index schedule) in
+           report (Some count) status (List.map encode races) launch.fixture (fields @ details schedule)
        | Symbolic ->
            match Bug_traces.find_symbolic_race ~timeout_ms launch.family with
            | No_race -> report None "no-race" [] launch.fixture []
            | Unknown reason -> report None "unknown" [] launch.fixture ["reason",`String reason]
            | Race {n;witness} ->
-               let schedule=Race_report.schedule launch n in
-               report (Some (Z.to_int n)) "race"
-                 [Race_report.core_race schedule (Race_report.index schedule) witness] launch.fixture (details schedule))
+               let schedule,coverage,races=Historical_schedule.symbolic_witness ~timeout_ms ~capacity:launch.capacity
+                 launch.family n witness in
+               let status,fields=match coverage with All_pairs -> "race",[] | result -> Concrete_schedule.fields result in
+               let encode=Race_report.core_race ~full:(Concrete_schedule.full coverage) schedule (Race_report.index schedule) in
+               report (Some (Z.to_int n)) status (List.map encode races) launch.fixture (fields @ details schedule))
   | Device variant ->
       let config={Vectorlayout_input.default with length=Option.value ~default:Vectorlayout_input.default.length n;kv_heads} in
       let found (fixture : Vectorlayout_input.config) status races events =
@@ -53,9 +59,9 @@ let replay catalog doc =
    | Core launch ->
        if launch.fixture<>field "fixture" then invalid_arg "launch or program differs";
        if races<>[] then (
-         let schedule=Race_report.schedule launch (Z.of_int (Json.to_int (field "n"))) in
+         let schedule=Race_report.schedule ~pair_limit:Loop_trace.threshold launch (Z.of_int (Json.to_int (field "n"))) in
          if Race_report.events launch schedule<>field "events" then invalid_arg "event dictionary differs";
-         List.iter (Race_report.replay_core schedule) races)
+         List.iter (Race_report.replay_core ~full:(field "trace_extent"=`String "program_end") schedule) races)
    | Device variant ->
        let config=Device_trace.parse_config (field "fixture") in
        if races<>[] then (

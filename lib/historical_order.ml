@@ -16,9 +16,8 @@ let touches sites = List.concat_map (fun site -> match site.kind with
 let same_key x y = x.block = y.block && x.receiver = y.receiver &&
                    x.source = y.source && x.target = y.target
 
-(* 一个解释给每个动态事件赋整数时钟。负值表示该事件未进入前缀。
-   固定 N 后实例集合有限，因此所有选中事件均可按时钟线性排列。 *)
-let execution ctx solver sites =
+(* 每个实际发生的动态事件都有非负时钟，因而同步约束也覆盖竞争端点之后的事件。 *)
+let execution ctx solver ~visible sites =
   let sort = Arithmetic.Integer.mk_sort ctx in
   let clocks = List.map (fun site ->
     site, FuncDecl.mk_fresh_func_decl ctx "completion" (List.map (fun _ -> sort) site.indices) sort
@@ -35,12 +34,14 @@ let execution ctx solver sites =
       (and_ ctx [occurs first; precedes first last]) in
   List.iter (fun last_site ->
     let last = instance ctx last_site in
+    rule last.args [valid last] (le ctx (int ctx 0) (clock last));
     List.iter (fun first_site ->
       if ordered_queue first_site last_site then (
         let first = instance ctx first_site in
         required first last (earlier ctx first last))
     ) sites;
     match last_site.kind with
+    | Blocked_control -> rule last.args [valid last] (bool ctx false)
     | Access (reads,writes) ->
         List.iter (fun slice -> match slice.storage with
           | External _ -> ()
@@ -83,4 +84,12 @@ let execution ctx solver sites =
         rule (i.args @ j.args) (precedes i j :: guards) (intervening (not sends) i key (Some i) j))
     ) touches
   ) touches;
-  fun a b -> and_ ctx [occurs a; occurs b; precedes a b]
+  let paired=List.combine visible sites in
+  let actual i={i with site=snd (List.find (fun (s,_) -> s==i.site) paired)} in
+  fun a b ->
+    let a=actual a and b=actual b in
+    let suffix=if visible==sites then [] else List.map (fun (bounded,site) ->
+      let i=instance ctx site in
+      forall ctx i.args (Boolean.mk_implies ctx
+        (and_ ctx [valid i;Boolean.mk_not ctx (valid {i with site=bounded})]) (precedes b i))) paired in
+    and_ ctx (occurs a :: occurs b :: precedes a b :: suffix)

@@ -103,3 +103,47 @@ let generate ?timeout_ms ?(first_only=false) backend rules pairs =
   let witness (a,b) = Option.bind (prefix a b) (fun f ->
     Option.map (fun r -> replay rules f; replay rules r; a,b,f,r) (prefix b a)) in
   if first_only then Option.to_list (List.find_map witness pairs) else List.filter_map witness pairs
+
+(* 两个方向各自选择完整执行，共享发生竞争的两个节点和轮数。 *)
+let complete_race ?(timeout_ms=5000) rules rounds pairs =
+  let open Z3 in
+  let ctx=mk_context [] in
+  let solver=Race_solve.new_solver ~timeout_ms ctx in
+  let int=Arithmetic.Integer.mk_numeral_i ctx and var=Arithmetic.Integer.mk_const_s ctx in
+  let le=Arithmetic.mk_le ctx and lt=Arithmetic.mk_lt ctx and eq=Boolean.mk_eq ctx in
+  let assert_ e=Solver.add solver [e] in
+  let execution prefix =
+    let t=Array.mapi (fun i _ -> var (prefix ^ string_of_int i)) rules in
+    Array.iteri (fun i rule ->
+      List.iter (fun xs -> assert_ (Boolean.mk_or ctx (List.map (fun p -> lt t.(p) t.(i)) xs))) rule.requires;
+      List.iter (fun j -> assert_ (lt t.(i) t.(j))) rule.excludes) rules;t in
+  let forward=execution "forward" and reverse=execution "reverse" in
+  let n=var "rounds" and pair=var "pair" and fend=var "forward_target" and rend=var "reverse_target" in
+  let maximum=Array.fold_left max 0 rounds in
+  let phase t last=Array.iteri (fun i count ->
+    assert_ (Boolean.mk_or ctx [le (int count) n;lt last t.(i)])) rounds in
+  let check xs=match Solver.check solver xs with
+    | SATISFIABLE -> Some (Option.get (Solver.get_model solver))
+    | UNSATISFIABLE -> None | UNKNOWN -> raise (Inconclusive (Solver.get_reason_unknown solver)) in
+  try match check [] with
+  | None -> Loop_trace.Incomplete "the launch has no legal complete execution"
+  | Some _ ->
+    phase forward fend; phase reverse rend;
+    assert_ (le (int 0) n); assert_ (le n (int maximum));
+    let pairs=Array.of_list pairs in
+    assert_ (Boolean.mk_or ctx (Array.to_list (Array.mapi (fun i (a,b) ->
+      Boolean.mk_and ctx [eq pair (int i);lt forward.(a) forward.(b);lt reverse.(b) reverse.(a);
+                          eq fend forward.(b);eq rend reverse.(a)]) pairs)));
+    let value model x=Arithmetic.Integer.get_big_int (Option.get (Model.eval model x true)) in
+    let rec shrink lo m =
+      let hi=Z.to_int (value m n) in if lo>=hi then m else
+      let mid=lo+(hi-lo)/2 in match check [le n (int mid)] with
+      | Some best -> shrink lo best | None -> shrink (mid+1) m in
+    (match check [] with None -> Loop_trace.No_race | Some m ->
+      let m=shrink 0 m in
+      let linearize times=Array.to_list (Array.mapi (fun i t -> value m t,i) times)
+        |> List.sort compare |> List.map snd in
+      let f=linearize forward and r=linearize reverse in
+      replay rules f; replay rules r;
+      let a,b=pairs.(Z.to_int (value m pair)) in Loop_trace.Found (Z.to_int (value m n),(a,b,f,r)))
+  with Inconclusive reason -> Loop_trace.Incomplete reason

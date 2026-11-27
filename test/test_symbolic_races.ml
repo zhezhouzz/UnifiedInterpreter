@@ -45,6 +45,28 @@ let () =
   let body = Scalar (2,0,[Var 1; int 16],
     Branch (Var 2,Scalar (3,0,[Var 0; int 17],Branch (Var 3,write End,End,End)),End,End)) in
   let loop body = For (1,int 0,Var 0,int 1,body,End) in
+  let late_write = Scalar (2,0,[Var 1;int 69],
+    Branch (Var 2,Scalar (3,0,[Var 0;int 100],Branch (Var 3,write End,End,End)),End,End)) in
+  let fixed = family [stream 0 (read (loop late_write))] in
+  let fixed_input = Z.of_int 100 in
+  let check_prefix f expected = match find_symbolic_race ~launch_n:fixed_input f with
+    | Race {n;witness} ->
+        assert (Z.equal n (Z.of_int expected));
+        List.iter (replay ~loop_bound:expected (instantiate f fixed_input))
+          [witness.first_then_second;witness.second_then_first]
+    | No_race -> failwith "missing fixed-input race"
+    | Unknown why -> failwith why in
+  check_prefix fixed 70;
+  let _,coverage,traces=Historical_schedule.family ~input:fixed_input ~capacity:1 Solve fixed in
+  (match coverage,traces with
+   | Loop_schedule.Full_trace 70,[w] ->
+       List.iter (fun events ->
+         replay (instantiate fixed fixed_input) events;
+         assert (List.exists (function Issued ({iterations=[99];_},Control) -> true | _ -> false) events))
+         [w.first_then_second;w.second_then_first]
+   | _ -> failwith "expected a full fixed-input race in round 70");
+  assert (find_symbolic_race ~launch_n:(Z.of_int 99) fixed=No_race);
+  check_prefix (family [stream 0 (For (1,int 0,Var 0,int 1,End,read (write End)))]) 100;
   check_found (family [stream 0 (read (loop body))]) (fun n w ->
     assert (Z.equal n (Z.of_int 17));
     assert (w.first.iterations = [] && w.second.iterations = [16]));
@@ -95,6 +117,14 @@ let () =
   safe opposite_inputs;
   (* 一个 key 有两个可能的发送流。来自同一次广播的令牌只能消费一次。 *)
   let event0 = Literal (VEvent 0) in
+  let late_signal=Scalar (3,0,[Var 0;int 4],Branch (Var 3,send event0 End,End,End)) in
+  let waits_after_race=family [stream 0 (read (write late_signal));stream 1 (recv End)] in
+  check_found waits_after_race (fun n _ -> assert (Z.equal n (Z.of_int 4)));
+  assert (find_symbolic_race ~launch_n:(Z.of_int 3) waits_after_race=No_race);
+  safe (family [stream 0 (loop (write End));stream 1 (recv End)]);
+  let stalled step=family [stream 0 (read (write (For (1,int 0,int 2,step,End,End))))] in
+  safe (stalled (int 0));
+  check_found (stalled (Var 0)) (fun n _ -> assert (Z.equal n Z.one));
   let twice = recv (recv (read (write End))) in
   let broadcasts streams = { (family streams) with block_edge = (fun _ _ receiver _ -> receiver = 2) } in
   safe (broadcasts [stream 0 (send event0 End); stream 2 twice]);

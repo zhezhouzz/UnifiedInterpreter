@@ -229,7 +229,7 @@ let rec pending_position schedule state item count = function
       | (Set _ | Bar), _ | _, (Wait _ | Wait_peers _ | Bar) -> None
       | _ -> pending_position schedule state item (count + 1) rest
 
-let step schedule state n =
+let step ?queue_position schedule state n =
   let { id; phase } = schedule.nodes.(n) in
   let advance event tokens =
     Some (event, { seen = Z.logor state.seen (Z.shift_left Z.one n); tokens }) in
@@ -257,15 +257,39 @@ let step schedule state n =
   | Emit { action; _ } -> advance (Issued (id, action)) state.tokens
   | Finish { submit; _ } when not (occurred state submit) -> None
   | Finish { pipe; item; earlier; _ } ->
-      match pending_position schedule state item 0 earlier with
+      let position=match queue_position with
+        | None -> pending_position schedule state item 0 earlier
+        | Some position -> position id.stream pipe item n in
+      match position with
       | None -> None
       | Some position ->
           let event = Done { id; pipe; position; item } in
           perform event item
 
 let replay_indices schedule indices =
-  List.fold_left_map (fun state n -> match step schedule state n with
-    | Some (event, state) -> state, event
+  let queue_position,update =
+    if List.compare_length_with indices 64<=0 then None,(fun _ -> ()) else
+    let submissions=Array.make (Array.length schedule.nodes) [] and queues=Hashtbl.create 8 in
+    Array.iteri (fun n node -> match node.phase with
+      | Finish {pipe;submit;_} -> submissions.(submit)<-(pipe,n)::submissions.(submit)
+      | Emit _ -> ()) schedule.nodes;
+    let pending key=Option.value ~default:Indices.empty (Hashtbl.find_opt queues key) in
+    let position stream pipe item n =
+      let earlier,_,_=Indices.split n (pending (stream,pipe)) in
+      let blocked=match item with
+        | Set _ | Bar -> not (Indices.is_empty earlier)
+        | _ -> Indices.exists (fun i -> match item_at schedule i with
+            | Wait _ | Wait_peers _ | Bar -> true | _ -> false) earlier in
+      if blocked then None else Some (Indices.cardinal earlier) in
+    let update n =
+      let node=schedule.nodes.(n) in
+      let change pipe f=let key=node.id.stream,pipe in Hashtbl.replace queues key (f (pending key)) in
+      match node.phase with
+      | Finish {pipe;_} -> change pipe (Indices.remove n)
+      | Emit _ -> List.iter (fun (pipe,i) -> change pipe (Indices.add i)) submissions.(n) in
+    Some position,update in
+  List.fold_left_map (fun state n -> match step ?queue_position schedule state n with
+    | Some (event, state) -> update n; state,event
     | None -> failwith "Bug_traces: illegal witness from solver"
   ) initial indices |> snd
 

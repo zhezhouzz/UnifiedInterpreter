@@ -47,7 +47,8 @@ type symbolic_result =
   | No_race
   | Unknown of string
 
-(** 查询是否存在 N >= 0 以及同一对动态操作的两个完成顺序。
-    No_race 表示对所有 N 均无竞争。timeout_ms 是单次符号 SMT 查询的预算，
-    默认 5000 毫秒，0 表示无限制。无法判定时返回 Unknown。 *)
-val find_symbolic_race : ?timeout_ms:int -> Symbolic.family -> symbolic_result
+(** 省略 launch_n 时查询是否存在有竞争的非负入口参数 N。
+    指定 launch_n 时只查询该输入，返回的 n 表示两个方向的前缀所需的循环轮数。
+    No_race 表示在查询范围内均无竞争。timeout_ms 是单次查询的毫秒预算，
+    默认值为 5000，0 表示无限制。无法判定时返回 Unknown。 *)
+val find_symbolic_race : ?launch_n:Z.t -> ?timeout_ms:int -> Symbolic.family -> symbolic_result

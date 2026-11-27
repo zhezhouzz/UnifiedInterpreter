@@ -10,6 +10,7 @@ type kind =
   | Send of channel list
   | Consume of channel
   | Barrier
+  | Blocked_control
 
 (* 每个模板代表一个源位置的所有动态实例。order 交替记录 AST 子节点和
    循环序号，它的字典序就是同一流中的发射顺序。 *)
@@ -18,8 +19,7 @@ type site = {
   pipe : int option; kind : kind; domain : Expr.expr; flat_loop : (int list * Expr.expr) option;
 }
 
-let compile ctx family n =
-  if family.parameter=[] then invalid_arg "symbolic N needs an entry parameter";
+let compile ?prefix_rounds ctx family n =
   validate family;
   let yes = bool ctx true and zero = int ctx 0 in
   let restrict condition = List.map (fun site ->
@@ -93,16 +93,22 @@ let compile ctx family n =
           let distance = Boolean.mk_ite ctx positive (sub hi lo) (sub lo hi) in
           let extent = simplify (Boolean.mk_ite ctx (and_ ctx [lt ctx zero width; lt ctx zero distance])
             (Arithmetic.mk_div ctx (add ctx distance (sub width (int ctx 1))) width) zero) in
-          let sites,falls = walk ((x,Integer index) :: env) (0 :: path) ((i,List.rev path,extent) :: loops)
+          let inside,visible,exhausted = match prefix_rounds with
+            | None -> inside,extent,yes
+            | Some rounds -> and_ ctx [inside; lt ctx i rounds],
+                Boolean.mk_ite ctx (lt ctx rounds extent) rounds extent, le ctx extent rounds in
+          let sites,falls = walk ((x,Integer index) :: env) (0 :: path) ((i,List.rev path,visible) :: loops)
             (i :: int ctx 0 :: order) body in
           let all_before = if Boolean.is_true (simplify falls) then yes else
             let j = fresh ctx "earlier_iteration" in
             let at_j e = Expr.substitute_one e i j in
             forall ctx [j] (Boolean.mk_implies ctx (and_ ctx [at_j inside; lt ctx j i]) (at_j falls)) in
-          let completes = and_ ctx [Boolean.mk_not ctx (eq ctx step zero);
+          let completes = and_ ctx [exhausted; Boolean.mk_not ctx (eq ctx step zero);
             forall ctx [i] (Boolean.mk_implies ctx inside falls)] in
           let rest,finish = child 1 env next in
-          restrict (and_ ctx [inside; all_before]) sites @ restrict completes rest,
+          let blocked = simplify (eq ctx step zero) in
+          let stalls = if Boolean.is_false blocked then [] else restrict blocked [event None Blocked_control] in
+          stalls @ restrict (and_ ctx [inside; all_before]) sites @ restrict completes rest,
           and_ ctx [completes; finish] in
     let env = List.map (fun (x,v) -> x,lift ctx v) stream.params in
     let env = List.fold_left (fun env (s,x) -> if s = stream.id then (x,Integer n) :: env else env)

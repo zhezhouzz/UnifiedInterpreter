@@ -8,12 +8,17 @@ type outcome =
   | No_race
   | Unknown of string
 
-let solve ~timeout_ms family =
+let solve ?launch_n ~timeout_ms family =
   if timeout_ms < 0 then invalid_arg "negative solver timeout";
+  if launch_n=None && family.parameter=[] then invalid_arg "symbolic N needs an entry parameter";
+  Option.iter (fun count -> if Z.sign count < 0 then invalid_arg "negative launch N") launch_n;
   let ctx = mk_context [] in
   let solver () = Race_solve.new_solver ~timeout_ms ctx in
   let n = fresh ctx "N" in
-  let sites = compile ctx family n in
+  let input,prefix_rounds = match launch_n with
+    | Some count -> num ctx count,Some n
+    | None -> n,None in
+  let sites = compile ?prefix_rounds ctx family input in
   let accesses = List.filter (fun s -> match s.kind with Access _ -> true | _ -> false) sites in
   let barriers = List.filter (fun s -> s.kind = Barrier) sites in
   let has_flags = Historical_order.touches sites <> [] in
@@ -22,8 +27,9 @@ let solve ~timeout_ms family =
   (* 两个解释独立选择合法前缀，共享入口参数及目标操作的动态身份。 *)
   let full = lazy (
     let s = solver () in
-    let forward = Historical_order.execution ctx s sites in
-    let reverse = Historical_order.execution ctx s sites in
+    let actual=if launch_n=None then sites else compile ctx family input in
+    let forward = Historical_order.execution ctx s ~visible:sites actual in
+    let reverse = Historical_order.execution ctx s ~visible:sites actual in
     s, forward, reverse) in
   let concretize solver assumptions a b =
     (* 整数模型可任意选取很大的 N。收紧已满足公式中 N 的上界，
@@ -41,10 +47,13 @@ let solve ~timeout_ms family =
     let id (i : instance) = Core_lang.{stream = i.site.stream; site = i.site.path;
                           iterations = List.map (fun e -> Z.to_int (value e)) i.args} in
     let count = value n in
-    let program = instantiate family count in
-    let schedule = Race_schedule.compile program in
+    let program = instantiate family (Option.value launch_n ~default:count) in
+    let loop_bound = Option.map (fun _ -> Z.to_int count) launch_n in
+    let schedule = Race_schedule.compile ~pair_limit:0 program in
+    let within=Option.map (fun loop_bound ->
+      Race_schedule.visibility (Race_schedule.compile ~loop_bound ~pair_limit:0 program) schedule) loop_bound in
     Option.map (fun witness -> Race {n = count; witness})
-      (Race_solve.witness ~timeout_ms schedule (id a) (id b)) in
+      (Race_solve.witness ?within ~timeout_ms schedule (id a) (id b)) in
   let pair left right =
     if left == right && left.indices = [] then No_race else
     let a = instance ctx left and b = instance ctx right in
@@ -67,7 +76,7 @@ let solve ~timeout_ms family =
       | Solver.SATISFIABLE ->
           (match concretize s query a b with
            | Some found -> found
-           | None -> failwith "symbolic scheduling model failed concrete validation") in
+           | None -> Unknown "the symbolic model has no validated complete execution") in
     if Boolean.is_false overlap then No_race else
     match Solver.check candidates [overlap] with
     | Solver.UNSATISFIABLE -> No_race
@@ -101,6 +110,6 @@ let solve ~timeout_ms family =
         check unknown remaining in
   pairs None accesses
 
-let find ?(timeout_ms = 5000) family =
-  try solve ~timeout_ms family with
+let find ?launch_n ?(timeout_ms = 5000) family =
+  try solve ?launch_n ~timeout_ms family with
   | Unsupported reason -> Unknown reason
