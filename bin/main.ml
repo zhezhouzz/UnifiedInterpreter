@@ -41,6 +41,12 @@ let vectorlayout argv =
       d.token d.head d.page d.actual d.expected) first
 
 let () = match Array.to_list Sys.argv with
+  | [_;"run";("--help"|"-help")] -> print_endline Source_run.usage
+  | [_;"run"] -> prerr_endline Source_run.usage; exit 2
+  | _::"run"::file::args ->
+      (try Source_run.run file args with
+       | Arg.Help message -> print_string message
+       | Arg.Bad message -> prerr_endline message; exit 2)
   | [_] -> Demo.run_all ()
   | _::"race"::"pairs"::args ->
       (try Ir_pairs.run (Array.of_list ("race pairs"::args)) with
