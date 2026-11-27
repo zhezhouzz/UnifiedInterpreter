@@ -7,6 +7,7 @@ import operator
 import os
 import struct
 import subprocess
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -150,6 +151,34 @@ def verify(name, stage, launch, result, config):
     return ", ".join(checks) or "all streams returned and pending tasks completed"
 
 
+def verify_schedule(name, stage, launch, result, config, hashes):
+    trace = result["schedule"]
+    events = trace["events"]
+    encoded = json.dumps(events, ensure_ascii=False, separators=(",", ":")).encode()
+    if hashlib.sha256(encoded).hexdigest() != trace["hash"] or trace["reused"] != (trace["hash"] in hashes):
+        raise ValueError("trace digest or history mismatch")
+    if trace["extent"] == "terminal":
+        if trace["terminal"] != result["status"] or trace["targets"] is not None:
+            raise ValueError("terminal state differs from delivered trace")
+        if (name, stage, result["status"]) == ("fixture/shared-allocation", "hfusion", "invalid-memory"):
+            if "uninitialized descriptor" not in result["detail"]:
+                raise ValueError(str(result["detail"]))
+            return result["detail"]
+        return verify(name, stage, launch, result, config)
+    if trace["extent"] != "race_prefix" or result["status"] not in ("returned", "deadlock", "invalid-memory"):
+        raise ValueError("unfinished execution")
+    first, last = [target["event"] for target in trace["targets"]]
+    if first not in events[:-1] or last != events[-1] or first == last:
+        raise ValueError("race endpoints missing or out of order")
+    if (name, stage) == ("fixture/fifo-copy", "hivm"):
+        values = struct.unpack("<iii", bytes.fromhex(result["memory_hex"]["gm:0"]))
+        expected = (7, 7, 7) if trace["targets"][0]["source"]["path"] == [10] else (7, 7, 0)
+        if values != expected:
+            raise ValueError(f"unexpected FIFO output {values}")
+        return f"opposite copy orders checked against gm:0 {values}"
+    return "replayed both ordered race endpoints and continued to " + result["status"]
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--bishengir-opt", type=Path, required=True)
@@ -157,6 +186,7 @@ def main():
     parser.add_argument("--results", type=Path)
     parser.add_argument("--filter", default="")
     parser.add_argument("--jobs", type=int, default=4)
+    parser.add_argument("--scheduled", action="store_true", help="request and replay two traces in separate processes")
     opts = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     exe = root / "_build/default/bin/main.exe"
@@ -203,7 +233,32 @@ def main():
         if stage == "hivm":
             for op in sorted(set(config.get("reads", {})) | set(config.get("read_sequence", {}))):
                 args.extend(["--inspect-input", "hivm.hir." + op])
-        proc = subprocess.run(args, env=env, capture_output=True, timeout=180)
+        if opts.scheduled:
+            rows = []
+            hashes = set()
+            with tempfile.TemporaryDirectory(dir=folder) as history:
+                for number in (1, 2):
+                    row = dict(benchmark=name, stage=stage, source_sha256=source["sha256"], run=number, status="error", extent="",
+                               reused="", hash="", events="", check="")
+                    proc = subprocess.run([*args, "--trace-db", Path(history) / "history.sqlite"],
+                                          env=env, capture_output=True, timeout=600)
+                    (folder / f"stderr-{number}").write_bytes(proc.stderr)
+                    if proc.returncode:
+                        row["check"] = proc.stderr.decode().strip()
+                    else:
+                        result = json.loads(proc.stdout)
+                        (folder / f"result-{number}.json").write_bytes(proc.stdout)
+                        trace = result["schedule"]
+                        row.update(status=result["status"], extent=trace["extent"], reused=trace["reused"],
+                                   hash=trace["hash"], events=len(trace["events"]))
+                        try:
+                            row["check"] = verify_schedule(name, stage, launch, result, config, hashes)
+                        except ValueError as error:
+                            row.update(status="mismatch", check=str(error))
+                        hashes.add(trace["hash"])
+                    rows.append(row)
+            return rows
+        proc = subprocess.run([*args, "--builtin"], env=env, capture_output=True, timeout=180)
         (folder / "stderr").write_bytes(proc.stderr)
         row = dict(benchmark=name, stage=stage, source_sha256=source["sha256"], status="error", check="",
                    steps="", completed_tasks="", parse_s="", execute_s="", peak_kib="")
@@ -226,6 +281,8 @@ def main():
         parser.error("no matching benchmark")
     with ThreadPoolExecutor(opts.jobs) as pool:
         rows = list(pool.map(check, items))
+    if opts.scheduled:
+        rows = [row for pair in rows for row in pair]
     with (opts.results or output / "results.csv").open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=rows[0], lineterminator="\n")
         writer.writeheader()

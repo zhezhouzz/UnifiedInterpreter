@@ -38,11 +38,12 @@ each operation's stage; `stage` records the CLI execution mode.
 The source interpreter also accepts parsed HFusion and HIVM modules. H1 tracks
 instruction sites and the execution budget, H2 maps the active stream to its
 block and subblock, H3 evaluates vector and tensor operations, H4 accesses
-typed memory, and H5 drives submitted tasks, flags and barriers. The default
-policy selects the first stream that can progress and completes its earliest
-eligible task before issuing another instruction. Delayed transfers read and
-write shared storage at completion. With no runnable stream or task, pending
-waits and signals are reported as a deadlock.
+typed memory, and H5 drives submitted tasks, flags and barriers. Each execution
+requests one trace from the scheduler. Previously unseen race prefixes take
+priority, followed by other observable schedules for that module and launch.
+Requests share a persistent history across processes. Use `--trace-db FILE`
+to select a history or `--builtin` to select the autonomous interpreter policy.
+Delayed transfers read and write shared storage at completion.
 
 Run the [interpreter benchmark matrix](scripts/check_interpreter_matrix.py)
 with the frontend environment and a BiShengIR compiler that supports AVE.
@@ -59,13 +60,18 @@ _build/default/bin/main.exe run benchmarks/ir-pairs/fixture/fifo-copy/hivm.mlir 
 
 JSON output includes execution status,
 completed task count, per-stream return values, and the final bytes of each
-named storage in `memory_hex`. The FIFO case writes three little-endian i32
-values `[7, 7, 7]` to `gm:0`. An OCaml caller can pass the same module and
-launch configuration directly to
-[`Hivm_trace.Execution.run_module`](lib/hivm/source_execution.mli).
-The [recorded matrix](benchmarks/results/interpreter-matrix.csv) lists the
-actual outcome, checks, parse time, execution time and process peak RSS for
-each source. Each row covers one concrete launch and scheduling order.
+named storage in `memory_hex`. The `schedule` object contains the delivered
+events, their SHA-256, the trace extent and the reuse flag. The first two
+scheduled HIVM FIFO runs with a fresh history produce `[7, 7, 7]` and
+`[7, 7, 0]` in `gm:0`. OCaml callers use `Ir_scheduler.run_module` with the
+parsed module and launch. See the [interface](lib/scheduler/ir_scheduler.mli)
+and [trace guide](docs/scheduler-traces.md).
+
+Pass `--scheduled` to the matrix script to request two traces in separate
+processes for each benchmark and stage. The [scheduled results](benchmarks/results/scheduled-interpreter-matrix.csv)
+record the extent, hash, reuse flag and execution outcome for each request.
+The [autonomous results](benchmarks/results/interpreter-matrix.csv) also
+record parse time, execution time and peak RSS.
 
 Two small MLIR kernel examples are available in
 [`examples/kernels`](examples/kernels): vector addition and row sum, each with
