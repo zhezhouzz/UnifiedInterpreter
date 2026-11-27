@@ -97,11 +97,12 @@ let module_json ~execution ast =
           @ (if execution then [] else ["source_sha256",str (Option.get ast.source_sha256)]))
 let execution_json = module_json ~execution:true
 let scheduling_json = module_json ~execution:false
-type syntax = Custom | Generic | BiSheng of string
+type syntax = Custom | Generic | BiSheng of string | Auto of string
 
 let parse ?(syntax=Custom) ~file input =
   let arguments = match syntax with
-    | Custom -> [] | Generic -> ["--generic"] | BiSheng path -> ["--bishengir-opt";path] in
+    | Custom -> [] | Generic -> ["--generic"] | BiSheng path -> ["--bishengir-opt";path]
+    | Auto path -> ["--auto-parser";path] in
   Attention_runtime.Parser.parse_json ~script:"mlir_frontend.py" ~arguments ~file input |> of_json
 
 let entry ast name = match List.assoc name ast.functions with

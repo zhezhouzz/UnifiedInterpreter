@@ -117,7 +117,17 @@ def attribute_value(attr):
     return str(attr)
 
 
-def export_module(source, filename, generic=False, normalized=False):
+def vendor_module(source, filename, compiler):
+    result = subprocess.run(
+        [compiler, "--verify-each", "--mlir-print-op-generic", "--mlir-print-local-scope"],
+        input=source, capture_output=True, text=True,
+    )
+    if result.returncode:
+        raise ValueError(f"{filename}: BiShengIR: {result.stderr.strip()}")
+    return export_module(result.stdout, filename, generic=True, normalized=True)
+
+
+def export_module(source, filename, generic=False, normalized=False, auto_parser=None):
     if generic:
         ctx = Context(allow_unregistered=True)
         ctx.load_dialect(Builtin)
@@ -126,7 +136,15 @@ def export_module(source, filename, generic=False, normalized=False):
         ctx.load_op(HFusionBarrierOp)
     parser_filename = f"{filename} (generic assembly)" if normalized else filename
     parser = SchedulerParser(ctx, source, parser_filename)
-    module = parser.parse_module()
+    try:
+        module = parser.parse_module()
+    except ParseError as first:
+        if auto_parser is None:
+            raise
+        try:
+            return vendor_module(source, filename, auto_parser)
+        except (ParseError, VerifyException, ValueError, RuntimeError, OSError) as second:
+            raise ValueError(f"xDSL: {first}\n{second}") from None
     module.verify()
     types = {}
 
@@ -182,17 +200,15 @@ def main():
     arguments.add_argument("filename", help="source name for diagnostics")
     mode = arguments.add_mutually_exclusive_group()
     mode.add_argument("--generic", action="store_true", help="read MLIR generic assembly")
+    mode.add_argument("--auto-parser", metavar="COMPILER", help="use BiShengIR on a syntax error")
     mode.add_argument("--bishengir-opt", help="convert vendor custom assembly to generic assembly")
     args = arguments.parse_args()
     source = sys.stdin.read()
     try:
         if args.bishengir_opt:
-            source = subprocess.run(
-                [args.bishengir_opt, "--verify-each", "--mlir-print-op-generic", "--mlir-print-local-scope"],
-                input=source, stdout=subprocess.PIPE, text=True, check=True,
-            ).stdout
-        normalized = args.bishengir_opt is not None
-        doc = export_module(source, args.filename, args.generic or normalized, normalized=normalized)
+            doc = vendor_module(source, args.filename, args.bishengir_opt)
+        else:
+            doc = export_module(source, args.filename, args.generic, auto_parser=args.auto_parser)
     except (ParseError, VerifyException, ValueError, RuntimeError, OSError, subprocess.CalledProcessError) as error:
         raise SystemExit(str(error)) from None
     json.dump(doc, sys.stdout, allow_nan=False)

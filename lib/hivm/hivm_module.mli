@@ -22,7 +22,7 @@ type catalog_origin = {benchmark:string; model_digest:string;
 type t = private {digest : string; format : string; attributes : (string * string) list; functions : (string * operation) list;
                   catalog_origin : catalog_origin option; types : (string * Yojson.Safe.t) list;
                   mlir_types : (string * typ) list; source_sha256 : string option}
-type syntax = Custom | Generic | BiSheng of string
+type syntax = Custom | Generic | BiSheng of string | Auto of string
 val parse : ?syntax:syntax -> file:string -> string -> t
 val read : string -> t
 val of_json : Yojson.Safe.t -> t
