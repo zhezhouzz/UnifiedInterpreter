@@ -76,15 +76,15 @@ let generate ?n ?inputs ?file ?timeout_ms stage name backend =
   let launch,count = match inputs with
     | None -> let l,count = input_request ?n name in
         dict (("extra_arguments",field "extra_arguments" case)::assoc l), count
-    | Some x -> Ir_scheduler.explicit x,n in
+    | Some x -> Ir_scheduler.Catalog.explicit x,n in
   let ast = registered_ast ?file stage case in
   let level = if stage="hivm" then Ir_scheduler.HIVM else HFusion in
-  Ir_scheduler.generate ?n:count ?timeout_ms ~name backend (Module (level,ast,launch))
+  Ir_scheduler.Catalog.generate ?n:count ?timeout_ms ~name backend (Module (level,ast,launch))
 
 let replay doc =
   let stage = J.to_string (field "stage" doc) and name = J.to_string (field "benchmark" doc) in
   let ast = registered_ast stage (List.assoc name (cases ())) in
-  Printf.printf "%s replayed=%d\n" name (Ir_scheduler.replay_module ast doc)
+  Printf.printf "%s replayed=%d\n" name (Ir_scheduler.Catalog.replay_module ast doc)
 
 let stage_of args =
   match List.filter (fun stage -> List.mem ("--"^stage) args || List.mem ("--"^stage^"-ast") args)

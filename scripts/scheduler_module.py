@@ -297,7 +297,7 @@ class Schedule:
             try:
                 self.block(entry, instance["stream"], body, args, {}, [], [], [])
             except EndOfPrefix:
-                continue
+                return {"nodes": self.nodes, "pairs": [], "status": "unknown"}
         pairs = []
         for i, node in enumerate(self.nodes):
             for cell in self.scalar_reads:

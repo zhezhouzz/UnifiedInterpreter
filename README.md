@@ -199,17 +199,16 @@ not by `H4`.
 
 ## Run
 
-The race runner accepts `race list`, `race run NAME` and `race replay FILE`.
-See [Core Language race benchmarks](docs/race-benchmarks.md) for the benchmark
-catalog, the concrete BFS and SMT backends, and symbolic loop counts.
-For execution on the original HIVM OCaml AST, see the
-[trace interface and fifo-copy example](docs/trace-interpreter.md).
-Use `race mlir FILE` to parse HFusion or HIVM MLIR and analyze a concrete launch.
-From OCaml, pass the same parsed module and launch parameters to
-`Ir_scheduler.generate_mlir` to obtain source-level trace prefixes.
-See the [interpreter interface](docs/scheduler-traces.md), the
-[MLIR input and launch guide](docs/mlir-to-core.md) and the
-[per-benchmark BFS and SMT results](benchmarks/results/scheduler-mlir-matrix.csv).
+**Scheduling from HIVM or HFusion source.** Pass the parsed module AST and its launch
+arguments to `Ir_scheduler.generate_mlir`. The file-based test command is
+`race mlir FILE --launch LAUNCH.json --backend smt --hivm`. Both return
+source-level events for the interpreter. See the [interpreter interface](docs/scheduler-traces.md),
+[source analysis](lib/hivm/mlir_trace.ml) and [source benchmark results](benchmarks/results/scheduler-mlir-matrix.csv).
+
+**Registered benchmark models.** `race list`, `race run NAME` and `race replay FILE`
+use the benchmark catalog. For example, `race run issue316/missing-ready --backend smt --n 70`
+loads the [parameterized Core Lang model](lib/race_benchmarks.ml). See the
+[catalog commands and model inputs](docs/race-benchmarks.md) and [catalog scheduler](lib/scheduler/catalog_scheduler.ml).
 
 Use an OCaml 5 switch:
 

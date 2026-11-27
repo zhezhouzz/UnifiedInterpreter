@@ -1,4 +1,6 @@
-# Core Language 数据竞争 trace
+# 已登记的 Core Language benchmark 模型
+
+`race run NAME` 按名称加载已登记的模型。例如 `issue316/missing-ready` 使用 OCaml 中定义的 `Race_benchmarks.issue316`。要分析调用方提供的 HIVM 或 HFusion 模块，使用 `Ir_scheduler.generate_mlir` 或文件命令 `race mlir FILE`。[#316 模型](../lib/race_benchmarks.ml) · [源码 AST 入口](mlir-to-core.md)
 
 在仓库根目录使用安装了项目依赖的 OCaml 5 switch 执行以下命令。本地的 `unified-interpreter` switch 可以通过 `opam exec --switch=unified-interpreter -- dune build` 构建。每个报告中的 `forward`、`reverse` 分别给出同一对操作按两个相反顺序完成的合法前缀。
 
@@ -35,15 +37,17 @@ Litao 文件保存在 `benchmarks/litao`，来源为 `core_language_litao` 的�
 
 对于同一启动配置，两条前缀必须包含同一对动态操作，并在同一物理地址发生冲突。至少一个操作写入该地址。判定允许两次写入相同的值。设备 AST 中同一个 `Issue` 内部的指令随同一次完成事件执行，标量流直接执行的访存也参与判定。
 
-具体后端为每对竞争操作返回两个方向的最短 trace。对于地址随调度变化的操作，两个方向必须共享冲突地址。搜索在满足这个条件的前缀组合中最小化长度之和。报告的 `complete` 适用于给定的入口参数。具有阻塞等待的程序也可能在等待之前产生数据竞争 trace。
+给定同一组入口参数，一对冲突访问只有在两种相反的完成顺序下都能继续执行到所有流结束、所有已提交任务完成时才会返回。两个方向需要共享冲突地址。短循环可以返回截止到第二个端点的前缀。报告的 `complete` 表示对本次输入完成了这个查询；空列表表示没有满足条件的竞争对。
 
 - `bfs` 在队列和令牌给出唯一前驱时按层遍历事件的前驱图。共同前驱只需要执行一次。多个发送者竞争同一令牌时，Core 后端对可达状态执行 BFS。
-- `smt` 对 Core 程序求解事件是否出现、完成时钟、令牌约束和前缀长度。对设备程序，Z3 求解每个事件的传递前驱位向量，每个直接前驱及其前驱集合都包含在结果中。
+- `smt` 对 Core 程序要求每个动态事件都发生，并约束完成时钟和令牌的置位、消费顺序。在这些约束下分别求解两个方向的竞争前缀。对设备程序，Z3 求解每个事件的传递前驱位向量，每个直接前驱及其前驱集合都包含在结果中。
 - 对 `vectorlayout` 的间接读取与写入，分析使用物理位区间。可能冲突而当前顺序无法产生数据竞争 trace 时，分析根据掩码和偏移量的写入来源划分调度，重新执行对应前缀。跨 block 的分析会检查共享内存的读写范围及同步边，再组合可以独立执行的前缀。
 
 ## 符号 N
 
 `race list --json` 中的 `symbolic_n` 标记可使用 `--backend symbolic` 的程序。该后端求解存在量化的非负整数 `N`。找到竞争时，报告保存整数模型以及该输入上的两条 trace。Core 后端还可返回 `no-race` 或 `unknown`。超时预算可用 `--timeout-ms` 设置。
+
+已知实际输入时，例如运行 `race run regression/repeated-write --backend smt --n 100`，报告中的 `n` 保留为 100。`prefix_rounds` 为 2，表示前两轮的两次写入就可以交换完成顺序。两条 trace 各自给出全部 100 轮的调度。OCaml 调用方可以将参数化 Core Lang 程序传给 `Historical_schedule.family ~input ~capacity backend`，其中 `input` 是原始的 `Z.t` 入口参数。[历史模型的循环调度](../lib/historical_schedule.ml)
 
 对于 `vectorlayout`，求解器沿实际 AST 的入口提取首轮路径条件、连续发射的 Vector 计算和物理缓冲区访问，寻找可产生数据竞争 trace 的 `N`。找到模型后使用该长度重新生成页表、缓冲区与启动参数，并检查完整设备程序上的两个完成顺序。该方法对这两个程序都可以找到两个方向的 trace。入口路径无法给出数据竞争 trace 时返回 `unknown`。
 

@@ -72,7 +72,7 @@ let run argv =
       let prepared = H.prepare program bindings in
       let result = match !backend with
         | (Bfs | Smt) when Option.fold ~none:true ~some:Z.fits_int n ->
-            Ir_scheduler.generate ?n:(Option.map Z.to_int n) ~timeout_ms:!timeout ~name
+            Ir_scheduler.Catalog.generate ?n:(Option.map Z.to_int n) ~timeout_ms:!timeout ~name
               (if !backend=Bfs then Bfs else Smt) (Tensor prepared)
         | method_ ->
             let report=H.generate ?n ~timeout_ms:!timeout method_ prepared |> H.to_json in

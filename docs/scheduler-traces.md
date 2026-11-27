@@ -6,7 +6,9 @@
 
 ## 2. scheduler 返回的 trace 结构
 
-两个 IR 层都返回 `hivm-race-1`。报告的 `streams` 给出每个实例的入口，`inputs` 给出 IR 层、AST 标识、实参和初始内存。每个 `races[]` 元素包含两个端点 `first`、`second` 和两条可执行前缀 `forward`、`reverse`。前者以 `second` 结束，后者以 `first` 结束。`status = "complete"` 表示对本次输入完成了分析。`"race"` 表示已找到竞争前缀，可能还有其他竞争。`"unknown"` 表示本次分析无法判定，原因在 `reason` 中。[事件定义](../lib/hivm/hivm_trace.mli)
+两个 IR 层都返回 `hivm-race-1`。报告的 `streams` 给出每个实例的入口，`inputs` 给出 IR 层、AST 标识、实参和初始内存。每个 `races[]` 元素包含两个端点和两条事件序列。`forward` 先执行 `first` 再执行 `second`，`reverse` 采用相反顺序。
+
+报告带有 `trace_extent: "program_end"` 时，两条序列都覆盖整个程序，`prefix_rounds` 给出覆盖两个端点所需的循环轮数。其余竞争报告给出在第二个目标事件处结束的前缀。`status` 为 `complete` 表示完成本次输入的分析，`race` 表示找到竞争，`no-race` 表示没有冲突事件对能在两次正常结束的执行中交换完成顺序。`unknown` 的具体原因记录在 `reason` 中。[事件定义](../lib/hivm/hivm_trace.mli)
 
 | 事件字段 | 解释器的使用方式 |
 | --- | --- |
@@ -17,7 +19,7 @@
 
 ## 3. interpreter 如何利用 trace
 
-从同一份初始内存分别执行两次，每次选择一条前缀。解释器自行执行常量、标量运算、分支和地址分配。到达需要调度的位置时，读取下一个事件。若为 `submit` 或 `execute`，推进指定实例到相应的动态位置并执行动作。若为 `complete`，从待完成任务中找到相同编号的任务，执行其中的读写，然后继续读取 trace。每个事件只消费一次。前缀执行完毕后，需要完整执行结果时，可选择任意合法调度运行到程序结束。[位置查询接口](../lib/hivm/hivm_module.mli)
+使用报告中的原始实参和初始内存分别执行两次，每次选择一条序列。解释器自行执行常量、标量运算、分支和地址分配。到达需要调度的位置时，读取下一个事件。若为 `submit` 或 `execute`，推进指定实例到相应的动态位置并执行动作。若为 `complete`，从待完成任务中找到相同编号的任务并执行其中的读写。完整 trace 中的所有事件都需要消费，包括两个端点之后的事件。对于前缀，scheduler 保证每个方向至少有一种后续调度能让所有流结束、所有已提交任务完成。解释器自行选择其他后续调度时仍可能遇到死锁。[位置查询接口](../lib/hivm/hivm_module.mli)
 
 ## 4. fifo-copy 例子
 

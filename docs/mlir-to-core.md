@@ -4,7 +4,7 @@
 
 解释器持有 OCaml 模块 AST 时，调用 `Ir_scheduler.generate_mlir ~configuration stage backend ast`。测试可以调用 `Hivm_trace.Module_ast.parse` 从 MLIR 文本取得相同类型的 AST。自定义汇编由 xDSL 读取，需要注册设备方言时，向解析器传入 `BiSheng path`，使用 `bishengir-opt` 输出 generic assembly 后读取。[公共接口](../lib/scheduler/ir_scheduler.mli) · [解析接口](../lib/hivm/hivm_module.mli) · [解释器使用指南](scheduler-traces.md)
 
-转换在生成每个可调度的 Core 指令时登记来源。查询键为实例编号和 Core 指令路径，记录内容包括源函数中的操作路径、操作名称、调用位置和复合操作的阶段。BFS 和 SMT 使用转换得到的 Core 程序及本次启动的输入生成 trace。导出时，静态来源与每个事件的循环轮次、调用实例和任务编号共同确定解释器要执行的源动作。[Core 转换](../lib/hivm/mlir_lowering.ml) · [设备操作转换](../lib/hivm/mlir_device.ml) · [trace 导出和回放](../lib/hivm/hivm_trace.ml)
+转换在生成每个可调度的 Core 指令时登记来源。查询键为实例编号和 Core 指令路径，记录内容包括源函数中的操作路径、操作名称、调用位置和复合操作的阶段。BFS 和 SMT 使用转换得到的 Core 程序及本次启动的输入生成 trace。导出时，静态来源与每个事件的循环轮次、调用实例和任务编号共同确定解释器要执行的源动作。[Core 转换](../lib/hivm/mlir_lowering.ml) · [设备操作转换](../lib/hivm/mlir_device.ml) · [源码分析和回放](../lib/hivm/mlir_trace.ml) · [Core 事件映射](../lib/hivm/trace_projection.ml) · [设备事件映射](../lib/hivm/device_projection.ml)
 
 ## 启动参数
 
@@ -14,10 +14,10 @@
 
 ## 从命令行生成、回放和导出
 
-配置项目 OCaml switch 和 xDSL 环境后，在仓库根目录运行。例如，将以下启动参数保存为 `_build/issue316-launch.json`。对应程序的循环执行三次。[#316 缺少等待的 HIVM 程序](../examples/kernels/issue316_missing_ready_hivm.mlir)
+配置项目 OCaml switch 和 xDSL 环境后，在仓库根目录运行。例如，将以下启动参数保存为 `_build/issue316-launch.json`。此输入执行两轮循环，两个方向都能完成全部任务。[#316 缺少等待的 HIVM 程序](../examples/kernels/issue316_missing_ready_hivm.mlir)
 
 ```json
-{"stage":"hivm","arguments":[{"shape":[3072]},null,3]}
+{"stage":"hivm","arguments":[{"shape":[2048]},null,2]}
 ```
 
 ```sh
@@ -31,6 +31,8 @@ dune exec unified-interpreter -- race mlir examples/kernels/issue316_missing_rea
 
 `--project` 检查源模块和启动输入，并按已保存的两条前缀映射每个事件。需要直接生成解释器报告时，使用 `--backend bfs --hivm` 或 `--backend smt --hivm`。两个 IR 层都使用 `hivm-race-1` 作为源级报告格式。
 
+同一程序在容量为 1 时，两轮循环分别使用 `EVENT_ID0` 和 `EVENT_ID1`。若执行三轮，第三轮再次向 `PIPE_V` 发送 `EVENT_ID0`，第一轮的同名信号还没有被消费。这次置位无法完成。因此，两轮输入可以生成竞争 trace，三轮输入返回空列表。
+
 ## 分析范围与全量测试
 
 Core 转换保留调度所需的标量计算、循环和分支、函数调用、张量 SSA 依赖、内存别名、读写范围和显式同步。HFusion 中按异步任务建模的操作使用逻辑任务队列。HIVM 使用源操作给出的管线、flag 和 barrier。一个源操作可以对应多个 Core 动作，例如 `mmadL1` 的分阶段执行。源级 trace 用 `part` 标出这些动作。[向量访存转换](../lib/hivm/mlir_vector.ml) · [Core 调度实现](../lib/race_schedule.ml)
@@ -39,7 +41,9 @@ Core 转换保留调度所需的标量计算、循环和分支、函数调用、
 
 当向量函数生成间接访存所用的掩码和偏移时，转换器将这些指令编译为 `Core_lang.Device.program`。每条候选 trace 使用相应顺序下的寄存器值和内存值计算实际访问的位区间。源级 trace 用原始 `func.call` 的位置标识向量任务的提交和完成。[向量函数与间接访存转换](../lib/hivm/mlir_indexed_kernel.ml) · [访问区间和回放](../lib/device_races.ml)
 
-`complete` 表示完成了当前模型对给定输入的分析。遇到尚未建模的操作或调度所需的数据时，分析保留可执行的前缀。找到能够按两种相反顺序回放的冲突端点时返回 `race`；缺少这样的前缀时返回 `unknown` 并给出原因。
+`complete` 表示已完成当前模型对给定输入的分析。返回的每条竞争前缀都能延伸到所有流结束、所有已提交任务完成。同一竞争对的两个方向分别满足这个条件。遇到未建模的操作、缺少调度所需的数据或求解超时时，返回 `unknown` 并给出原因。
+
+具体输入的循环超过 64 轮时，BFS 和 SMT 入口都在具体事件及其依赖上求解竞争访问和前缀轮数。普通 Core 转换先检查有限前缀，必要时扩大展开范围。设备转换执行原始启动以取得动态访存。两个方向分别选择一条合法后续并回放到程序结束。报告用 `trace_extent: "program_end"` 标识完整 trace，`prefix_rounds` 给出包含两次目标访问的轮数。嵌套循环取覆盖前缀所需的各层轮数的最大值。原始输入决定循环边界、循环后的指令和内存地址。无法完成执行或求解超时会返回 `unknown` 和原因。[具体循环调度](../lib/concrete_schedule.ml) · [源码事件求解](../lib/loop_trace.ml)
 
 全量测试直接读取目录登记的 84 个 benchmark 在两个 IR 层的源文件，校验源码摘要，分别运行 BFS 和 SMT，回放 Core 前缀，并逐事件核对源函数、操作路径、调用和完成顺序。运行以下命令，环境变量 `BISHENGIR_OPT` 需指向本机的编译器可执行文件。[测试脚本](../scripts/check_mlir_matrix.py) · [启动输入](../scripts/mlir_benchmark_launch.py) · [逐项结果](../benchmarks/results/scheduler-mlir-matrix.csv)
 

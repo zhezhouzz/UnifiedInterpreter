@@ -45,13 +45,13 @@ let run argv =
       let source = In_channel.with_open_bin file In_channel.input_all in
       let module_ast = Hivm_trace.Module_ast.parse ?syntax:!syntax ~file source in
       let configuration = Option.map Yojson.Safe.from_file !launch in
-      let lowered = Hivm_trace.lower_mlir ?entry:!entry ?configuration module_ast in
+      let lowered = Hivm_trace.Source.lower_mlir ?entry:!entry ?configuration module_ast in
       (match !replay with
        | Some path -> Printf.printf "%s replayed=%d\n" file
-           (Hivm_trace.replay_mlir lowered (Yojson.Safe.from_file path))
+           (Hivm_trace.Source.replay_mlir lowered (Yojson.Safe.from_file path))
        | None -> emit file (match !project with
-           | Some path -> Hivm_trace.project_mlir lowered (Yojson.Safe.from_file path)
-           | None -> Hivm_trace.analyze_mlir ~backend:mode ~hivm:!hivm lowered))
+           | Some path -> Hivm_trace.Source.project_mlir lowered (Yojson.Safe.from_file path)
+           | None -> Hivm_trace.Source.analyze_mlir ~timeout_ms:!timeout ~backend:mode ~hivm:!hivm lowered))
   | _ ->
       if !entry<>None || !launch<>None || !replay<>None || !project<>None || !syntax<>None then
         raise (Arg.Bad "MLIR options require race mlir FILE");
@@ -77,7 +77,7 @@ let run argv =
              | Some path ->
                  let pairing = Hivm_trace.registered_file ~root:directory catalog name path in
                  (match method_ with
-                  | Concrete b -> Ir_scheduler.generate ?n:!n ~kv_heads:!heads ~timeout_ms:!timeout ~name
+                  | Concrete b -> Ir_scheduler.Catalog.generate ?n:!n ~kv_heads:!heads ~timeout_ms:!timeout ~name
                       (match b with Search -> Bfs | Solve -> Smt) (Device pairing)
                   | Symbolic -> Hivm_trace.to_json (Hivm_trace.generate ?n:!n ~kv_heads:!heads
                                                    ~timeout_ms:!timeout method_ pairing)) in

@@ -1,4 +1,4 @@
-# 在 HFusion AST 上使用 scheduler trace
+# HFusion 单函数张量模型的解释器 trace
 
 本文介绍单函数张量 AST 的 `hfusion-race-1` 接口。直接传入解析所得的 OCaml 模块 AST 时，使用支持跨函数调用和多个 region 的模块接口。[两层共用的模块接口](scheduler-traces.md)
 
@@ -14,12 +14,12 @@
 
 ## 2. scheduler 返回的 trace 结构
 
-报告包含 `entry`、启动实参、`n`、`status` 和 `races`。JSON 格式为 `hfusion-race-1`，启动实参在 `inputs` 中。具体分析的 `complete` 表示已列出该输入上所有可以交换完成顺序的冲突指令对。符号分析返回 `race`、`no-race` 或带原因的 `unknown`。每个竞争包含 `first`、`second` 和两条合法前缀。两次执行使用相同的输入和初始内存。
+报告包含 `entry`、启动实参、`n`、`status` 和 `races`。JSON 格式为 `hfusion-race-1`，启动实参在 `inputs` 中。具体分析的 `complete` 表示已列出该输入上所有可以交换完成顺序的冲突指令对。符号分析返回 `race`、`no-race` 或带原因的 `unknown`。两次执行使用相同的输入和初始内存。带有 `trace_extent: "program_end"` 的报告给出两条完整 trace，`prefix_rounds` 给出覆盖竞争所需的轮数。回放时使用原始输入并执行整个列表。其他竞争报告给出两条在第二个目标事件处结束的前缀。
 
 | 字段 | 如何使用 |
 | --- | --- |
-| `forward` | `first` 先完成，最后一个事件是 `second`。 |
-| `reverse` | `second` 先完成，最后一个事件是 `first`。 |
+| `forward` | `first` 在 `second` 之前完成。 |
+| `reverse` | `second` 在 `first` 之前完成。 |
 | `event.stream`、`event.entry` | 确定程序实例和函数。 |
 | `event.path`、`event.opcode` | `resolve program path` 返回原 AST 指令。路径是函数体及嵌套 region 中从零开始的指令下标。 |
 | `event.iterations` | 从外到内的循环轮次，各自从零开始计数。 |
@@ -30,7 +30,7 @@
 1. 为每个实例保留程序位置、循环轮次和 SSA 环境。共享分配对应同一份内存。执行第二条前缀前，重新建立初始状态。
 2. 读取下一个 trace 事件，选择它指定的实例。沿该实例的正常控制流执行，遇到 `memref.alloc` 时自行分配缓冲区并绑定 SSA 结果，trace 游标保持原位。当 `scheduling_point prepared ~stream ~path` 为真时，核对当前路径、opcode 和循环轮次，执行整条指令，再消费该事件。
 3. `bufferization.to_tensor` 创建的是可引用原内存的张量视图。带 `restrict` 时，建立别名约束本身是一个调度点。使用该视图的张量指令才读取数据。`memref.copy` 在同一条指令内读取源视图并写入目标视图，`bufferization.materialize_in_destination` 写入目标视图。普通索引计算和只处理自有张量的计算由解释器自行执行。[指令执行函数](../attention/runner.ml) · [缓冲区与张量的内存语义](../rocq/HFusion/Semantics/Memory.v)
-4. 前缀结束时保留所有实例的当前位置和内存。如果需要完整执行，可继续使用任意合法调度，直到程序结束。`replay` 可以检查单条前缀，`verify_race` 可以核对两条前缀及其竞争端点。[接口](../lib/hfusion/hfusion_trace.mli)
+4. 前缀结束时保留所有实例的当前位置和内存。两个方向各自至少有一种能执行到程序结束的后续调度。`replay` 可以检查单条前缀，`verify_race` 可以核对两条前缀及其竞争端点。[接口](../lib/hfusion/hfusion_trace.mli)
 
 ## 4. 例子
 
