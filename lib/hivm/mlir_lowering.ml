@@ -16,6 +16,7 @@ type source = {
 }
 
 type t = {
+  source_input : (M.t * Yojson.Safe.t) option;
   ast_digest : string;
   launch : Launch.t;
   program : C.program;
@@ -1037,7 +1038,7 @@ let lower_with_launch ?(allow_prefix=false) ast (launch : Launch.t) =
   let program = C.{streams;scalar_eval=(fun _ id -> scalars.(id));
                    footprint=(fun _ _ id -> snd accesses.(id));
                    block_edge=(fun source _ target _ -> List.mem (source,target) edges)} in
-  {ast_digest=ast.digest;launch;program;sources=validate_sources ast launch (List.concat sources);
+  {source_input=None;ast_digest=ast.digest;launch;program;sources=validate_sources ast launch (List.concat sources);
    operation_names=Array.map fst accesses}
 
 let lower ?entry ?configuration ast =

@@ -6,7 +6,7 @@ val report_for_launch : ?entry:string -> ?configuration:Yojson.Safe.t -> ?timeou
   stage -> Unified_interpreter.Precedence.backend -> Hivm_module.t -> Yojson.Safe.t
 val lower_mlir : ?entry:string -> ?configuration:Yojson.Safe.t -> ?allow_prefix:bool ->
   Hivm_module.t -> lowered_mlir
-val analyze_mlir : ?timeout_ms:int -> backend:Unified_interpreter.Bug_traces.backend ->
+val analyze_mlir : ?timeout_ms:int -> ?symbolic_prefix:bool -> backend:Unified_interpreter.Bug_traces.backend ->
   ?hivm:bool -> lowered_mlir -> Yojson.Safe.t
 val project_mlir : lowered_mlir -> Yojson.Safe.t -> Yojson.Safe.t
 val replay_mlir : lowered_mlir -> Yojson.Safe.t -> int

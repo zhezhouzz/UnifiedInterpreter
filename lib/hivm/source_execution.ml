@@ -17,7 +17,7 @@ let dims xs=Array.of_list (List.map Z.to_int xs)
 let env_bind env ids vs=List.iter2 (fun (id,_) v->env.(id)<-v) ids vs
 let integer = function M.Integer n->n | _->invalid_arg "expected integer type"
 
-let run_module ?choose ?(quiet=false) ?trace ?on_read ?(max_steps=10_000_000) ~stage ~launch ast =
+let run_module ?choose ?(quiet=false) ?trace ?on_read ?on_bounds ?(max_steps=10_000_000) ~stage ~launch ast =
   if max_steps<=0 then invalid_arg "step budget must be positive";
   let configuration=match launch with
     | `Assoc fields -> (match List.assoc_opt "stage" fields with Some (`String x) when x<>stage ->
@@ -59,7 +59,8 @@ let run_module ?choose ?(quiet=false) ?trace ?on_read ?(max_steps=10_000_000) ~s
           ~record_choices:false ~observe_accesses:false ~on_finish:(fun ()->incr tasks) ~copy_bank:(fun _->false)
           ~on_blocked:(fun reason->status:=Blocked [reason]) device.program device.memory device.bindings))).memory
       with Budget site->status:=Step_limit site;device.memory
-         | Device_eval.Invalid_indirect_address i->status:=Invalid_memory (Printf.sprintf "%s: indirect index %d" !current i);device.memory in
+         | Device_eval.Invalid_indirect_address i->Option.iter (fun f->f ()) on_bounds;
+             status:=Invalid_memory (Printf.sprintf "%s: indirect index %d" !current i);device.memory in
     {status= !status;steps= !steps;tasks= !tasks;returned=Array.make (List.length launch.streams) [];
      memory=List.map (fun (s:Launch.storage)->s.name,Hashtbl.find memory (Device_value.Allocation s.name)) launch.storages})
   else
@@ -367,6 +368,7 @@ let run_module ?choose ?(quiet=false) ?trace ?on_read ?(max_steps=10_000_000) ~s
   let status=try match schedule (fun ()->match choose with
     | None->Q.drive state launch.capacity tasks entries | Some select->Q.guided state launch.capacity tasks select entries) with
     | Q.Returned->Finished | Deadlock sites->Blocked sites
-    with Memory_fault reason->Invalid_memory (!current^": "^reason) | Budget site->Step_limit site
+    with Out_of_bounds reason->Option.iter (fun f->f ()) on_bounds;Invalid_memory (!current^": "^reason)
+       | Memory_fault reason->Invalid_memory (!current^": "^reason) | Budget site->Step_limit site
        | Invalid_argument reason->invalid_arg (!current^": "^reason) in
   {status;steps= !steps;tasks= !tasks;returned;memory=Array.to_list (Array.map (fun b->b.name,b.data) banks)}

@@ -48,10 +48,11 @@ let bits elem s = match elem,s with
   | _,C.VFloat x -> float_bits elem x
   | _ -> invalid_arg "invalid stored value"
 exception Memory_fault of string
+exception Out_of_bounds of string
 let address b offset =
   let pos=b.base+offset*width b.element in
   if pos<0 || pos>Bytes.length b.storage.data-width b.element then
-    raise (Memory_fault (Printf.sprintf "%s byte %d outside %d bytes" b.storage.name pos (Bytes.length b.storage.data)));
+    raise (Out_of_bounds (Printf.sprintf "%s byte %d outside %d bytes" b.storage.name pos (Bytes.length b.storage.data)));
   pos
 let position b indices =
   let rank=Array.length b.shape in
@@ -59,7 +60,7 @@ let position b indices =
     | [] when axis=rank -> offset
     | i::tail when axis<rank ->
         let n=b.shape.(axis) in
-        if i<0 || i>=n then raise (Memory_fault (Printf.sprintf "%s index %d outside dimension %d" b.storage.name i n));
+        if i<0 || i>=n then raise (Out_of_bounds (Printf.sprintf "%s index %d outside dimension %d" b.storage.name i n));
         walk (axis+1) (offset+i*b.strides.(axis)) tail
     | _->invalid_arg "index rank mismatch" in
   walk 0 0 indices

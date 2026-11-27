@@ -519,10 +519,10 @@ let generate ?timeout_ms model =
     raise (Race_solve.Inconclusive "no complete continuation was verified for a device race")) rows;
   rows
 
-let analyze ?timeout_ms model =
+let analyze ?timeout_ms ?(solve_loop=false) model =
   match model.blocked_reason with
   | Some why -> Concrete_schedule.Unresolved why,[]
-  | None when not (Array.exists (fun n -> n>Loop_trace.threshold) model.rounds) ->
+  | None when not solve_loop && not (Array.exists (fun n -> n>Loop_trace.threshold) model.rounds) ->
       (try Concrete_schedule.All_pairs,generate ?timeout_ms model
        with Race_solve.Inconclusive why -> Unresolved why,[])
   | None ->

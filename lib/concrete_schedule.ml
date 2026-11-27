@@ -27,7 +27,7 @@ let select ?timeout_ms ?partial schedule parents validate =
   Loop_trace.choose ?timeout_ms ?partial ~parents ~iterations:(iteration_counts schedule) (Array.to_list accesses)
     (fun graph i j -> validate graph accesses.(i).node accesses.(j).node)
 
-let run ?(timeout_ms=5000) ?target schedule =
+let run ?(timeout_ms=5000) ?target ?(allow_cutoff=false) schedule =
   let rounds=iteration_counts schedule in
   let witness a b f r =
     let pair=Race_report.pair_at schedule a b in
@@ -37,7 +37,7 @@ let run ?(timeout_ms=5000) ?target schedule =
   let complete order required a b =
     let f=required @ [a;b] and r=required @ [b;a] in
     f,witness a b (Loop_trace.complete order f) (Loop_trace.complete order r) in
-  if schedule.boundaries<>[] || schedule.cutoffs<>[] then
+  if schedule.boundaries<>[] || (schedule.cutoffs<>[] && not allow_cutoff) then
     Loop_trace.Incomplete "a complete continuation requires the entire launch"
   else if schedule.blocked_control then Loop_trace.No_race
   else match Race_search.precedence schedule with
@@ -76,15 +76,18 @@ let run ?(timeout_ms=5000) ?target schedule =
       (try match Race_solve.check enc [] with
        | None -> Loop_trace.Incomplete "the launch has no legal complete execution"
        | Some _ ->
-           let rec select = function
-             | [] -> Loop_trace.No_race
+           let rec select best = function
+             | [] -> (match best with None->Loop_trace.No_race | Some (k,w)->Loop_trace.Found (k,w))
              | p::rest -> match Race_solve.complete_direction enc rounds p.a p.b with
-               | None -> select rest
+               | None -> select best rest
                | Some f -> match Race_solve.complete_direction enc rounds p.b p.a with
-                 | None -> select rest
-                 | Some r -> Loop_trace.Found (max (round_through p.b f) (round_through p.a r),
-                                                witness p.a p.b f r) in
-           select (conflict_pairs schedule.nodes)
+                 | None -> select best rest
+                 | Some r ->
+                     let k=max (round_through p.b f) (round_through p.a r) in
+                     let best=match best with Some (old,_) when old<=k -> best
+                       | _ -> Some (k,witness p.a p.b f r) in
+                     select best rest in
+           select None (conflict_pairs schedule.nodes)
        with Race_solve.Inconclusive reason -> Loop_trace.Incomplete reason)
 
 type coverage = All_pairs | Full_trace of int | Race_free | Unresolved of string
@@ -133,7 +136,25 @@ let from_probe ~timeout_ms ~capacity backend program probe =
       | No_race when bound<=max_int/2 ->
           let bound=2*bound in concrete_prefix bound (compile ~loop_bound:bound ~capacity program)
       | No_race | Incomplete _ -> finish current in
-    concrete_prefix (Loop_trace.threshold+1) probe
+    match backend with
+    | Bug_traces.Search ->
+        let rec search bound =
+          if bound>=Loop_trace.threshold+1 then concrete_prefix (Loop_trace.threshold+1) probe
+          else
+            let current=compile ~loop_bound:bound ~capacity program in
+            match Race_search.precedence current with
+            | Some parents when current.boundaries=[] && current.cutoffs<>[] ->
+                (match select ~timeout_ms ~partial:true current parents (fun graph a b ->
+                   Some (Precedence.prefix graph a b,(current.nodes.(a).id,current.nodes.(b).id))) with
+                 | Found (k,pair) ->
+                     let schedule,coverage,races=finish ~target:pair probe in
+                     (match coverage with Full_trace n when n=k -> schedule,coverage,races
+                      | _ -> let coverage,races=analyze ~timeout_ms backend schedule in schedule,coverage,races)
+                 | No_race -> search (2*bound)
+                 | Incomplete _ -> concrete_prefix (Loop_trace.threshold+1) probe)
+            | _ -> concrete_prefix (Loop_trace.threshold+1) probe in
+        search 1
+    | Solve -> concrete_prefix (Loop_trace.threshold+1) probe
 
 let program ?(timeout_ms=5000) ~capacity backend program =
   from_probe ~timeout_ms ~capacity backend program (probe ~capacity program)

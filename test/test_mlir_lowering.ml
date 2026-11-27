@@ -77,7 +77,16 @@ let issue316 () =
       assert (field "status" core=`String "complete");
       assert (List.length (races core)=count && H.replay_mlir lowered core=2*count);
       let hivm = H.analyze_mlir ~backend ~hivm:true lowered in
-      assert (List.length (races hivm)=count);
+      if backend=Search && stage="hivm" && Filename.basename file="issue316_missing_ready_hivm.mlir" then (
+        assert (field "status" hivm=`String "deadlock");
+        let terminal=field "trace" hivm in
+        let events=J.to_list (field "events" terminal) |> List.map Dispatch.decode in
+        assert (events<>[]);
+        let trace=H.Execution.Delivery.make events (Terminal "deadlock") `Null in
+        let result=H.Execution.execute_trace ~stage:H.Source.HIVM ~launch:configuration ast trace in
+        assert (match result.status with Blocked (_::_)->true | _->false));
+      let expected=if backend=Search then min 1 count else count in
+      assert (List.length (races hivm)=expected);
       check_locations ast hivm
     ) Bug_traces.[Search;Solve]
   ) ["hivm","../examples/kernels/issue316_vexp_hivm.mlir",0;
@@ -137,11 +146,13 @@ let nested_async_calls () =
   List.iter (fun backend ->
     let source=H.analyze_mlir ~hivm:true ~backend lowered in
     let core=H.analyze_mlir ~backend lowered in
-    assert (source=H.project_mlir lowered core);
+    let projected=H.project_mlir lowered core in
+    (match backend with Solve->assert (source=projected)
+     | Search->assert (field "analysis" source=`String "loop-smt" && field "prefix_rounds" source=`Int 1));
     let method_=match backend with Bug_traces.Search -> Precedence.Bfs | Solve -> Smt in
     let from_ast=Ir_scheduler.generate_mlir ~entry:"main" ~configuration HFusion method_ ast in
     assert (source=from_ast);
-    assert (List.length (races source)=6 && H.replay_mlir lowered core=12);
+    assert (List.length (races source)=(if backend=Search then 1 else 6) && H.replay_mlir lowered core=12);
     check_locations ast source;
     let identity event =
       assert (field "entry" event=`String "@inner" && field "iterations" event=`List []);
@@ -153,7 +164,7 @@ let nested_async_calls () =
           field "path" caller,field "iterations" caller
       | _ -> failwith "expected both source calls" in
     let ids=List.concat_map (fun race -> List.map (fun k -> identity (field k race)) ["first";"second"]) (races source) in
-    assert (List.length (List.sort_uniq compare ids)=4)
+    assert (List.length (List.sort_uniq compare ids)=(if backend=Search then 2 else 4))
   ) Bug_traces.[Search;Solve]
 
 let reject_foreign_trace () =
@@ -557,8 +568,40 @@ let large_device_race () =
       field "stream" e=`Int b && field "iterations" e=`List [`Int 69]) events)) [0;1])
     ["forward";"reverse"]
 
+let symbolic_prefix_execution () =
+  let check rounds stage op barrier expected =
+    let ast=parse_inline "prefix-execution.mlir" (Printf.sprintf {|func.func @main(%%src: memref<1xi32>, %%dst: memref<1xi32>, %%n: index) {
+      %%z = arith.constant 0 : index
+      %%one = arith.constant 1 : index
+      scf.for %%i = %%z to %%n step %%one {
+        %s
+        %s
+      }
+      return
+    }|} op barrier) in
+    let p=H.lower_mlir ~configuration:(`Assoc ["stage",`String stage;"arguments",`List [`Null;`Null;`Int rounds]]) ast in
+    let report=H.analyze_mlir ~backend:Search ~hivm:true p in
+    assert (field "analysis" report=`String "loop-smt" && field "graph_loop_bound" report=`Int expected);
+    if expected=0 then assert (field "status" report=`String "no-race")
+    else (
+      assert (field "prefix_rounds" report=`Int expected);
+      let race=List.hd (races report) in
+      let check_order name a b=
+        let trace=J.to_list (field name race) in
+        assert (List.length trace=2*rounds);
+        assert (List.filter (fun e->e=field a race || e=field b race) trace=[field a race;field b race]);
+        assert (List.exists (fun e->field "iterations" e=`List [`Int (rounds-1)]) trace) in
+      check_order "forward" "first" "second";check_order "reverse" "second" "first") in
+  let copy="memref.copy %src, %dst : memref<1xi32> to memref<1xi32>" in
+  List.iter (fun rounds->
+    let expected=if rounds<2 then 0 else 2 in
+    check rounds "hfusion" copy "" expected;
+    check rounds "hfusion" copy "hfusion.barrier" 0;
+    check rounds "hivm" "hivm.hir.load ins(%src : memref<1xi32>) outs(%dst : memref<1xi32>)" "" expected)
+    [0;1;2;64;65;128]
+
 let () =
-  large_loop_traces (); late_source_race (); large_device_race ();
+  large_loop_traces (); late_source_race (); large_device_race (); symbolic_prefix_execution ();
   examples (); issue316 (); issue316_barrier_scope (); nested_async_calls (); reject_foreign_trace (); carried_views (); dynamic_slices (); indexed (); masked_vector (); scheduled_mask ();
   hfusion_indirect (); cross_flag (); generic_matrix (); unsupported (); unsupported_device_geometry ();
   counter_and_local_snapshot (); debug_conflict (); dense_float_bits (); ub_scalar_readback ()

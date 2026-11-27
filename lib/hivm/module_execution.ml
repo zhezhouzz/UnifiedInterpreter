@@ -6,7 +6,7 @@ module J = Yojson.Safe.Util
 
 let run_builtin = Source_execution.run_module
 
-let next_trace ?db_path ?timeout_ms ?max_steps ~stage ~launch ast =
+let next_trace ?db_path ?timeout_ms ?max_steps ?(backend=Precedence.Bfs) ~stage ~launch ast =
   let configuration = Mlir_trace.configuration_for stage launch in
   let stage_name = Mlir_trace.stage_name stage in
   let bound = Mlir_launch.bind ~configuration ast in
@@ -21,7 +21,8 @@ let next_trace ?db_path ?timeout_ms ?max_steps ~stage ~launch ast =
   let local = match J.member "local_initial" configuration with `Null -> `List [] | rows -> rows in
   let identity = `List [Hivm_module.execution_json ast; `String stage_name; Mlir_launch.inputs bound;
                         `List (List.map stream bound.streams); `Int bound.capacity; edges; local] in
-  let analyze ~timeout_ms = Mlir_trace.report_for_launch ~configuration ~timeout_ms stage Precedence.Bfs ast in
+  let identity=match backend with Precedence.Smt->identity | Bfs->`List [`String "bfs-terminal";identity] in
+  let analyze ~timeout_ms = Mlir_trace.report_for_launch ~configuration ~timeout_ms stage backend ast in
   let execute choose =
     (Source_execution.run_module ~quiet:true ~choose ?max_steps ~stage:stage_name ~launch ast).status in
   Delivery.next_trace ?db_path ?timeout_ms ~identity ~analyze ~execute ()
@@ -33,8 +34,8 @@ let execute_trace ?max_steps ?trace ?on_read ~stage ~launch ast schedule =
   verify result.status;
   result
 
-let run_scheduled ?db_path ?timeout_ms ?max_steps ?trace ?on_read ~stage ~launch ast =
-  let schedule = next_trace ?db_path ?timeout_ms ?max_steps ~stage ~launch ast in
+let run_scheduled ?db_path ?timeout_ms ?max_steps ?backend ?trace ?on_read ~stage ~launch ast =
+  let schedule = next_trace ?db_path ?timeout_ms ?max_steps ?backend ~stage ~launch ast in
   schedule, execute_trace ?max_steps ?trace ?on_read ~stage ~launch ast schedule
 
 let run_module ?db_path ?timeout_ms ?max_steps ?trace ?on_read ~stage ~launch ast =

@@ -10,7 +10,12 @@ type lowered_mlir = Core_mlir of Mlir.t | Device_mlir of Mlir_device.t
 let lower_mlir ?entry ?configuration ?(allow_prefix=true) ast =
   let launch = Mlir.Launch.bind ?entry ?configuration ast in
   if Mlir_device.required launch then Device_mlir (Mlir_device.lower_with_launch ast launch)
-  else Core_mlir (Mlir.lower_with_launch ~allow_prefix ast launch)
+  else
+    let lowered=Mlir.lower_with_launch ~allow_prefix ast launch in
+    let configuration=Option.value configuration ~default:(`Assoc []) in
+    let fields=J.to_assoc configuration in
+    let fields=match entry with None->fields | Some e->("entry",`String e)::List.remove_assoc "entry" fields in
+    Core_mlir {lowered with source_input=Some (ast,`Assoc fields)}
 
 let mlir_schedule ?pair_limit (lowered : Mlir.t) =
   Race_report.prefix_schedule ?pair_limit ~capacity:lowered.launch.capacity lowered.program
@@ -75,7 +80,7 @@ let source_event_order (lowered : Mlir.t) =
     (if Array.length graph.order=Array.length parents then schedule.pairs else []) in
   Array.of_list (List.rev !visible),pairs
 
-let core_mlir_report ~coverage ~(backend : Bug_traces.backend) ~hivm (lowered : Mlir.t) (schedule : Race_report.Schedule.t) races =
+let core_mlir_report ?(extend=Fun.id) ~coverage ~(backend : Bug_traces.backend) ~hivm (lowered : Mlir.t) (schedule : Race_report.Schedule.t) races =
   let coverage = match schedule.boundaries with
     | [] -> coverage
     | reasons ->
@@ -87,7 +92,7 @@ let core_mlir_report ~coverage ~(backend : Bug_traces.backend) ~hivm (lowered : 
   if hivm then (
     let pipes,source = mlir_projection lowered in
     let races = export_races ~full:(Concrete_schedule.full coverage) ~pipes ~entries ~source schedule races in
-    to_json {benchmark=name;streams=entries;n=None;inputs;status;races})
+    to_json {benchmark=name;streams=entries;n=None;inputs;status;races=List.map extend races})
   else
     let index = Race_report.index schedule in
     `Assoc (["format",`String "core-race-1";"benchmark",`String name;
@@ -132,14 +137,132 @@ let device_mlir_report ~coverage ~(backend : Bug_traces.backend) ~hivm (lowered 
             "inputs",inputs;"address_unit",`String "bit";"events",Device_races.events model;
             "sources",`List sources;"races",`List races] @ details)
 
-let analyze_mlir ?(timeout_ms=5000) ~backend ?(hivm=false) = function
+let loop_prefix ~timeout_ms (p:Mlir.t) =
+  let module P=Symbolic_loop_prefix in
+  match p.source_input,p.launch.hfusion,p.launch.streams with
+  | Some (ast,configuration),hfusion,[stream] ->
+    (try
+       let plan=P.summarize ~timeout_ms ~hfusion ast stream in
+       let extend race =
+           let sites=List.mapi (fun index (path,opcode)->
+             Dispatch.site stream.entry path opcode,(index,{path;opcode;part=None})) plan.paths
+             |> List.to_seq |> Hashtbl.of_seq in
+           let dispatch (event:Hivm_event.event)=
+             let site=Dispatch.site stream.entry event.location.origin.path event.location.origin.opcode in
+             let phase,pipe=match event.phase with Async_submit _->Dispatch.Submit,"HFUSION_ASYNC"
+               | Async_complete _->Complete,"HFUSION_ASYNC" | Execute _->Execute,"S"
+               | Submit [t]->Submit,Core_lang.Device.pipe_name t.pipe
+               | Complete t->Complete,Core_lang.Device.pipe_name t.pipe
+               | _->invalid_arg "unexpected symbolic loop event" in
+             let occurrence=match event.location.iterations with [n]->n | _->invalid_arg "unexpected iteration" in
+             {Dispatch.stream=stream.id;site;pipe;occurrence;phase} in
+           let source_event (e:Dispatch.event)=
+             let index,origin=Hashtbl.find sites e.site in
+             let id=e.occurrence*List.length plan.paths+index in
+             let phase,action=match e.phase with
+               | Submit when hfusion->Async_submit id,Compute | Complete when hfusion->Async_complete id,Compute
+               | Submit->Submit [{id;pipe=Mlir_launch.pipe e.pipe}],Compute
+               | Complete->Complete {id;pipe=Mlir_launch.pipe e.pipe},Compute | Execute->Execute None,Barrier in
+             {location={stream=stream.id;entry=stream.entry;origin;iterations=[e.occurrence];calls=[]};phase;action} in
+           let direction prefix=
+             let planned=List.map dispatch prefix in
+             let remaining=ref planned and events=ref [] in
+             let choose enabled=
+               let event=match !remaining with []->List.hd enabled
+                 | e::rest when List.mem e enabled->remaining:=rest;e
+                 | _->raise (P.Unresolved "prefix disabled during source execution") in
+               events:=source_event event::!events;event in
+             let result=Source_execution.run_module ~quiet:true ~choose ~stage:(if hfusion then "hfusion" else "hivm")
+               ~launch:configuration ast in
+             if !remaining<>[] || result.status<>Finished then raise (P.Unresolved "source execution did not finish");
+             List.rev !events in
+           {first=source_event (dispatch race.first);second=source_event (dispatch race.second);
+            forward=direction race.forward;reverse=direction race.reverse} in
+       Some (Option.value plan.minimum ~default:0),extend
+     with P.Unsupported->None,Fun.id)
+  | _->None,Fun.id
+
+let fault_report ~timeout_ms (p:Mlir.t) schedule =
+  Option.bind p.source_input (fun (ast,launch)->
+    Option.map (fun (fault,order)->
+      let pipes,source=mlir_projection p in
+      let project=project_node ~pipes ~entries:(mlir_entries p) ~source schedule in
+      let deadline=Unix.gettimeofday ()+.float timeout_ms/.1000. in
+      let rec reproduce cursor=
+      let select,next=Source_schedules.Trace_delivery.branch_cursor cursor in
+      let ranks=Hashtbl.create 32 in
+      List.iteri (fun index node->Option.iter (fun event->
+        let loc=event.location in
+        let site=Dispatch.site loc.entry loc.origin.path loc.origin.opcode in
+        let phase=match event.phase with Submit _|Async_submit _->Dispatch.Submit
+          | Complete _|Async_complete _->Complete | Execute _->Execute in
+        let key=loc.stream,site,phase in
+        let positions=match Hashtbl.find_opt ranks key with Some q->q | None->
+          let q=Queue.create () in Hashtbl.add ranks key q;q in
+        Queue.add index positions) (project schedule.nodes.(node))) order;
+      let positions (e:Dispatch.event)=Hashtbl.find_opt ranks (e.stream,e.site,e.phase) in
+      let rank e=Option.bind (positions e) Queue.peek_opt |> Option.value ~default:max_int in
+      let events=ref [] and bounds=ref false in
+      let choose options=
+        if timeout_ms>0 && Unix.gettimeofday ()>=deadline then
+          raise (Race_solve.Inconclusive "source error trace search timed out");
+        let event=select (List.stable_sort (fun a b->Int.compare (rank a) (rank b)) options) in
+        Option.iter (fun q->ignore (Queue.take_opt q)) (positions event);
+        events:=Dispatch.encode event::!events;event in
+      let result=Source_execution.run_module ~quiet:true ~choose ~on_bounds:(fun ()->bounds:=true)
+        ~stage:(if p.launch.hfusion then "hfusion" else "hivm") ~launch ast in
+      match fault,result.status with
+        | `Deadlock,Blocked sites->"deadlock",`List (List.map (fun s->`String s) sites),List.rev !events
+        | `Memory,Invalid_memory why when !bounds->"invalid-memory",`String why,List.rev !events
+        | _->match next () with Some path->reproduce path | None->
+            raise (Race_solve.Inconclusive "SMT error trace did not reproduce the predicted source error") in
+      let status,detail,events=reproduce [] in
+      let base=core_mlir_report ~coverage:Race_free ~backend:Search ~hivm:true p schedule [] in
+      `Assoc (["analysis",`String "terminal-fault-smt";"status",`String status;"detail",detail;
+               "trace",`Assoc ["extent",`String "terminal";"terminal",`String status;
+                              "events",`List events]] @ List.remove_assoc "status" (J.to_assoc base)))
+      (Race_solve.terminal_fault ~timeout_ms schedule))
+
+let analyze_mlir ?(timeout_ms=5000) ?(symbolic_prefix=true) ~backend ?(hivm=false) = function
   | Core_mlir p ->
-      let schedule,coverage,races=Concrete_schedule.program ~timeout_ms ~capacity:p.launch.capacity backend p.program in
-      core_mlir_report ~coverage ~backend ~hivm p schedule races
+      let loop= symbolic_prefix && hivm && backend=Bug_traces.Search &&
+        List.exists (fun (s:Core_lang.stream)->Core_lang.contains_loop s.body) p.program.streams in
+      if loop then (
+        let report_unknown why=
+          to_json {benchmark=String.concat "," (List.map snd (mlir_entries p));streams=mlir_entries p;
+            inputs=mlir_inputs p.ast_digest p.launch;n=None;status=Unknown why;races=[]} in
+        try
+        let loop_bound,extend=loop_prefix ~timeout_ms p in
+        let schedule=Concrete_schedule.compile ?loop_bound ~capacity:p.launch.capacity p.program in
+        match fault_report ~timeout_ms p schedule with Some report->report | None->
+        let coverage,races=match Concrete_schedule.run ~timeout_ms ~allow_cutoff:(Option.is_some loop_bound) schedule with
+          | Found (k,_) when Option.fold ~none:false ~some:((<>) k) loop_bound ->
+              Concrete_schedule.Unresolved "symbolic and concrete race prefix lengths differ",[]
+          | No_race when Option.fold ~none:false ~some:((<) 0) loop_bound ->
+              Concrete_schedule.Unresolved "symbolic race absent from bounded event graph",[]
+          | Found (k,race)->Concrete_schedule.Full_trace k,[race]
+          | No_race->Concrete_schedule.Race_free,[]
+          | Incomplete why->Concrete_schedule.Unresolved why,[] in
+        let report=core_mlir_report ~extend ~coverage ~backend ~hivm p schedule races in
+        `Assoc (("analysis",`String "loop-smt")::("graph_loop_bound",
+          Option.fold ~none:`Null ~some:(fun n->`Int n) loop_bound)::J.to_assoc report)
+        with Race_solve.Inconclusive why | Symbolic_loop_prefix.Unresolved why->report_unknown why)
+      else
+        let schedule,coverage,races=Concrete_schedule.program ~timeout_ms ~capacity:p.launch.capacity backend p.program in
+        core_mlir_report ~coverage ~backend ~hivm p schedule races
   | Device_mlir p ->
+      let rec contains_loop code=List.exists (function
+        | Core_lang.Device.For _ -> true
+        | Issue (_,_,body) -> contains_loop body
+        | If (_,yes,no) -> contains_loop yes || contains_loop no
+        | _ -> false) code in
+      let solve_loop=symbolic_prefix && hivm && backend=Bug_traces.Search &&
+        (List.exists (fun (s:Core_lang.Device.stream)->contains_loop s.body) p.program.streams ||
+         Mlir_device.contains p.launch (fun op->List.mem op.opcode ["scf.for";"scf.while";"affine.for"])) in
       let model=mlir_device_model ~backend p in
-      let coverage,races=Device_races.analyze ~timeout_ms model in
-      device_mlir_report ~coverage ~backend ~hivm p model races
+      let coverage,races=Device_races.analyze ~timeout_ms ~solve_loop model in
+      let report=device_mlir_report ~coverage ~backend ~hivm p model races in
+      if solve_loop then `Assoc (("analysis",`String "loop-smt")::J.to_assoc report) else report
 
 type stage = HFusion | HIVM
 let stage_name = function HFusion -> "hfusion" | HIVM -> "hivm"

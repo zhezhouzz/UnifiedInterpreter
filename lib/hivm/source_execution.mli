@@ -21,5 +21,6 @@ val run_module :
   ?quiet:bool ->
   ?trace:(int -> string -> unit) ->
   ?on_read:(int -> string -> Execution_value.view -> unit) ->
+  ?on_bounds:(unit -> unit) ->
   ?max_steps:int ->
   stage:string -> launch:Yojson.Safe.t -> Hivm_module.t -> result

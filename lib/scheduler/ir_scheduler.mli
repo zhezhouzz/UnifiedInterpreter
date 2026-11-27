@@ -10,9 +10,9 @@ module Delivery : sig
   val replay : trace -> Unified_interpreter.Dispatch.choose * (Hivm_trace.Execution.status -> unit)
 end
 type stage = Source.stage = HFusion | HIVM
-val next_trace : ?db_path:string -> ?timeout_ms:int -> ?max_steps:int -> stage:stage ->
+val next_trace : ?db_path:string -> ?timeout_ms:int -> ?max_steps:int -> ?backend:Unified_interpreter.Precedence.backend -> stage:stage ->
   launch:Yojson.Safe.t -> Ast.t -> Delivery.trace
-val run_module : ?db_path:string -> ?timeout_ms:int -> ?max_steps:int ->
+val run_module : ?db_path:string -> ?timeout_ms:int -> ?max_steps:int -> ?backend:Unified_interpreter.Precedence.backend ->
   ?trace:(int -> string -> unit) -> ?on_read:(int -> string -> Hivm_trace.Execution_value.view -> unit) ->
   stage:stage -> launch:Yojson.Safe.t -> Ast.t -> Delivery.trace * Hivm_trace.Execution.result
 val generate_mlir : ?entry:string -> ?configuration:Yojson.Safe.t -> ?timeout_ms:int -> stage ->

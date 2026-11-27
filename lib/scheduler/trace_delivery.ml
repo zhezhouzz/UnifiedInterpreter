@@ -131,6 +131,10 @@ let next_trace ?db_path ?(timeout_ms=30000) ~identity ~analyze ~execute () =
       let races=J.to_list (J.member "races" report) in
       H.transaction db (fun ()->if state ()=None then (
         H.write db "INSERT INTO searches VALUES (?,0,'[]',0)" [key];
+        (match J.member "trace" report with
+         | `Assoc _ as trace when J.member "extent" trace=`String "terminal" ->
+             H.write db "INSERT INTO guides VALUES (?,0,?)" [key;H.text (Yojson.Safe.to_string trace)]
+         | _ -> ());
         List.iteri (fun i race->
           let get k=J.member k race in
           List.iteri (fun j (a,b,order)->
@@ -151,7 +155,13 @@ let next_trace ?db_path ?(timeout_ms=30000) ~identity ~analyze ~execute () =
           let path=List.map J.to_int (J.to_list (Yojson.Safe.from_string (H.string cursor))) in
           let candidate,next,g=match guide with
             | Some row->
-                let t,next=race_trace run (Yojson.Safe.from_string (H.string row.(0))) path in
+                let guide=Yojson.Safe.from_string (H.string row.(0)) in
+                let t,next=match J.member "terminal" guide with
+                  | `String terminal->
+                      let events=List.map D.decode (J.to_list (J.member "events" guide)) in
+                      let trace=make events (Terminal terminal) `Null in
+                      let choose,verify=replay trace in verify (run choose);Some trace,None
+                  | _->race_trace run guide path in
                 (match next with Some _->t,next,s.(0) | None->
                   t,Some [],Sqlite3.Data.INT (Int64.succ (Sqlite3.Data.to_int64_exn s.(0))))
             | None->let t,next=next_leaf run path in Some t,next,s.(0) in

@@ -64,6 +64,16 @@ type command =
 type footprint = { reads : address list; writes : address list }
 type stream = { id : int; pipes : int list; params : (int * value) list; body : command }
 
+let rec contains_loop = function
+  | For _ | For_values _ | While_values _ -> true
+  | End | Return _ | Yield _ -> false
+  | Scalar (_,_,_,rest) | Block_counter (_,rest) | Alloc (_,_,_,rest)
+  | Issue (_,_,_,rest) | Sync (_,_,_,_,rest) | Peer_sync (_,_,_,_,_,rest)
+  | Barrier (_,rest) | Core_barrier rest -> contains_loop rest
+  | Branch (_,yes,no,rest) | Branch_values (_,_,yes,no,rest) ->
+      contains_loop yes || contains_loop no || contains_loop rest
+  | Call_values (_,_,_,body,rest) -> contains_loop body || contains_loop rest
+
 (** 两个解释函数均须为纯函数。视图共享底层地址时保留别名关系。 *)
 type program = {
   streams : stream list;

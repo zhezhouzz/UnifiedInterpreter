@@ -87,6 +87,35 @@ let check enc assumptions = match Solver.check enc.solver assumptions with
   | Solver.UNSATISFIABLE -> None
   | Solver.UNKNOWN -> raise (Inconclusive (Solver.get_reason_unknown enc.solver))
 
+(* 在有限的确定前驱图上，出现的事件组成某个可达前缀。非法访问
+   可以就绪并引发异常，但不能作为已成功执行的事件出现在前缀内。 *)
+let terminal_fault ~timeout_ms schedule =
+  let valid=Array.map (function Unallocated->false | Allocated_after _->true) schedule.allocations in
+  let ordinary={schedule with allocations=Array.map (function
+    | Unallocated->Allocated_after [] | x->x) schedule.allocations} in
+  match Race_search.precedence ordinary with
+  | None -> None
+  | Some parents when Array.for_all Fun.id valid &&
+      Array.length (Precedence.topological_order parents)=Array.length parents -> None
+  | Some parents ->
+      let enc=encode ~timeout_ms schedule in
+      let open Boolean in
+      let ready=Array.mapi (fun i ps -> mk_and enc.ctx (mk_not enc.ctx enc.present.(i)::
+        List.map (fun j->if j<0 then mk_false enc.ctx else enc.present.(j)) ps)) parents in
+      let order model =
+        Array.to_list (Array.mapi (fun i var->
+          if is_true (Option.get (Model.eval model var true)) then
+            Some (Arithmetic.Integer.get_big_int (Option.get (Model.eval model enc.clock.(i) true)),i)
+          else None) enc.present) |> List.filter_map Fun.id |> List.sort compare |> List.map snd in
+      let pending=mk_or enc.ctx (Array.to_list (Array.map (mk_not enc.ctx) enc.present)) in
+      match check enc (pending::Array.to_list (Array.map (mk_not enc.ctx) ready)) with
+      | Some model->Some (`Deadlock,order model)
+      | None->
+          let faults=Array.to_list (Array.mapi (fun i enabled->if valid.(i) then mk_false enc.ctx else enabled) ready) in
+          Option.map (fun model->
+            let i=List.find_index (fun expr->is_true (Option.get (Model.eval model expr true))) faults |> Option.get in
+            `Memory,order model @ [i]) (check enc [mk_or enc.ctx faults])
+
 let prefix enc model last =
   let eval var = Option.get (Model.eval model var true) in
   let events = Array.to_list (Array.mapi (fun n var ->

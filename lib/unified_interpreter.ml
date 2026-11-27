@@ -19,6 +19,7 @@ module Vectorlayout_input = Vectorlayout_input
 module Race_benchmarks = Race_benchmarks
 module Benchmark_traces = Benchmark_traces
 module Race_report = Race_report
+module Race_solve = Race_solve
 module Concrete_schedule = Concrete_schedule
 module Historical_schedule = Historical_schedule
 module Loop_schedule = Loop_schedule

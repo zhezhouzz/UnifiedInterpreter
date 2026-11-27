@@ -52,7 +52,7 @@ let choose ?(timeout_ms=5000) ?(partial=false) ~parents ~iterations accesses val
           match Solver.check solver [le n (int mid)] with
           | Solver.SATISFIABLE -> shrink lower (Option.get (Solver.get_model solver))
           | Solver.UNSATISFIABLE -> shrink (mid+1) model
-          | Solver.UNKNOWN -> model in
+            | Solver.UNKNOWN -> raise (Race_solve.Inconclusive (Solver.get_reason_unknown solver)) in
         let model=shrink 0 (Option.get (Solver.get_model solver)) in
         let i=value model a and j=value model b in
         let x=accesses.(i).node and y=accesses.(j).node in
@@ -63,7 +63,7 @@ let choose ?(timeout_ms=5000) ?(partial=false) ~parents ~iterations accesses val
             Found (actual,data)
         | None ->
             assert_ (Boolean.mk_not ctx (both [eq a (int i);eq b (int j)]));search () in
-  search ()
+  try search () with Race_solve.Inconclusive reason -> Incomplete reason
 
 let complete order prefix =
   let selected=Array.make (Array.length order) false in
