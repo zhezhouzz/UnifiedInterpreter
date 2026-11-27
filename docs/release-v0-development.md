@@ -100,6 +100,20 @@ docker rm release-v0-matrix
 
 检查 CSV 中的 `status`、`check` 和 `race_order`。部分用例预期报告死锁或无效内存访问。`race_order=opposite` 表示两次执行中同一对竞争事件的顺序相反。`wall_seconds` 包含启动、解析、调度、解释执行以及收取输出的时间。仓库中有可供核对的[逐次执行记录](../benchmarks/results/scheduled-interpreter-matrix.csv)和[自动解析测试记录](../benchmarks/results/offline-auto-parser.md)。
 
+### 发布版本的 benchmark 运行结果
+
+按默认测试输入和项目的 IR 语义，源码核查与执行记录在 84 个 benchmark 中确认了 **55 个有问题的用例**，两次调度在这 55 个用例中均检出了至少一种问题。HIVM 和 HFusion 分别计数时，已确认有问题的 IR 版本为 74 个，检出 74 个。同一版本即使同时存在死锁和竞争，也只计入总数一次。[逐个用例的源码判断](../benchmarks/results/source-fault-audit.md)
+
+| IR 层 | 测试版本数 | 已确认有问题 | 检出至少一种问题 | 两条 trace 显示竞争 | 报告死锁 | 报告越界 | 报告未初始化描述符 | 两次运行累计耗时 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| HIVM | 84 | 46 | 46 | 36 | 9 | 1 | 0 | 96.52 秒 |
+| HFusion | 84 | 28 | 28 | 26 | 0 | 1 | 1 | 129.57 秒 |
+| 合计 | 168 | 74 | 74 | 62 | 9 | 2 | 1 | 226.09 秒 |
+
+已确认存在竞争的 IR 版本共 **64 个**。其中 **62 个**在两条 trace 中展示了同一对冲突访问以相反顺序完成。其余两个 HIVM 版本 `fixture/duplicate-set` 和 `issue316/missing-ready` 在死锁前存在竞争，本次运行报告了死锁。[源码核查](../benchmarks/results/source-fault-audit.md) · [逐次执行结果](../benchmarks/results/scheduled-interpreter-matrix.csv)
+
+每个 IR 版本执行两次，共 336 次。各版本首次运行耗时合计 144.48 秒，第二次合计 81.61 秒。表中使用每次从进程启动到收完输出的 `wall_seconds`，包括解析、调度和解释执行。226.09 秒是逐次耗时之和，并行运行整批测试的实际经过时间未单独记录。
+
 ## 打包与发布
 
 [打包脚本](../scripts/build_offline.py)将 OCaml 可执行文件、Python 运行环境、前端脚本、启动配置模板、BiShengIR 和所需动态库归档，编译 [C 启动器](../release/launcher.c)，并将归档追加到启动器末尾。新增前端模块或运行时数据文件时，应检查打包脚本的复制清单，再用重新生成的单文件运行相关用例。
