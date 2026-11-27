@@ -47,7 +47,7 @@ dune build bin/main.exe
 
 第一条 Python 命令核对目录覆盖范围和文件摘要，用 BiShengIR 验证每份 HIVM，并将每份 HFusion 编译到 HIVM。对于计算版本，它还从原始 HIVM 重新生成 HFusion 并比较文件和参数。对于四个 CV 变体，它使用 `mm-map-mode=macro_instr`，将转换结果与原始日志中 `After ConvertHFusionToHIVM` 快照经同一编译器打印后的摘要比较。第二条命令从原始 MLIR 重新导出模块 AST，逐个比较操作、类型、属性和 region。多个变体共享完全相同的 IR 时，按 SHA-256 只保存一份 AST。
 
-目录中的 28 个 Litao HIVM 文件直接引用合并进来的原始路径。`add-Ascend910B1` 的两个变体也直接读取同一份高层输入。用 `git log -- benchmark/L2/double-buffer/buggy.hivm.mlir` 可以查看该文件的原始提交和作者。[Litao benchmark](../benchmark/README.md)
+Litao 用例按所测试的行为存放。例如，双缓冲复用位于 `benchmark/L2/double-buffer/`，跨核交接位于 `benchmark/L1/mix-handoff/`。每个目录包含该用例的启动参数、Core 程序、原始 HIVM 以及对应的 HFusion。生成的 HFusion 分别使用 `buggy.hfusion.mlir` 和 `fixed.hfusion.mlir`。`add-Ascend910B1` 的两个变体共用原始高层输入 `source.mlir`。用 `git log -- benchmark/L2/double-buffer/buggy.hivm.mlir` 可以查看原始提交和作者。[Litao benchmark](../benchmark/README.md)
 
 从原始归档重新生成目录时，传入场景 1 的 ZIP 和解压后包含两个 vectorlayout 编译日志的目录。
 

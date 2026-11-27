@@ -150,8 +150,10 @@ def generate(opts, low_cases, high_cases, staging):
                 case = {"origin": "compiler-source", "hfusion": result}
             else:
                 high, bindings = project(opts.opt, data, name)
+                high_path = (low.with_name(f"{variant}.hfusion.mlir") if name.startswith("litao/")
+                             else PAIRS / name / "hfusion.mlir")
                 case = {"origin": "computation-projection",
-                        "hfusion": store(staging, PAIRS / name / "hfusion.mlir", high)}
+                        "hfusion": store(staging, high_path, high)}
                 if bindings:
                     case["extra_arguments"] = bindings
             case["hivm"] = record(low, data)

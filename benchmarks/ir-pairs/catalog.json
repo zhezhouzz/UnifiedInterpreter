@@ -460,7 +460,7 @@
     "litao/broadcast-guard/buggy": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/broadcast-guard/buggy/hfusion.mlir",
+        "path": "benchmark/L2/broadcast-guard/buggy.hfusion.mlir",
         "sha256": "c64bf62ee7c8dd9906791a28006e92fa3335e3a91b376a94dcb94cd3b09a56cc"
       },
       "extra_arguments": {
@@ -485,7 +485,7 @@
     "litao/broadcast-guard/fixed": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/broadcast-guard/fixed/hfusion.mlir",
+        "path": "benchmark/L2/broadcast-guard/fixed.hfusion.mlir",
         "sha256": "c64bf62ee7c8dd9906791a28006e92fa3335e3a91b376a94dcb94cd3b09a56cc"
       },
       "extra_arguments": {
@@ -510,7 +510,7 @@
     "litao/counter-capacity/buggy": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/counter-capacity/buggy/hfusion.mlir",
+        "path": "benchmark/L2/counter-capacity/buggy.hfusion.mlir",
         "sha256": "9d885661f7e0a021b1324921540a2d6d95b0ae0e67544d14a9c4712022b39a0b"
       },
       "hivm": {
@@ -525,7 +525,7 @@
     "litao/counter-capacity/fixed": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/counter-capacity/fixed/hfusion.mlir",
+        "path": "benchmark/L2/counter-capacity/fixed.hfusion.mlir",
         "sha256": "9d885661f7e0a021b1324921540a2d6d95b0ae0e67544d14a9c4712022b39a0b"
       },
       "hivm": {
@@ -540,7 +540,7 @@
     "litao/cross-loop-placement/buggy": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/cross-loop-placement/buggy/hfusion.mlir",
+        "path": "benchmark/L2/cross-loop-placement/buggy.hfusion.mlir",
         "sha256": "895b162e8d00871b0aec7ff42c81ba2754b7f98040090b803a3f6cc02888e651"
       },
       "hivm": {
@@ -555,7 +555,7 @@
     "litao/cross-loop-placement/fixed": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/cross-loop-placement/fixed/hfusion.mlir",
+        "path": "benchmark/L2/cross-loop-placement/fixed.hfusion.mlir",
         "sha256": "895b162e8d00871b0aec7ff42c81ba2754b7f98040090b803a3f6cc02888e651"
       },
       "hivm": {
@@ -570,7 +570,7 @@
     "litao/double-buffer/buggy": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/double-buffer/buggy/hfusion.mlir",
+        "path": "benchmark/L2/double-buffer/buggy.hfusion.mlir",
         "sha256": "b014292d4f9d7d00c02d47ecfa5572079e32fddc39135582fba15295dcc935cc"
       },
       "extra_arguments": {
@@ -616,7 +616,7 @@
     "litao/double-buffer/fixed": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/double-buffer/fixed/hfusion.mlir",
+        "path": "benchmark/L2/double-buffer/fixed.hfusion.mlir",
         "sha256": "b014292d4f9d7d00c02d47ecfa5572079e32fddc39135582fba15295dcc935cc"
       },
       "extra_arguments": {
@@ -662,7 +662,7 @@
     "litao/empty-preload/buggy": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/empty-preload/buggy/hfusion.mlir",
+        "path": "benchmark/L2/empty-preload/buggy.hfusion.mlir",
         "sha256": "ef73fc8867a143137e15e7ddd295570ade98340c68626af521b0ea6f0714547b"
       },
       "hivm": {
@@ -677,7 +677,7 @@
     "litao/empty-preload/fixed": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/empty-preload/fixed/hfusion.mlir",
+        "path": "benchmark/L2/empty-preload/fixed.hfusion.mlir",
         "sha256": "ef73fc8867a143137e15e7ddd295570ade98340c68626af521b0ea6f0714547b"
       },
       "hivm": {
@@ -692,7 +692,7 @@
     "litao/event-collision/buggy": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/event-collision/buggy/hfusion.mlir",
+        "path": "benchmark/L2/event-collision/buggy.hfusion.mlir",
         "sha256": "3bda86e4bbc1cd480d5951b704df7ed48adee0b889b662a20ebe6ade0cb87ef6"
       },
       "hivm": {
@@ -707,7 +707,7 @@
     "litao/event-collision/fixed": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/event-collision/fixed/hfusion.mlir",
+        "path": "benchmark/L2/event-collision/fixed.hfusion.mlir",
         "sha256": "3bda86e4bbc1cd480d5951b704df7ed48adee0b889b662a20ebe6ade0cb87ef6"
       },
       "hivm": {
@@ -722,7 +722,7 @@
     "litao/indirect-atomic/buggy": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/indirect-atomic/buggy/hfusion.mlir",
+        "path": "benchmark/L2/indirect-atomic/buggy.hfusion.mlir",
         "sha256": "0e361e6b5ec1e5e8ffa45244e0d9e9576a79b4c8fffb4fbbaeb8b1b939f87b7a"
       },
       "extra_arguments": {
@@ -750,7 +750,7 @@
     "litao/indirect-atomic/fixed": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/indirect-atomic/fixed/hfusion.mlir",
+        "path": "benchmark/L2/indirect-atomic/fixed.hfusion.mlir",
         "sha256": "0e361e6b5ec1e5e8ffa45244e0d9e9576a79b4c8fffb4fbbaeb8b1b939f87b7a"
       },
       "extra_arguments": {
@@ -778,7 +778,7 @@
     "litao/missing-wait/buggy": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/missing-wait/buggy/hfusion.mlir",
+        "path": "benchmark/L1/missing-wait/buggy.hfusion.mlir",
         "sha256": "e69c42da133ea5be3b3ef843deb6cbe1e484d285c9b110d18b09cde3c3204bd8"
       },
       "extra_arguments": {
@@ -815,7 +815,7 @@
     "litao/missing-wait/fixed": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/missing-wait/fixed/hfusion.mlir",
+        "path": "benchmark/L1/missing-wait/fixed.hfusion.mlir",
         "sha256": "e69c42da133ea5be3b3ef843deb6cbe1e484d285c9b110d18b09cde3c3204bd8"
       },
       "extra_arguments": {
@@ -852,7 +852,7 @@
     "litao/mix-handoff/buggy": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/mix-handoff/buggy/hfusion.mlir",
+        "path": "benchmark/L1/mix-handoff/buggy.hfusion.mlir",
         "sha256": "e22610179fd6a69a945d5d54154c121841628c2a2481e7ea1f1533e128a27d29"
       },
       "extra_arguments": {
@@ -891,7 +891,7 @@
     "litao/mix-handoff/fixed": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/mix-handoff/fixed/hfusion.mlir",
+        "path": "benchmark/L1/mix-handoff/fixed.hfusion.mlir",
         "sha256": "e22610179fd6a69a945d5d54154c121841628c2a2481e7ea1f1533e128a27d29"
       },
       "extra_arguments": {
@@ -930,7 +930,7 @@
     "litao/scalar-fallback/buggy": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/scalar-fallback/buggy/hfusion.mlir",
+        "path": "benchmark/L2/scalar-fallback/buggy.hfusion.mlir",
         "sha256": "dcb57d50b84bb212e805d0eb365f64cc8cf776719567f2a5becbfd5275faaae1"
       },
       "extra_arguments": {
@@ -967,7 +967,7 @@
     "litao/scalar-fallback/fixed": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/scalar-fallback/fixed/hfusion.mlir",
+        "path": "benchmark/L2/scalar-fallback/fixed.hfusion.mlir",
         "sha256": "dcb57d50b84bb212e805d0eb365f64cc8cf776719567f2a5becbfd5275faaae1"
       },
       "extra_arguments": {
@@ -1004,7 +1004,7 @@
     "litao/slot-release/buggy": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/slot-release/buggy/hfusion.mlir",
+        "path": "benchmark/L2/slot-release/buggy.hfusion.mlir",
         "sha256": "c87141f31e1c8b10279a9d1e521719d95e0719ebd965c51d5bc642841a266a74"
       },
       "extra_arguments": {
@@ -1041,7 +1041,7 @@
     "litao/slot-release/fixed": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/slot-release/fixed/hfusion.mlir",
+        "path": "benchmark/L2/slot-release/fixed.hfusion.mlir",
         "sha256": "c87141f31e1c8b10279a9d1e521719d95e0719ebd965c51d5bc642841a266a74"
       },
       "extra_arguments": {
@@ -1078,7 +1078,7 @@
     "litao/wrong-event/buggy": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/wrong-event/buggy/hfusion.mlir",
+        "path": "benchmark/L1/wrong-event/buggy.hfusion.mlir",
         "sha256": "e69c42da133ea5be3b3ef843deb6cbe1e484d285c9b110d18b09cde3c3204bd8"
       },
       "extra_arguments": {
@@ -1115,7 +1115,7 @@
     "litao/wrong-event/fixed": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/wrong-event/fixed/hfusion.mlir",
+        "path": "benchmark/L1/wrong-event/fixed.hfusion.mlir",
         "sha256": "e69c42da133ea5be3b3ef843deb6cbe1e484d285c9b110d18b09cde3c3204bd8"
       },
       "extra_arguments": {
@@ -1152,7 +1152,7 @@
     "litao/zero-trip-alias/buggy": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/zero-trip-alias/buggy/hfusion.mlir",
+        "path": "benchmark/L2/zero-trip-alias/buggy.hfusion.mlir",
         "sha256": "c9d35117b7e8648a7dd850d79789b0ac1120ab3382076be818cb16ba66211c7f"
       },
       "extra_arguments": {
@@ -1189,7 +1189,7 @@
     "litao/zero-trip-alias/fixed": {
       "origin": "computation-projection",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/zero-trip-alias/fixed/hfusion.mlir",
+        "path": "benchmark/L2/zero-trip-alias/fixed.hfusion.mlir",
         "sha256": "c9d35117b7e8648a7dd850d79789b0ac1120ab3382076be818cb16ba66211c7f"
       },
       "extra_arguments": {

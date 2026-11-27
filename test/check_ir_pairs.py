@@ -32,6 +32,8 @@ for name, case in cases.items():
             raise ValueError(f"{name}: incorrect Litao variant")
         if case["origin"] == "compiler-source" and case["hfusion"]["path"] != case["source"]["hfusion_path"]:
             raise ValueError(f"{name}: HFusion must use the original compiler input")
+        if case["origin"] == "computation-projection" and Path(case["hfusion"]["path"]) != hivm.with_name(f"{variant}.hfusion.mlir"):
+            raise ValueError(f"{name}: HFusion must be stored with its HIVM variant")
     for stage in ("hfusion", "hivm"):
         file = case[stage]
         if sha256((root / file["path"]).read_bytes()).hexdigest() != file["sha256"]:

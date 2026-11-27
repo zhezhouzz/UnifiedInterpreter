@@ -33,7 +33,8 @@ def litao_cases():
 
 def litao_revision():
     return subprocess.check_output(
-        ["git", "log", "-1", "--format=%H", "--", "benchmark"], cwd=ROOT, text=True
+        ["git", "log", "-1", "--format=%H", "--", "benchmark", ":(exclude)benchmark/**/*.hfusion.mlir"],
+        cwd=ROOT, text=True
     ).strip()
 
 
