@@ -4,6 +4,7 @@ module Tensor = Tensor
 module Language = Language
 module Effects = Effects
 module Interpreter = Interpreter
+module Dispatch = Dispatch
 module Examples = Examples
 module Report = Report
 module Demo = Demo

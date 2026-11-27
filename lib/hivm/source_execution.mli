@@ -1,4 +1,4 @@
-type status =
+type status = Unified_interpreter.Dispatch.status =
   | Finished
   | Blocked of string list
   | Invalid_memory of string
@@ -17,6 +17,8 @@ type result = {
     tasks 统计已经完成的管线操作，包括同步操作。trace 接收执行流编号和当前指令位置。
     on_read 用于观察批量复制和结构化计算的输入视图，视图内容应在回调期间读取。 *)
 val run_module :
+  ?choose:Unified_interpreter.Dispatch.choose ->
+  ?quiet:bool ->
   ?trace:(int -> string -> unit) ->
   ?on_read:(int -> string -> Execution_value.view -> unit) ->
   ?max_steps:int ->

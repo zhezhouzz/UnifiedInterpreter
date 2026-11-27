@@ -244,6 +244,9 @@ let device_bank ctx core bank =
   | None -> let i=List.length ctx.launch.storages + Hashtbl.length ctx.registry.banks in
       Hashtbl.add ctx.registry.banks key i; i
 
+let copy_pipe src dst = match space src,space dst with
+  | 6,2 -> C.Device.MTE3 | 6,6 -> V | _ -> invalid_arg "unsupported device copy address spaces"
+
 let pointer ctx op rest =
   let id = result op in
   let ty = shaped ctx id in
@@ -935,8 +938,7 @@ and lower_op ctx path (op : M.operation) rest =
         | _ -> invalid_arg "invalid padded load") rest
   | "hivm.hir.nd2nz",[_;_],_ when op.results=[] -> issue ctx op origin MTE2 args nd2nz rest
   | "hivm.hir.copy",[src;dst],_ when op.results=[] ->
-      let pipe=match space (shaped ctx src).space,space (shaped ctx dst).space with
-        | 6,2 -> C.Device.MTE3 | 6,6 -> V | _ -> invalid_arg "unsupported device copy address spaces" in
+      let pipe=copy_pipe (shaped ctx src).space (shaped ctx dst).space in
       issue ctx op origin pipe args copy rest
   | "hivm.hir.fixpipe",[src;dst],_ when op.results=[] &&
       attribute op "dual_dst_mode"=`String "#hivm.fixpipe_dual_dst_mode<ROW_SPLIT>" ->

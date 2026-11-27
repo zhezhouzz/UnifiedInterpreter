@@ -16,7 +16,7 @@ type _ Effect.t += Enqueue : task * bool -> unit Effect.t
 type fiber = { mutable next : (unit -> unit) option; mutable blocked : int option;
                mutable tasks : task list }
 
-let run ?schedule ?prefix ?on_step ?on_stop ?on_blocked ?on_iteration ?execute ?copy_bank ?(record_events=true)
+let run ?dispatch ?schedule ?prefix ?on_step ?on_stop ?on_blocked ?on_iteration ?execute ?copy_bank ?(record_events=true)
     ?(record_choices=true) ?(observe_accesses=true) ?source_step ?(source_effects=false) ?on_finish
     ?(replay_error=fun reason -> Invalid_argument reason)
     ?(iteration_ordinals=false) (program : program) inputs bindings =
@@ -44,7 +44,9 @@ let run ?schedule ?prefix ?on_step ?on_stop ?on_blocked ?on_iteration ?execute ?
       counters=Hashtbl.create 4;control=Hashtbl.create 4;reads=[];writes=[];observe;observe_accesses} in
     let submit pipe site path loops job synchronous =
       let number = !serial in incr serial;
-      Effect.perform (Enqueue ({number;pipe;site;path;loops;job}, synchronous)) in
+      let task={number;pipe;site;path;loops;job} in
+      match dispatch with Some (_,issue,_) -> issue id task synchronous
+      | None -> Effect.perform (Enqueue (task,synchronous)) in
     let keys channel sending p q flag =
       let me = c.loc in
       let peers = match channel with Local -> [me] | Cross ->
@@ -63,6 +65,8 @@ let run ?schedule ?prefix ?on_step ?on_stop ?on_blocked ?on_iteration ?execute ?
         idx+1,env) (0,env) commands |> snd
     and instruction nested p site path loops env cmd =
       current := p,site,path,loops;
+      (match dispatch,cmd with Some (_,_,atomic), (Let (_,Read _) | Control _) when not nested -> atomic id path
+       | _->());
       Option.iter (fun visit -> visit id site path) source_step;
       let ev e =
         let x=if source_effects then Effect.perform (Effects.Device_compute (c,env,e)) else eval c env e in
@@ -195,9 +199,11 @@ let run ?schedule ?prefix ?on_step ?on_stop ?on_blocked ?on_iteration ?execute ?
     let step = match choice with Host id -> host id fibers.(id)
       | Finish (id,n) -> completion id fibers.(id) (fun t -> t.number = n) in
     match step with Some step -> apply step | None -> raise (replay_error "invalid replay step") in
-  (match schedule,prefix with None,None -> drive () | None,Some choices -> List.iter replay choices
-   | Some choices,None -> List.iter replay choices; if unfinished () then raise (replay_error "incomplete replay schedule")
-   | Some _,Some _ -> invalid_arg "provide either a schedule or a prefix");
+  (match dispatch,schedule,prefix with
+   | Some (run,_,_),None,None->run (Array.map (fun f->Option.get f.next) fibers)
+   | None,None,None -> drive () | None,None,Some choices -> List.iter replay choices
+   | None,Some choices,None -> List.iter replay choices; if unfinished () then raise (replay_error "incomplete replay schedule")
+   | _ -> invalid_arg "incompatible device scheduling policies");
   Option.iter (fun observe ->
     Array.to_list (Array.mapi (fun id f ->
       Option.to_list (Option.map fst (host id f)) @ List.filter_map (fun t ->

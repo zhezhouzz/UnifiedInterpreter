@@ -8,7 +8,7 @@ module J = Yojson.Safe.Util
 module T = Execution_tensor
 module H = Execution_handlers
 
-type status = Finished | Blocked of string list | Invalid_memory of string | Step_limit of string
+type status = Dispatch.status = Finished | Blocked of string list | Invalid_memory of string | Step_limit of string
 type result = {status:status; memory:(string * bytes) list; returned:t list array; steps:int; tasks:int}
 exception Budget of string
 let pipe op key = C.Device.pipe_name (Launch.pipe (L.enum (L.attribute op key)))
@@ -17,7 +17,7 @@ let dims xs=Array.of_list (List.map Z.to_int xs)
 let env_bind env ids vs=List.iter2 (fun (id,_) v->env.(id)<-v) ids vs
 let integer = function M.Integer n->n | _->invalid_arg "expected integer type"
 
-let run_module ?trace ?on_read ?(max_steps=10_000_000) ~stage ~launch ast =
+let run_module ?choose ?(quiet=false) ?trace ?on_read ?(max_steps=10_000_000) ~stage ~launch ast =
   if max_steps<=0 then invalid_arg "step budget must be positive";
   let configuration=match launch with
     | `Assoc fields -> (match List.assoc_opt "stage" fields with Some (`String x) when x<>stage ->
@@ -38,12 +38,24 @@ let run_module ?trace ?on_read ?(max_steps=10_000_000) ~stage ~launch ast =
     let origins=Hashtbl.create (List.length device.sources) in
     List.iter (fun ((id,path),(source:L.source))->
       let entry=List.fold_left (fun _ (_,_,_,callee)->callee) (List.nth launch.streams id).entry source.frames in
-      let site=Printf.sprintf "%s/%s %s" entry (String.concat "." (List.map string_of_int source.origin.path)) source.origin.opcode in
+      let site=Dispatch.site entry source.origin.path source.origin.opcode in
       Hashtbl.add origins (id,path) site) device.sources;
     let source_step id site path=state.current_pid<-id;
       Effect.perform (Effects.Source_step (Option.value (Hashtbl.find_opt origins (id,path)) ~default:site)) in
+    let dispatch=Option.map (fun choose->
+      let ids=Array.to_seqi locations |> Seq.map (fun (i,loc)->loc,i) |> Hashtbl.of_seq in
+      let key (a,b,p,q,k)=Hashtbl.find ids a,Hashtbl.find ids b,C.Device.pipe_name p,C.Device.pipe_name q,k in
+      let run entries=match Q.guided state launch.capacity tasks choose entries with
+        | Q.Returned->() | Deadlock xs->status:=Blocked xs in
+      let issue stream (t:Device_run.task) blocking=
+        let site=Hashtbl.find origins (stream,t.path) in
+        let op=match t.job with Action f->Q.Work f | Send ks->Set (List.map key ks)
+          | Receive ks->Wait (List.map key ks) | Fence->Barrier in
+        Q.submit ~blocking (C.Device.pipe_name t.pipe) site op in
+      let atomic i path=Option.iter (fun s->Effect.perform (Q.Atomic s)) (Hashtbl.find_opt origins (i,path)) in
+      run,issue,atomic) choose in
     let memory=try
-      (schedule (fun ()->mapped (fun ()->Device_run.run ~source_step ~source_effects:true ~record_events:false
+      (schedule (fun ()->mapped (fun ()->Device_run.run ?dispatch ~source_step ~source_effects:true ~record_events:false
           ~record_choices:false ~observe_accesses:false ~on_finish:(fun ()->incr tasks) ~copy_bank:(fun _->false)
           ~on_blocked:(fun reason->status:=Blocked [reason]) device.program device.memory device.bindings))).memory
       with Budget site->status:=Step_limit site;device.memory
@@ -78,6 +90,11 @@ let run_module ?trace ?on_read ?(max_steps=10_000_000) ~stage ~launch ast =
        let v=match element with Integer _->Scalar (C.VInt (Launch.z_of_json data)) | _->T.float (J.to_number data) in
        for i=0 to count-1 do write view i v done) (J.to_list rows));
   let streams=Array.of_list launch.streams in
+  let core_pipes=lazy (
+    let program=(L.lower_with_launch ~allow_prefix:true ast launch).program in
+    Array.of_list (List.map (fun (s:C.stream)->
+      List.filter_map (fun pipe->if List.mem (L.pipe_id pipe) s.pipes then Some (C.Device.pipe_name pipe)
+        else None) C.Device.[V;MTE2;MTE3;FIX;MTE1;M]) program.streams)) in
   let controls=Array.map (fun _->Hashtbl.create 4) streams in
   let peers=Array.map (fun (s:Launch.stream)->
     let neighbors sending=match launch.edges with
@@ -104,7 +121,7 @@ let run_module ?trace ?on_read ?(max_steps=10_000_000) ~stage ~launch ast =
       and operation path (op:M.operation) =
         incr site_count; let internal_event= - !site_count in
         let code=op.opcode and attr=L.attribute op in
-        let site=Printf.sprintf "%s/%s %s" entry (String.concat "." (List.map string_of_int path)) code in
+        let site=Dispatch.site entry path code in
         let regions=List.mapi (fun i blocks->Array.of_list (List.mapi (fun j child->block (path@[i;j]) child) blocks)) op.regions
           |> Array.of_list in
         let result_id ()=fst (List.hd op.results) in
@@ -228,8 +245,14 @@ let run_module ?trace ?on_read ?(max_steps=10_000_000) ~stage ~launch ast =
               Q.submit ~blocking:(pipe="S") pipe site (if send then Q.Set keys else Q.Wait keys);[]
           | "hivm.hir.pipe_barrier",[] | "hfusion.barrier",[] ->
               let pipes=if code="hfusion.barrier" then ["HFUSION_ASYNC"] else
-                match L.enum (attr "pipe") with "PIPE_ALL"->["M";"V";"FIX";"MTE1";"MTE2";"MTE3"]
-                | _->[pipe op "pipe"] in List.iter (fun p->Q.submit ~blocking:(code="hfusion.barrier") p site Q.Barrier) pipes;[]
+                match L.enum (attr "pipe") with
+                | "PIPE_ALL" when Option.is_some choose -> (Lazy.force core_pipes).(stream.id)
+                | "PIPE_ALL" -> ["M";"V";"FIX";"MTE1";"MTE2";"MTE3"]
+                | _->[pipe op "pipe"] in
+              (match choose,pipes with
+               | Some _,([] | _::_::_) -> Effect.perform (Q.Fence (site,pipes))
+               | _ -> List.iter (fun p->Q.submit ~blocking:(code="hfusion.barrier") p site Q.Barrier) pipes);
+              []
           | "hivm.hir.nd2nz",[Buffer src;Buffer dst] -> transfer "MTE2" (fun ()->
               for r=0 to src.shape.(0)-1 do for c=0 to src.shape.(1)-1 do
                 write dst (position dst [c/16;r/16;r mod 16;c mod 16]) (T.read_at src [r;c]) done done)
@@ -264,7 +287,9 @@ let run_module ?trace ?on_read ?(max_steps=10_000_000) ~stage ~launch ast =
                 for i=0 to m-1 do for j=0 to n-1 do write dst (position dst [j/16;i/16;i mod 16;j mod 16]) (get output (i*n+j)) done done);
               if events<>[] then flag true "M" "MTE1" 0;[]
           | ("memref.copy"|"linalg.copy"|"bufferization.materialize_in_destination"|"hivm.hir.load"|"hivm.hir.store"|"hivm.hir.copy"|"hivm.hir.fixpipe"),[Buffer a;Buffer b] ->
-              let p=match code with "hivm.hir.load"->"MTE2"|"hivm.hir.store"|"hivm.hir.copy"->"MTE3"
+              let p=match code with "hivm.hir.load"->"MTE2"|"hivm.hir.store"->"MTE3"
+                |"hivm.hir.copy"->C.Device.pipe_name (L.copy_pipe (shaped (List.hd op.operands)).space
+                    (shaped (List.nth op.operands 1)).space)
                 |"hivm.hir.fixpipe"->"FIX"|"bufferization.materialize_in_destination"->"S"|_->target in
               if op.results=[] then (work p (fun ()->observe a;Effect.perform (H.Copy (a,b)));[])
               else [Buffer (clone a)]
@@ -280,7 +305,7 @@ let run_module ?trace ?on_read ?(max_steps=10_000_000) ~stage ~launch ast =
           | ("hfusion.print"|"hivm.hir.debug"),[Buffer b] ->
               let label=match attr "prefix" with `String s->s | _->code in
               let values=List.init (size b.shape) (fun i->Printf.sprintf "%g" (real (scalar (get b i)))) in
-              Printf.eprintf "%s %s\n" label (String.concat "," values);[]
+              if not quiet then Printf.eprintf "%s %s\n" label (String.concat "," values);[]
           | "hfusion.indirect_load",[Buffer base;Buffer offsets;Buffer third;Buffer fourth;Buffer fifth] ->
               let mask,other,dst=if op.generic then fourth,fifth,third else third,fourth,fifth in
               let out=create dst.element (Array.to_list dst.shape) in
@@ -312,8 +337,15 @@ let run_module ?trace ?on_read ?(max_steps=10_000_000) ~stage ~launch ast =
                   L.space (shaped (List.hd (List.rev op.operands))).space=2 then "MTE2" else "V" in
                 work p (fun ()->ignore (run ()));[])
           | _->invalid_arg ("unsupported source operation "^code) in
+        let atomic=List.mem code ["memref.store";"memref.load";"memref.atomic_rmw";"tensor.insert";"tensor.extract";
+          "tensor.extract_slice";"tensor.insert_slice";"bufferization.materialize_in_destination";"hivm.hir.debug";
+          "hfusion.print";"hfusion.indirect_load";"hivm.hir.set_ctrl";"hivm.hir.set_mask_norm"] ||
+          (code="memref.copy" && not launch.hfusion) ||
+          (code="func.call" && attr "hivm.pipe"<>`Null && pipe op "hivm.pipe"="S") ||
+          (op.results<>[] && List.mem code (L.linalg_ops@L.hfusion_ops@L.vector_ops@["hivm.hir.mmadL1";"hivm.hir.matmul"])) in
         fun frame nested ordinal ->
           Effect.perform (Effects.Source_step site);
+          if Option.is_some choose && atomic && not nested then (Effect.perform (Q.Atomic site);current:=site);
           let args=List.map (Array.get frame) op.operands in
           if List.mem code ["func.return";"scf.yield";"scf.condition";"linalg.yield"] then Some args else
           (env_bind frame op.results (f frame nested ordinal args);None)
@@ -332,7 +364,8 @@ let run_module ?trace ?on_read ?(max_steps=10_000_000) ~stage ~launch ast =
       returned.(id)<-(Hashtbl.find functions stream.entry) false (List.map bind stream.arguments)) in
   let entries=Array.map make_stream streams in
   let tasks=ref 0 in
-  let status=try match schedule (fun ()->Q.drive state launch.capacity tasks entries) with
+  let status=try match schedule (fun ()->match choose with
+    | None->Q.drive state launch.capacity tasks entries | Some select->Q.guided state launch.capacity tasks select entries) with
     | Q.Returned->Finished | Deadlock sites->Blocked sites
     with Memory_fault reason->Invalid_memory (!current^": "^reason) | Budget site->Step_limit site
        | Invalid_argument reason->invalid_arg (!current^": "^reason) in
