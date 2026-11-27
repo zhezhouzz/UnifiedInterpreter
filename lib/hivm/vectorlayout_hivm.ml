@@ -4,7 +4,6 @@ open Hivm_event
 module D = Core_lang.Device
 module R = Device_races
 module A = Hivm_module
-module J = Yojson.Safe.Util
 
 let check variant ast =
   let digest = match variant with Vectorlayout.Ok -> "5d40dbba7f011e6202b48e02c8aa13ef"
@@ -102,69 +101,7 @@ let mappings ast stream =
     Hashtbl.add sites path origin) (device_sites stream) (source_sites ast name);
   sites
 
-let export_events ?(logical_async=fun _ -> false) ?(atomic=fun _ -> false) ~entries ~location (model : R.model) races =
-  let streams = Array.of_list model.program.streams in
-  let ids = Hashtbl.create (Array.length streams) in
-  Array.iteri (fun i s -> Hashtbl.add ids s.D.location i) streams;
-  let signal (src,dst,p,q,k) = {receiver=Hashtbl.find ids dst;source=p;target=q;flag=k;cross=src<>dst} in
-  let action = function
-    | Device_run.Compute -> Compute | Barrier_step -> Barrier
-    | Signal keys -> Set (List.map signal keys)
-    | Await (key::rest as keys) ->
-        let k = signal key in
-        if k.cross then (
-          if not (List.for_all (fun other -> signal other=k) rest) then invalid_arg "inconsistent cross-core wait";
-          Wait_all (List.map (fun (s,_,_,_,_) -> Hashtbl.find ids s) keys,k))
-        else Wait k
-    | Await [] -> invalid_arg "empty device wait" in
-  let pending = Hashtbl.create 256 in
-  let steps = Array.mapi (fun i choice ->
-    let step = model.source_steps.(i) in
-    match choice with
-    | Device_run.Host stream ->
-        let host = List.map (fun id -> id,{location=location id;phase=Execute (Some S);action=Compute}) step.host in
-        (match step.issued with None -> host | Some (id,sub) ->
-          let task = {id=i;pipe=sub.queue} in
-          let loc=location id in
-          let submit,complete=if logical_async loc.origin.opcode then Async_submit i,Async_complete i
-            else Submit [task],Complete task in
-          let issued = {location=loc;action=action sub.operation;phase=submit} in
-          if atomic loc.origin.opcode && sub.synchronous then (
-            Hashtbl.add pending (stream,sub.serial) (id,{issued with phase=Execute (Some sub.queue)});
-            host)
-          else (
-            Hashtbl.add pending (stream,sub.serial) (id,{issued with phase=complete});
-            host @ [id,issued]))
-    | Finish (stream,serial) ->
-        let key = stream,serial in
-        let completion = Hashtbl.find pending key in
-        Hashtbl.remove pending key;
-        [completion]) model.steps in
-  let race json =
-    let field k = J.member k json in
-    let target node key =
-      let site = List.find (fun site -> R.identity_json site=field key) model.by_node.(node) in
-      snd (List.find (fun (id,e) -> id=site.id && match e.phase with Submit _ | Async_submit _ -> false | _ -> true) steps.(node)) in
-    match Race_report.numbers (field "nodes") with
-    | [a;b] ->
-        let first = target a "first" and second = target b "second" in
-        let prefix key x y =
-          let rec until = function
-            | [] -> invalid_arg "race target missing from HIVM prefix"
-            | (_,e)::_ when e=y -> [e]
-            | (_,e)::rest -> e::until rest in
-          let rec convert acc = function
-            | [] -> invalid_arg "empty device prefix"
-            | [last] -> List.rev_append acc (until steps.(last))
-            | n::rest -> convert (List.fold_left (fun acc (_,e) -> e::acc) acc steps.(n)) rest in
-          let events = convert [] (Race_report.numbers (field key)) in
-          if List.filter (fun e -> e=x || e=y) events <> [x;y] then invalid_arg "incorrect HIVM race order";
-          events in
-        {first;second;forward=prefix "forward" first second;reverse=prefix "reverse" second first}
-    | _ -> invalid_arg "expected two conflicting accesses" in
-  Array.to_list (Array.mapi (fun i name -> i,name) entries),List.map race races
-
-let export ast (model : R.model) races =
+let export ?full ast (model : R.model) races =
   let streams = Array.of_list model.program.streams in
   let entries = Array.map (fun s -> entry s.D.location.core) streams in
   let maps = Array.map (mappings ast) streams in
@@ -175,14 +112,15 @@ let export ast (model : R.model) races =
       if offset<0 || offset mod 28<>0 then invalid_arg "invalid block loop induction value";
       offset/28::rest in
     {stream=id.stream;entry=entries.(id.stream);origin;iterations;calls=[]} in
-  export_events ~entries ~location model races
+  Device_projection.export_events ?full ~entries ~location model races
 
 let generate ?n ~kv_heads ~timeout_ms method_ variant ast =
   let config = {Vectorlayout_input.default with
     length=Option.value ~default:Vectorlayout_input.default.length n;kv_heads} in
   let name = "vectorlayout/" ^ Vectorlayout.variant_name variant in
   let report (input : Vectorlayout_input.input) (m : R.model) status witnesses =
-    let streams,races = export ast m witnesses in
+    let full=match status with Full_race _ -> true | _ -> false in
+    let streams,races = export ~full ast m witnesses in
     let coordinates = List.mapi (fun id s -> `Assoc ["stream",`Int id;"block",`Int s.D.location.block;
       "core",`String (D.core_name s.location.core)]) m.program.streams in
     {benchmark=name;streams;n=Some (Z.of_int input.config.length);races;status;
@@ -194,7 +132,10 @@ let generate ?n ~kv_heads ~timeout_ms method_ variant ast =
   | Benchmark_traces.Concrete backend ->
       let input = Vectorlayout_input.make config in
       let m = R.compile ~backend variant input in
-      report input m Complete_search (R.generate m)
+      let coverage,rows=R.analyze ~timeout_ms m in
+      let status=match coverage with Concrete_schedule.All_pairs -> Complete_search | Full_trace n -> Full_race n
+        | Race_free -> No_race | Unresolved reason -> Unknown reason in
+      report input m status rows
   | Symbolic ->
       if n<>None then invalid_arg "symbolic analysis requires a free N";
       match Device_symbolic.find_model ~timeout_ms variant config with

@@ -45,7 +45,8 @@ let check_locations ast report =
   List.iter (fun race ->
     let check order last =
       let events = J.to_list (field order race) in
-      assert (List.hd (List.rev events)=field last race);
+      if field "trace_extent" report<>`String "program_end" then
+        assert (List.hd (List.rev events)=field last race);
       List.iter (fun event ->
         let entry = J.to_string (field "entry" event) in
         let stream=List.nth (J.to_list (field "streams" report)) (J.to_int (field "stream" event)) in
@@ -467,7 +468,97 @@ let ub_scalar_readback () =
   | _ -> failwith "accepted a fixed address derived from a concurrent UB write"
   | exception Invalid_argument msg -> assert (String.starts_with ~prefix:"a concurrent" msg)
 
+let large_loop_traces () =
+  let check stage instruction =
+    let ast=parse_inline "large-loop.mlir" (Printf.sprintf {|func.func @main(%%src: memref<1xi32>, %%dst: memref<1xi32>, %%n: index) {
+      %%zero = arith.constant 0 : index
+      %%one = arith.constant 1 : index
+      scf.for %%i = %%zero to %%n step %%one {
+        %s
+      }
+      %s
+      return
+    }|} instruction instruction) in
+    let configuration=launch (Printf.sprintf {|{"stage":"%s","arguments":[null,null,70]}|} stage) in
+    let p=H.lower_mlir ~configuration ast in
+    List.iter (fun backend ->
+      let core=H.analyze_mlir ~backend p in
+      assert (field "trace_extent" core=`String "program_end" && field "prefix_rounds" core=`Int 2);
+      assert (H.replay_mlir p core=2);
+      let source=H.project_mlir p core in
+      check_locations ast source;
+      let race=List.hd (races source) in
+      let check_direction key first second =
+        let trace=J.to_list (field key race) in
+        assert (List.length trace=142);
+        assert (List.filter (fun e -> e=first || e=second) trace=[first;second]);
+        assert (List.exists (fun e -> field "iterations" e=`List [`Int 69]) trace);
+        assert (List.exists (fun e -> field "iterations" e=`List [] && field "phase" e=`String "complete") trace) in
+      check_direction "forward" (field "first" race) (field "second" race);
+      check_direction "reverse" (field "second" race) (field "first" race);
+      let row=List.hd (races core) in
+      let shorten fields key value=`Assoc ((key,value)::List.remove_assoc key (J.to_assoc fields)) in
+      (match H.replay_mlir p (shorten core "prefix_rounds" (`Int 1)) with
+       | exception Invalid_argument _ -> () | _ -> failwith "accepted incorrect race prefix round count");
+      let row=shorten row "forward" (`List (List.rev (List.tl (List.rev (J.to_list (field "forward" row)))))) in
+      (match H.replay_mlir p (shorten core "races" (`List [row])) with
+       | exception Invalid_argument _ -> () | _ -> failwith "accepted incomplete large-loop execution")
+    ) Bug_traces.[Search;Solve] in
+  check "hivm" "hivm.hir.load ins(%src : memref<1xi32>) outs(%dst : memref<1xi32>)";
+  check "hfusion" "memref.copy %src, %dst : memref<1xi32> to memref<1xi32>"
+
+let late_source_race () =
+  let ast=parse_inline "late-loop.mlir" {|func.func @main(%src: memref<1xi32>, %dst: memref<1xi32>, %n: index) {
+    %zero = arith.constant 0 : index
+    %one = arith.constant 1 : index
+    %late = arith.constant 67 : index
+    %launch = arith.constant 70 : index
+    %enabled = arith.cmpi eq, %n, %launch : index
+    scf.for %i = %zero to %n step %one {
+      %at = arith.cmpi eq, %i, %late : index
+      %both = arith.andi %at, %enabled : i1
+      scf.if %both {
+        memref.copy %src, %dst : memref<1xi32> to memref<1xi32>
+        memref.copy %src, %dst : memref<1xi32> to memref<1xi32>
+      }
+    }
+    return
+  }|} in
+  let analyze n = H.lower_mlir ~configuration:(`Assoc ["stage",`String "hfusion";
+    "arguments",`List [`Null;`Null;`Int n]]) ast in
+  let p=analyze 70 in
+  let core=H.analyze_mlir ~backend:Solve p in
+  assert (field "prefix_rounds" core=`Int 68 && H.replay_mlir p core=2);
+  assert (field "status" (H.analyze_mlir ~backend:Solve (analyze 69))=`String "no-race")
+
+let large_device_race () =
+  let ast=parse_inline "device-loop.mlir" {|module {
+    func.func @writer(%dst: memref<4xi32>, %mask: vector<4xi1>, %values: vector<4xi32>, %n: index) {
+      %zero = arith.constant 0 : index
+      %one = arith.constant 1 : index
+      scf.for %i = %zero to %n step %one {
+        vector.maskedstore %dst[%zero], %mask, %values : memref<4xi32>, vector<4xi1>, vector<4xi32>
+      }
+      return
+    }
+  }|} in
+  let args=launch {|[{"storage":"shared"},{"initial":[true,false,false,false]},{"initial":[6,7,8,9]},70]|} in
+  let stream b=`Assoc ["entry",`String "writer";"block",`Int b;"arguments",args] in
+  let p=H.lower_mlir ~configuration:(`Assoc ["streams",`List [stream 0;stream 1]]) ast in
+  let ()=match p with H.Device_mlir _ -> () | _ -> failwith "expected masked device program" in
+  let core=H.analyze_mlir ~backend:Solve p in
+  assert (field "trace_extent" core=`String "program_end" && H.replay_mlir p core=2);
+  let source=H.project_mlir p core in
+  check_locations ast source;
+  let r=List.hd (races source) in
+  List.iter (fun key ->
+    let events=J.to_list (field key r) in
+    List.iter (fun b -> assert (List.exists (fun e ->
+      field "stream" e=`Int b && field "iterations" e=`List [`Int 69]) events)) [0;1])
+    ["forward";"reverse"]
+
 let () =
+  large_loop_traces (); late_source_race (); large_device_race ();
   examples (); issue316 (); issue316_barrier_scope (); nested_async_calls (); reject_foreign_trace (); carried_views (); dynamic_slices (); indexed (); masked_vector (); scheduled_mask ();
   hfusion_indirect (); cross_flag (); generic_matrix (); unsupported (); unsupported_device_geometry ();
   counter_and_local_snapshot (); debug_conflict (); dense_float_bits (); ub_scalar_readback ()

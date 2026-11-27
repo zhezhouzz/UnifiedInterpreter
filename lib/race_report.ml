@@ -97,6 +97,7 @@ let events_of op_name schedule =
 let events launch = events_of launch.Litao_benchmark.op_name
 
 let witnesses ?timeout_ms backend schedule =
+  if schedule.boundaries<>[] || schedule.cutoffs<>[] then invalid_arg "incomplete event graph";
   match backend with
   | Bug_traces.Search -> Race_search.generate schedule
   | Solve -> Race_solve.generate ?timeout_ms schedule

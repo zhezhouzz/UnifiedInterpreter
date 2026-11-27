@@ -4,6 +4,9 @@ module Module_ast = Hivm_module
 module Mlir = Mlir_lowering
 module Mlir_device = Mlir_device
 
+(** 从解析得到的模块 AST 生成、导出和回放 trace。 *)
+module Source = Mlir_trace
+
 type pipe = Core_lang.Device.pipe = S | V | M | MTE1 | MTE2 | MTE3 | FIX
 type origin = { path : int list; opcode : string; part : string option }
 
@@ -22,9 +25,9 @@ type phase = Submit of task list | Complete of task | Execute of pipe option
   | Async_submit of int | Async_complete of int
 type event = { location : location; action : action; phase : phase }
 
-(** 两条前缀分别以 second 和 first 的访问结束，均可能保留待完成任务。 *)
+(** 普通报告返回竞争前缀。Full_race 返回执行到程序结束的两个事件序列。 *)
 type race = { first : event; second : event; forward : event list; reverse : event list }
-type status = Complete_search | Race_found | No_race | Unknown of string
+type status = Complete_search | Race_found | Full_race of int | No_race | Unknown of string
 type report = {
   benchmark : string;
   streams : (int * string) list;
@@ -65,9 +68,9 @@ val generate : ?n:int -> ?kv_heads:int -> ?timeout_ms:int -> Benchmark_traces.me
 val core_inputs : ?n:int -> pairing -> (int * string) list * Z.t option * Yojson.Safe.t
 val to_json : report -> Yojson.Safe.t
 
-type lowered_mlir = Core_mlir of Mlir.t | Device_mlir of Mlir_device.t
+type lowered_mlir = Source.lowered_mlir = Core_mlir of Mlir.t | Device_mlir of Mlir_device.t
 val lower_mlir : ?entry:string -> ?configuration:Yojson.Safe.t -> ?allow_prefix:bool -> Module_ast.t -> lowered_mlir
-val analyze_mlir : backend:Bug_traces.backend -> ?hivm:bool -> lowered_mlir -> Yojson.Safe.t
+val analyze_mlir : ?timeout_ms:int -> backend:Bug_traces.backend -> ?hivm:bool -> lowered_mlir -> Yojson.Safe.t
 val project_mlir : lowered_mlir -> Yojson.Safe.t -> Yojson.Safe.t
 val replay_mlir : lowered_mlir -> Yojson.Safe.t -> int
 
