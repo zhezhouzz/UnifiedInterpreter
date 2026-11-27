@@ -1,7 +1,7 @@
 module R = Hivm_trace.Execution
 module A = Hivm_trace.Module_ast
 module V = Hivm_trace.Execution_value
-let usage = "unified-interpreter run FILE --stage {hfusion|hivm} --launch JSON [--trace-db FILE | --builtin] [--trace] [--max-steps N] [--scheduler-timeout-ms N]"
+let usage = "unified-interpreter run FILE --stage {hfusion|hivm} [--launch JSON | --seed N] [--trace-db FILE | --builtin] [--scheduler-backend {bfs|smt}] [--trace] [--max-steps N] [--scheduler-timeout-ms N]"
 
 let hex bytes =
   let digits="0123456789abcdef" in
@@ -27,22 +27,36 @@ let rec value = function
 let run file args =
   let stage=ref "" and launch=ref "" and compiler=ref "" and limit=ref 10_000_000
   and trace=ref false and inspect=ref [] and builtin=ref false and db_path=ref None and timeout_ms=ref None in
+  let backend=ref None and seed=ref None in
   Arg.parse_argv ~current:(ref 0) (Array.of_list ("run"::args))
     ["--stage",Arg.Symbol (["hfusion";"hivm"],fun s->stage:=s),"IR stage";"--launch",Arg.Set_string launch,"launch JSON";
+     "--seed",Arg.Int (fun n -> seed := Some n),"seed for generating a launch configuration";
      "--bishengir-opt",Arg.Set_string compiler,"normalize assembly with BiShengIR";
+     "--vendor-syntax",Arg.Unit (fun ()->compiler:=Filename.concat (Sys.getenv "ATTENTION_ROOT") "bishengir-opt"),"use bundled BiShengIR parser";
      "--builtin",Arg.Set builtin,"use the built-in scheduling policy";
+     "--scheduler-backend",Arg.Symbol (["bfs";"smt"],fun s->backend:=Some
+       (if s="bfs" then Unified_interpreter.Precedence.Bfs else Smt)),"race analysis backend";
      "--trace-db",Arg.String (fun p->db_path:=Some p),"scheduler history database";
      "--scheduler-timeout-ms",Arg.Int (fun n->timeout_ms:=Some n),"scheduler request budget in milliseconds";
      "--max-steps",Arg.Set_int limit,"maximum interpreter steps";"--trace",Arg.Set trace,"emit execution sites on stderr";
      "--inspect-input",Arg.Symbol (["hivm.hir.load";"hivm.hir.vabs"],fun code->inspect:=code::!inspect),
          "sample the input tensor when a load or vabs completes"]
     (fun s->raise (Arg.Bad ("unexpected argument "^s))) usage;
-  if !launch="" || !stage="" then raise (Arg.Bad usage);
-  if !builtin && (!db_path<>None || !timeout_ms<>None) then raise (Arg.Bad "scheduler options require scheduled execution");
+  if !stage="" then raise (Arg.Bad usage);
+  if !launch<>"" && !seed<>None then raise (Arg.Bad "--seed requires automatic launch generation");
+  if !builtin && (!db_path<>None || !timeout_ms<>None || !backend<>None) then raise (Arg.Bad "scheduler options require scheduled execution");
   let start=Unix.gettimeofday () in
-  let syntax=if !compiler="" then A.Custom else A.BiSheng !compiler in
-  let ast=A.parse ~syntax ~file (Attention_runtime.Attention.read_file file) in
-  let launch=Yojson.Safe.from_file !launch in
+  let syntax = if !compiler <> "" then A.BiSheng !compiler else
+    match Sys.getenv_opt "ATTENTION_ROOT" with
+    | Some root when Sys.file_exists (Filename.concat root "bishengir-opt") ->
+        A.Auto (Filename.concat root "bishengir-opt")
+    | _ -> A.Custom in
+  let source=Attention_runtime.Attention.read_file file in
+  let ast=A.parse ~syntax ~file source in
+  let launch,generated=if !launch<>"" then Yojson.Safe.from_file !launch,[] else
+    let seed=match !seed with Some n -> n | None -> Random.State.bits (Random.State.make_self_init ()) in
+    let config=Random_launch.generate ~seed ~source ~stage:!stage ast in
+    config,["seed",`Int seed;"launch",config] in
   let parsed=Unix.gettimeofday () in
   let samples=ref [] in
   let on_read stream code b=if List.mem code !inspect then
@@ -50,18 +64,24 @@ let run file args =
       "values",`List (List.init (V.size b.V.shape) (fun i->value (V.get b i)))]::!samples in
   let on_read=if !inspect=[] then None else Some on_read in
   let trace=if !trace then Some (Printf.eprintf "%d %s\n") else None in
-  let schedule,r=if !builtin then
-    None,R.run_builtin ~max_steps:!limit ?on_read ?trace ~stage:!stage ~launch ast
+  let schedule,started,r=if !builtin then
+    let started=Unix.gettimeofday () in
+    None,started,R.run_builtin ~max_steps:!limit ?on_read ?trace ~stage:!stage ~launch ast
   else
-    let schedule,r=Ir_scheduler.run_module ?db_path:!db_path ?timeout_ms:!timeout_ms ~max_steps:!limit
-      ?on_read ?trace ~stage:(if !stage="hivm" then HIVM else HFusion) ~launch ast in
-    Some schedule,r in
+    let stage=if !stage="hivm" then Ir_scheduler.HIVM else HFusion in
+    let schedule=Ir_scheduler.next_trace ?db_path:!db_path ?timeout_ms:!timeout_ms ?backend:!backend
+      ~max_steps:!limit ~stage ~launch ast in
+    let started=Unix.gettimeofday () in
+    Some schedule,started,R.execute_trace ~max_steps:!limit ?on_read ?trace ~stage ~launch ast schedule in
   let finished=Unix.gettimeofday () in
   let status,detail=match r.status with Finished->"returned",`Null | Blocked xs->"deadlock",`List (List.map (fun x->`String x) xs)
     | Invalid_memory msg->"invalid-memory",`String msg | Step_limit msg->"step-limit",`String msg in
-  Yojson.Safe.to_channel stdout (`Assoc ["status",`String status;"detail",detail;"steps",`Int r.steps;
+  (match r.status with Blocked sites->Printf.eprintf "deadlock: %s\n" (String.concat ", " sites)
+   | Invalid_memory why->Printf.eprintf "invalid-memory: %s\n" why | _->());
+  Yojson.Safe.to_channel stdout (`Assoc (generated @ ["status",`String status;"detail",detail;"steps",`Int r.steps;
     "schedule",(match schedule with None->`Null | Some t->Ir_scheduler.Delivery.encode t);
     "tasks",`Int r.tasks;"parse_seconds",`Float (parsed-.start);"execute_seconds",`Float (finished-.parsed);
+    "interpreter_seconds",`Float (finished-.started);
     "memory_hex",`Assoc (List.map (fun (k,b)->k,`String (hex b)) r.memory);
     "inspected_inputs",`List (List.rev !samples);
-    "returns",`List (Array.to_list (Array.map (fun xs->`List (List.map value xs)) r.returned))]);print_newline ()
+    "returns",`List (Array.to_list (Array.map (fun xs->`List (List.map value xs)) r.returned))]));print_newline ()
