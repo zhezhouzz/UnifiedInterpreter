@@ -45,7 +45,9 @@ let generate ?n ?(kv_heads=1) ?(timeout_ms=5000) catalog method_ name =
       match method_ with
       | Concrete backend ->
           let model=Device_races.compile ~backend variant (Vectorlayout_input.make config) in
-          found config "complete" (Device_races.generate model) (Device_races.events model)
+          let coverage,rows=Device_races.analyze ~timeout_ms model in
+          let status,fields=Concrete_schedule.fields coverage in
+          `Assoc (fields @ Json.to_assoc (found config status rows (Device_races.events model)))
       | Symbolic ->
           match Device_symbolic.find ~timeout_ms variant config with
           | Error reason -> report None "unknown" [] (Device_trace.config config) ["reason",`String reason]
@@ -68,5 +70,5 @@ let replay catalog doc =
          if field "n"<>`Int config.length then invalid_arg "trace length parameter differs";
          let model=Device_races.compile variant (Vectorlayout_input.make config) in
          if Device_races.events model<>field "events" then invalid_arg "event dictionary differs";
-         List.iter (Device_races.replay_witness model) races));
+         List.iter (Device_races.replay_witness ~full:(field "trace_extent"=`String "program_end") model) races));
   2*List.length races

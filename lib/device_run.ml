@@ -16,7 +16,8 @@ type _ Effect.t += Enqueue : task * bool -> unit Effect.t
 type fiber = { mutable next : (unit -> unit) option; mutable blocked : int option;
                mutable tasks : task list }
 
-let run ?schedule ?prefix ?on_step ?on_stop ?execute ?copy_bank ?(record_events=true)
+let run ?schedule ?prefix ?on_step ?on_stop ?on_blocked ?on_iteration ?execute ?copy_bank ?(record_events=true)
+    ?(replay_error=fun reason -> Invalid_argument reason)
     ?(iteration_ordinals=false) (program : program) inputs bindings =
   if program.register_bytes <= 0 then invalid_arg "invalid register size";
   let memory = Hashtbl.create (Hashtbl.length inputs) in
@@ -89,6 +90,7 @@ let run ?schedule ?prefix ?on_step ?on_stop ?execute ?copy_bank ?(record_events=
           let names = List.map fst l.carried in
           let rec repeat ordinal i values =
             if i >= hi then List.combine names values @ env else
+            let ()=Option.iter (fun f -> f id ordinal) on_iteration in
             let inner = (l.index,scalar l.index_type (Int64.of_int i)) :: List.combine names values @ env in
             let loops = loops @ [if iteration_ordinals then ordinal else i] in
             let scope = block nested p site path loops inner l.body in
@@ -179,14 +181,15 @@ let run ?schedule ?prefix ?on_step ?on_stop ?execute ?copy_bank ?(record_events=
             not (List.exists (fun x -> x.number < t.number && x.pipe = t.pipe) f.tasks)) f.tasks in
           Printf.sprintf "stream %d [%s]" id (String.concat ", " (List.map (fun t ->
             Printf.sprintf "%s@%s" t.site (String.concat "/" (List.map string_of_int t.loops))) queues))) fibers) in
-        failwith ("device streams blocked: " ^ String.concat "; " pending)
+        let reason="device streams blocked: " ^ String.concat "; " pending in
+        (match on_blocked with Some report -> report reason | None -> failwith reason)
     | None -> () in
   let replay choice =
     let step = match choice with Host id -> host id fibers.(id)
       | Finish (id,n) -> completion id fibers.(id) (fun t -> t.number = n) in
-    match step with Some step -> apply step | None -> invalid_arg "invalid replay step" in
+    match step with Some step -> apply step | None -> raise (replay_error "invalid replay step") in
   (match schedule,prefix with None,None -> drive () | None,Some choices -> List.iter replay choices
-   | Some choices,None -> List.iter replay choices; if unfinished () then invalid_arg "incomplete replay schedule"
+   | Some choices,None -> List.iter replay choices; if unfinished () then raise (replay_error "incomplete replay schedule")
    | Some _,Some _ -> invalid_arg "provide either a schedule or a prefix");
   Option.iter (fun observe ->
     Array.to_list (Array.mapi (fun id f ->

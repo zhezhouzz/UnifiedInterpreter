@@ -84,9 +84,13 @@ let find_model ~timeout_ms variant config =
     | [] -> Result.Error "no verified witness in symbolic entry paths"
     | (a,b)::tail ->
         let conflicts = or_ ctx (cross a.writes (b.reads @ b.writes) @ cross a.reads b.writes) in
-        match Solver.check solver [a.guard;b.guard;conflicts] with
-        | Solver.UNKNOWN -> Result.Error (Solver.get_reason_unknown solver)
-        | Solver.UNSATISFIABLE -> query tail
+        let assumptions=[a.guard;b.guard;conflicts] in
+        (* 启动配置给出一个可选的长度。两个查询都保留相同的访问和同步检查。 *)
+        let preferred=eq ctx n (int ctx config.length) in
+        let rec models = function
+        | [] -> query tail
+        | extra::rest -> match Solver.check solver (extra::assumptions) with
+        | Solver.UNKNOWN | Solver.UNSATISFIABLE -> models rest
         | Solver.SATISFIABLE ->
             let model = Option.get (Solver.get_model solver) in
             let length = Z.to_int (Historical_lang.numeral (Option.get (Model.eval model n true))) in
@@ -95,12 +99,15 @@ let find_model ~timeout_ms variant config =
             let find path = List.find_opt (fun (s : Device_races.access_site) ->
               s.id.stream=1 && s.id.path=path) schedule.sites in
             (match find a.path,find b.path with Some x,Some y when Precedence.unordered schedule.graph x.node y.node ->
-               (match Device_races.minimum schedule x y with
-                | Some w ->
-                    Device_races.replay_witness schedule w;
+               (try match Device_races.minimum schedule x y with
+                | Some w when schedule.blocked_reason=None &&
+                    Option.is_some (Device_races.continuations ~timeout_ms schedule w) ->
+                    Device_races.replay_access_pair schedule w;
                     Ok (input,schedule,w)
-                | None -> query tail)
-             | _ -> query tail) in
+                | _ -> models rest
+                with Race_solve.Inconclusive _ -> models rest)
+             | _ -> models rest) in
+        models [preferred;Boolean.mk_not ctx preferred] in
   query (List.rev !segments)
 
 let find ~timeout_ms variant config =

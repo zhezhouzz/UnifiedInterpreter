@@ -55,6 +55,12 @@ let () =
       assert (Hashtbl.find expected (a,b)=List.length (J.to_list (J.member "forward" j)));
       assert (Hashtbl.find expected (b,a)=List.length (J.to_list (J.member "reverse" j)))) races;
     let original=List.hd races in
+    let wait=Wait (Local,V,MTE3,Int (I32,7L)) in
+    let blocked={p with streams=List.map (fun stream -> {stream with body=stream.body@[wait]}) p.streams} in
+    let stalled=R.compile_program ~backend blocked input in
+    assert (stalled.blocked_reason<>None && R.generate stalled=[]);
+    (match R.replay_witness stalled original with
+     | exception Invalid_argument _ -> () | () -> failwith "accepted a prefix followed by an unmatched wait");
     let changed=`Assoc (("conflicts",`List [])::List.remove_assoc "conflicts" (J.to_assoc original)) in
     match R.replay_witness model changed with
     | () -> failwith "accepted a witness with different addresses" | exception Invalid_argument _ -> ()

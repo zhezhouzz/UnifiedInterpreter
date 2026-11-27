@@ -10,9 +10,10 @@ type access_site = {id : identity; node : int; observed : footprint; possible : 
 type cached = {env : (string * Device_value.value) list; inputs : (access * string) list;
                outputs : (access * string) list; access : observation}
 type model = {program : Device_ast.program; memory : Device_value.memory;
+              blocked_reason : string option;
               bindings : (string * Device_value.value) list; iteration_ordinals : bool; steps : choice array;
               source_steps : source_step array;
-              parents : int list array; graph : Precedence.t; sites : access_site list;
+              parents : int list array; graph : Precedence.t; sites : access_site list; rounds : int array;
               banks : (choice,Device_value.bank list) Hashtbl.t; cache : (choice,cached list) Hashtbl.t;
               selectors : (int,access list * access list) Hashtbl.t;
               indexed : (int,access list) Hashtbl.t;
@@ -62,7 +63,11 @@ let compile_memory ?(backend=Bug_traces.Search) ?(readonly=[]) ?(immutable_views
   and pending = Hashtbl.create 128 and flags = Hashtbl.create 32 in
   let rows = ref [] and actions = ref [] and access = ref [] and count = ref 0 and descriptors = ref [] in
   let source_steps = ref [] in
+  let rounds=ref [] and step_rounds=ref 0 in
+  let on_iteration _ ordinal=step_rounds:=max !step_rounds (ordinal+1) in
   let on_step t =
+    rounds:= !step_rounds::!rounds;
+    step_rounds:=0;
     let n = !count in incr count;
     let info = List.find_opt (fun e -> e.phase="issued" || e.phase="done") t.observations in
     let host = match t.choice with Finish _ -> [] | Host _ ->
@@ -129,7 +134,9 @@ let compile_memory ?(backend=Bug_traces.Search) ?(readonly=[]) ?(immutable_views
       Hashtbl.replace selectors n (ranges reads,[]));
     access := List.rev_append touched !access;
     rows := !parents :: !rows; actions := t.choice :: !actions in
-  ignore (run ~on_step ~record_events:false ~iteration_ordinals program memory bindings);
+  let blocked_reason=ref None in
+  ignore (run ~on_step ~on_iteration ~on_blocked:(fun reason -> blocked_reason:=Some reason)
+    ~record_events:false ~iteration_ordinals program memory bindings);
   let parents = Array.of_list (List.rev !rows) in
   Hashtbl.iter (fun _ (s,w) ->
     let sends = Array.of_list (List.rev s) and waits = Array.of_list (List.rev w) in
@@ -164,8 +171,8 @@ let compile_memory ?(backend=Bug_traces.Search) ?(readonly=[]) ?(immutable_views
   let independent = Hashtbl.fold (fun (bank,block) () ok -> ok &&
     not (Hashtbl.fold (fun (b,k) () found -> found || (b=bank && k<>block)) readers false)) writers true &&
     Array.for_all (fun n -> List.for_all (fun p -> blocks.(p)=blocks.(n)) parents.(n)) graph.order in
-  {program;memory;bindings;iteration_ordinals;parents;steps;source_steps=Array.of_list (List.rev !source_steps);
-   banks;cache=Hashtbl.create 128;graph;sites;selectors;transfers;indexed;
+  {program;memory;bindings;blocked_reason= !blocked_reason;iteration_ordinals;parents;steps;source_steps=Array.of_list (List.rev !source_steps);
+   banks;cache=Hashtbl.create 128;graph;sites;rounds=Array.of_list (List.rev !rounds);selectors;transfers;indexed;
    blocks;independent;descriptors=Array.of_list (List.rev !descriptors);
    verified=Hashtbl.create 128;by_node;mutable_banks;read_write;writers_by_bank;host_accesses}
 
@@ -314,21 +321,24 @@ let witness a b conflicts f r =
           "conflicts",`List (List.map Device_trace.range conflicts);
           "forward",Race_report.ints f;"reverse",Race_report.ints r]
 
-let replay_witness model j =
+let replay_access_pair ?(full=false) model j =
   let open Yojson.Safe.Util in
   let f = Race_report.numbers (member "forward" j) and r = Race_report.numbers (member "reverse" j) in
   let site n key = List.find (fun s -> s.node=n && identity_json s=member key j) model.sites in
   match Race_report.numbers (member "nodes" j) with
   | [x;y] ->
       let check a b trace =
-        if List.filter (fun n -> n=x || n=y) trace<>[a;b] || List.hd (List.rev trace)<>b then
+        if List.filter (fun n -> n=x || n=y) trace<>[a;b] ||
+           (if full then List.length trace<>Array.length model.steps else List.hd (List.rev trace)<>b) then
           invalid_arg "incorrect device witness order";
         let seen = Array.make (Array.length model.steps) false in
         List.iter (fun n ->
           if seen.(n) || not (List.for_all (Array.get seen) model.parents.(n))
-            || (model.independent && model.blocks.(n)<>model.blocks.(a) && model.blocks.(n)<>model.blocks.(b))
+            || (not full && model.independent && model.blocks.(n)<>model.blocks.(a) && model.blocks.(n)<>model.blocks.(b))
             then invalid_arg "illegal device prefix";
-          seen.(n) <- true) trace in
+          seen.(n) <- true) trace;
+        if full then ignore (run ~schedule:(List.map (Array.get model.steps) trace) ~record_events:false
+          ~iteration_ordinals:model.iteration_ordinals model.program model.memory model.bindings) in
       check x y f;check y x r;
       let a = site x "first" and b = site y "second" in
       let conflicts = intersect (replay ~sliced:false model f [a;b]) (replay ~sliced:false model r [a;b]) in
@@ -448,7 +458,7 @@ let independent_pair profiles a b =
     let prior = List.rev_append (List.tl (List.rev p)) (List.rev (List.tl (List.rev q))) in
     witness a b overlap (prior@[a.node;b.node]) (prior@[b.node;a.node])) !best
 
-let generate model =
+let short_prefixes model =
   let table = Hashtbl.create 32 in
   let profiles site = match Hashtbl.find_opt table site.node with Some xs -> xs | None ->
     let xs = detached_profiles model site in Hashtbl.add table site.node xs;xs in
@@ -458,5 +468,84 @@ let generate model =
        a.conditional_writes<>[] && b.conditional_writes<>[]
     then independent_pair profiles a b
     else match minimum model a b with Some _ as w -> w | None -> refine model a b) (candidates model) in
-  List.iter (replay_witness model) races;
+  List.iter (replay_access_pair model) races;
   races
+
+let continuation ?timeout_ms model prefix =
+  let graph=model.graph in
+  let choices=List.map (Array.get model.steps) in
+  let exception Disabled in
+  let legal ?prefix ?schedule () =
+    try
+      ignore (run ?prefix ?schedule ~replay_error:(fun _ -> Disabled) ~record_events:false
+        ~iteration_ordinals:model.iteration_ordinals model.program model.memory model.bindings);
+      true
+    with Disabled | Invalid_indirect_address _ -> false in
+  let initial=Loop_trace.complete graph.Precedence.order prefix in
+  if legal ~schedule:(choices initial) () then Some initial else
+  let seen=Array.make (Array.length graph.order) false in
+  List.iter (fun n -> seen.(n)<-true) prefix;
+  let deadline=match Option.value timeout_ms ~default:5000 with
+    | 0 -> infinity | ms -> Unix.gettimeofday () +. float_of_int ms /. 1000. in
+  let rec extend rev remaining =
+    if Unix.gettimeofday ()>deadline then raise (Race_solve.Inconclusive "device continuation timed out");
+    if remaining=0 then
+      let order=List.rev rev in
+      if legal ~schedule:(choices order) () then Some order else None
+    else Array.to_seq graph.order |> Seq.find_map (fun n ->
+      if seen.(n) || not (List.for_all (Array.get seen) model.parents.(n)) then None else
+      let next=n::rev in
+      if not (legal ~prefix:(choices (List.rev next)) ()) then None else (
+        seen.(n)<-true;
+        let found=extend next (remaining-1) in
+        seen.(n)<-false;found)) in
+  extend (List.rev prefix) (Array.length graph.order-List.length prefix)
+
+let continuations ?timeout_ms model row =
+  let steps k=Race_report.numbers (Yojson.Safe.Util.member k row) in
+  Option.bind (continuation ?timeout_ms model (steps "forward")) (fun f ->
+    Option.map (fun r -> f,r) (continuation ?timeout_ms model (steps "reverse")))
+
+let replay_witness ?(full=false) model row =
+  Option.iter invalid_arg model.blocked_reason;
+  replay_access_pair ~full model row;
+  if not full && Option.is_none (continuations model row) then
+    invalid_arg "device race prefix cannot reach program end"
+
+let generate ?timeout_ms model =
+  match model.blocked_reason with Some _ -> [] | None ->
+  let rows=short_prefixes model in
+  List.iter (fun row -> if Option.is_none (continuations ?timeout_ms model row) then
+    raise (Race_solve.Inconclusive "no complete continuation was verified for a device race")) rows;
+  rows
+
+let analyze ?timeout_ms model =
+  match model.blocked_reason with
+  | Some why -> Concrete_schedule.Unresolved why,[]
+  | None when not (Array.exists (fun n -> n>Loop_trace.threshold) model.rounds) ->
+      (try Concrete_schedule.All_pairs,generate ?timeout_ms model
+       with Race_solve.Inconclusive why -> Unresolved why,[])
+  | None ->
+    let sites=Array.of_list model.sites in
+    let spans=List.map (fun r -> r.bank,r.first,r.limit) in
+    let accesses=List.map (fun (s:access_site) -> Loop_trace.{node=s.node;reads=spans s.possible.reads;
+                                               writes=spans s.possible.writes}) model.sites in
+    let blocked_prefix=ref false in
+    let validate _graph i j =
+      let a,b=if i<j then sites.(i),sites.(j) else sites.(j),sites.(i) in
+      let candidate=match minimum model a b with Some _ as found -> found | None -> refine model a b in
+      Option.bind candidate (fun row ->
+        let steps k=Race_report.numbers (Yojson.Safe.Util.member k row) in
+        let f=steps "forward" and r=steps "reverse" in
+        match continuations ?timeout_ms model row with
+        | Some (forward,reverse) ->
+            let doc=`Assoc (List.map (function "forward",_ -> "forward",Race_report.ints forward
+              | "reverse",_ -> "reverse",Race_report.ints reverse | field -> field) (Yojson.Safe.Util.to_assoc row)) in
+            replay_witness ~full:true model doc; Some (f @ r,doc)
+        | _ -> blocked_prefix:=true; None) in
+    match Loop_trace.choose ?timeout_ms ~parents:model.parents ~iterations:model.rounds accesses validate with
+    | Found (n,doc) -> Concrete_schedule.Full_trace n,[doc]
+    | No_race when !blocked_prefix -> Unresolved "no complete continuation was found for the racing prefixes",[]
+    | No_race -> Race_free,[]
+    | Incomplete why -> Unresolved why,[]
+    | exception Race_solve.Inconclusive why -> Unresolved why,[]
