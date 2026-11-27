@@ -6,7 +6,7 @@ import subprocess
 from tempfile import TemporaryDirectory
 from zipfile import ZipFile
 
-from export_catalog_ast import REVISION
+from export_catalog_ast import litao_bytes, litao_cases, litao_revision
 from export_vectorlayout_ast import DIGESTS
 from project_hfusion_ir import compile_ir, project
 
@@ -106,12 +106,8 @@ def cv_pair(opts, name, staging):
 
 def generate(opts, low_cases, high_cases, staging):
     cases = {}
-    litao = Path("benchmarks/litao")
-    dirs = {json.loads(f.read_bytes())["id"]: f.parent.relative_to(ROOT / litao)
-            for f in (ROOT / litao).rglob("case.json")}
-
-    def original(path):
-        return subprocess.check_output(["git", "-C", opts.litao_repo, "show", f"{REVISION}:{path}"])
+    dirs = litao_cases()
+    revision = litao_revision()
 
     for name in sorted(set(low_cases) | set(high_cases) | {f"cv/scene1/{v}" for v in SCENE}):
         if name.startswith(("vectorlayout/", "cv/scene1/")):
@@ -134,23 +130,23 @@ def generate(opts, low_cases, high_cases, staging):
                 low = Path(f"examples/kernels/{EXISTING[name]}_hivm.mlir")
                 data = read(low)
             else:
-                low = PAIRS / name / "hivm.mlir"
                 if name.startswith("litao/"):
                     _, kernel, variant = name.split("/")
-                    path = Path("benchmark") / dirs[kernel] / f"{variant}.hivm.mlir"
-                    data = original(path)
-                    source = {"revision": REVISION, "hivm_path": str(path)}
+                    low = dirs[kernel] / f"{variant}.hivm.mlir"
+                    data = litao_bytes(low, revision, opts.litao_repo)
+                    source = {"revision": revision, "hivm_path": str(low)}
                 else:
+                    low = PAIRS / name / "hivm.mlir"
                     data = subprocess.check_output([opts.exe, "race", "source", name], cwd=ROOT)
+                    store(staging, low, data)
                 ast = json.loads(read(low_cases[name]["hivm_ast"]))
                 if digest(data) != ast["source_sha256"]:
                     raise ValueError(f"{name}: HIVM source differs from scheduler AST")
-                store(staging, low, data)
             if name.startswith("litao/add-Ascend910B1/"):
-                path = Path("benchmark") / dirs[kernel] / "source.mlir"
+                path = dirs[kernel] / "source.mlir"
                 source["hfusion_path"] = str(path)
-                high = original(path)
-                result = store(staging, PAIRS / "litao/add-Ascend910B1/hfusion.mlir", high)
+                high = litao_bytes(path, revision, opts.litao_repo)
+                result = record(path, high)
                 case = {"origin": "compiler-source", "hfusion": result}
             else:
                 high, bindings = project(opts.opt, data, name)
@@ -196,7 +192,7 @@ def main():
     parser.add_argument("action", choices=["generate", "check"])
     parser.add_argument("--opt", default="bishengir-opt")
     parser.add_argument("--exe", type=Path, default=ROOT / "_build/default/bin/main.exe")
-    parser.add_argument("--litao-repo", type=Path, default=ROOT)
+    parser.add_argument("--litao-repo", type=Path, help="also verify inputs against this Git repository")
     parser.add_argument("--scene-zip", type=Path)
     parser.add_argument("--layout-dumps", type=Path)
     opts = parser.parse_args()

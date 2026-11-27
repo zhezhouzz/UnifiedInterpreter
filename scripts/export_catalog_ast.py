@@ -11,7 +11,7 @@ from xdsl.parser import Parser
 from mlir_frontend import encode_function
 
 
-REVISION = "ee071f0409535dd13fcb2e2e96fd3e5f5ce050eb"
+ROOT = Path(__file__).resolve().parents[1]
 CONTROL = {"if": "scf.if", "for": "scf.for"}
 SYNC = {"pipebarrier": "hivm.hir.pipe_barrier", "setflag": "hivm.hir.set_flag",
         "waitflag": "hivm.hir.wait_flag", "syncblockset": "hivm.hir.sync_block_set",
@@ -19,6 +19,31 @@ SYNC = {"pipebarrier": "hivm.hir.pipe_barrier", "setflag": "hivm.hir.set_flag",
 PURE = {"annotation.mark", "hivm.hir.get_block_idx", "hivm.hir.get_sub_block_idx",
         "hivm.hir.pointer_cast", "hivm.hir.set_mask_norm", "memref.reinterpret_cast",
         "memref.subview", "scf.yield", "func.return"}
+
+
+def litao_cases():
+    directories = {}
+    for tier in ("L1", "L2"):
+        for file in (ROOT / "benchmark" / tier).rglob("case.json"):
+            case = json.loads(file.read_bytes())
+            if case.get("execution") is not None:
+                directories[case["id"]] = file.parent.relative_to(ROOT)
+    return directories
+
+
+def litao_revision():
+    return subprocess.check_output(
+        ["git", "log", "-1", "--format=%H", "--", "benchmark"], cwd=ROOT, text=True
+    ).strip()
+
+
+def litao_bytes(path, revision, reference_repo):
+    data = (ROOT / path).read_bytes()
+    if reference_repo is not None:
+        expected = subprocess.check_output(["git", "-C", reference_repo, "show", f"{revision}:{path}"])
+        if data != expected:
+            raise ValueError(f"{path} differs from the reference repository at {revision}")
+    return data
 
 
 def litao_sites(commands, body, site, path):
@@ -94,13 +119,13 @@ def export(opt, source, name, core):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--litao-repo", type=Path, required=True)
+    parser.add_argument("--litao-repo", type=Path, help="also verify inputs against this Git repository")
     parser.add_argument("--opt", default="bishengir-opt")
     parser.add_argument("--exe", type=Path, default=Path("_build/default/bin/main.exe"))
     parser.add_argument("--output", type=Path, default=Path("benchmarks/hivm"))
     args = parser.parse_args()
-    root = Path("benchmarks/litao")
-    cases = {json.loads(f.read_text())["id"]: f.parent.relative_to(root) for f in root.rglob("case.json")}
+    cases = litao_cases()
+    revision = litao_revision()
     cli = [args.exe.resolve(), "race"]
     names = subprocess.check_output([*cli, "list"], text=True).splitlines()
     archived = {"fixture/hivm-two-loads", "issue316/ordered", "issue316/missing-ready",
@@ -110,13 +135,8 @@ def main():
         core = None
         if name.startswith("litao/"):
             _, case, variant = name.split("/")
-            def original(ext):
-                file = Path("benchmark") / cases[case] / f"{variant}.{ext}"
-                return subprocess.check_output(["git", "-C", args.litao_repo, "show", f"{REVISION}:{file}"])
-            source = original("hivm.mlir")
-            model = original("program.core")
-            if model != (root / cases[case] / f"{variant}.program.core").read_bytes():
-                raise ValueError(f"{name}: local Core program differs from the source revision")
+            source = litao_bytes(cases[case] / f"{variant}.hivm.mlir", revision, args.litao_repo)
+            model = litao_bytes(cases[case] / f"{variant}.program.core", revision, args.litao_repo)
             core = json.loads(model)
         else:
             source = subprocess.check_output([*cli, "source", name])

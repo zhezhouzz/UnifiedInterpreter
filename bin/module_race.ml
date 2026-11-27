@@ -35,7 +35,7 @@ let scene_model ?query_length () =
   | _ -> invalid_arg "no launch input satisfies the nonempty sparse tile constraints"
 
 let input_request ?n name =
-  let catalog = Race_benchmarks.catalog "benchmarks/litao" in
+  let catalog = Race_benchmarks.catalog "benchmark" in
   if List.mem_assoc name Hfusion_race.catalog then begin
     let file,launch,default = List.assoc name Hfusion_race.catalog in
     let program = Attention_runtime.Parser.parse ~file (Attention_runtime.Attention.read_file file) in
@@ -121,7 +121,7 @@ let dispatch args =
       if List.exists (fun s -> not (List.mem s ["--hfusion";"--hivm";"--json"])) flags then
         invalid_arg "unknown catalog option";
       let all = cases () in
-      let core = Race_benchmarks.catalog "benchmarks/litao" in
+      let core = Race_benchmarks.catalog "benchmark" in
       if List.mem "--json" flags then (Yojson.Safe.to_channel stdout
         (list (List.map (fun (name,case) -> info core stage name case) all)); print_newline ())
       else List.iter (fun (name,_) -> print_endline name) all;
@@ -129,7 +129,7 @@ let dispatch args =
   | "replay"::file::_,_ when field "format" (Yojson.Safe.from_file file) = text "ir-race-1" ->
       replay (Yojson.Safe.from_file file); true
   | "run"::name::options,Some stage when List.mem_assoc name (cases ()) &&
-      not (if stage="hivm" then List.mem_assoc name (Race_benchmarks.catalog "benchmarks/litao")
+      not (if stage="hivm" then List.mem_assoc name (Race_benchmarks.catalog "benchmark")
            else List.mem_assoc name Hfusion_race.catalog) ->
       let backend = ref Precedence.Bfs and n = ref None and save = ref None and launch = ref None
       and file = ref None and timeout = ref 5000 in

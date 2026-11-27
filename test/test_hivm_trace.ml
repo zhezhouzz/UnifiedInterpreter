@@ -4,7 +4,7 @@ module H = Hivm_trace
 module C = Core_lang
 module J = Yojson.Safe.Util
 
-let catalog = Race_benchmarks.catalog "../benchmarks/litao"
+let catalog = Race_benchmarks.catalog "../benchmark"
 let registered = H.registered ~root:"../benchmarks/hivm" catalog
 let fixture file = H.read_ast ("../benchmarks/hivm/" ^ file ^ ".ast.json")
 let methods = Benchmark_traces.[Concrete Search; Concrete Solve; Symbolic]

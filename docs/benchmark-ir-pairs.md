@@ -47,10 +47,12 @@ dune build bin/main.exe
 
 第一条 Python 命令核对目录覆盖范围和文件摘要，用 BiShengIR 验证每份 HIVM，并将每份 HFusion 编译到 HIVM。对于计算版本，它还从原始 HIVM 重新生成 HFusion 并比较文件和参数。对于四个 CV 变体，它使用 `mm-map-mode=macro_instr`，将转换结果与原始日志中 `After ConvertHFusionToHIVM` 快照经同一编译器打印后的摘要比较。第二条命令从原始 MLIR 重新导出模块 AST，逐个比较操作、类型、属性和 region。多个变体共享完全相同的 IR 时，按 SHA-256 只保存一份 AST。
 
-从原始归档重新生成目录时，传入场景 1 的 ZIP、解压后包含两个 vectorlayout 编译日志的目录，以及包含所记录 Git 修订的仓库。
+目录中的 28 个 Litao HIVM 文件直接引用合并进来的原始路径。`add-Ascend910B1` 的两个变体也直接读取同一份高层输入。用 `git log -- benchmark/L2/double-buffer/buggy.hivm.mlir` 可以查看该文件的原始提交和作者。[Litao benchmark](../benchmark/README.md)
+
+从原始归档重新生成目录时，传入场景 1 的 ZIP 和解压后包含两个 vectorlayout 编译日志的目录。
 
 ```sh
 .venv-attention/bin/python scripts/benchmark_ir_pairs.py generate \
   --opt /path/to/bishengir-opt --scene-zip '/path/to/场景1 IR.zip' \
-  --layout-dumps '/path/to/vectorlayout精度问题' --litao-repo /path/to/UnifiedInterpreter
+  --layout-dumps '/path/to/vectorlayout精度问题'
 ```

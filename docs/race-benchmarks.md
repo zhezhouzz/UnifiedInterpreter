@@ -17,7 +17,7 @@ dune exec ./bin/main.exe -- race run vectorlayout/fail --backend smt --n 160 --s
 ```ocaml
 open Unified_interpreter
 
-let catalog = Race_benchmarks.catalog "benchmarks/litao"
+let catalog = Race_benchmarks.catalog "benchmark"
 let report = Benchmark_traces.generate catalog (Concrete Solve) "litao/missing-wait/buggy"
 let replayed_prefixes = Benchmark_traces.replay catalog report
 ```
@@ -31,7 +31,7 @@ let replayed_prefixes = Benchmark_traces.replay catalog report
 | `vectorlayout/` | `ok` 与 `fail` 的设备 AST。默认序列长度为 160，KV head 数量为 1。使用 `--n 4096 --kv-heads 4` 可以执行 8 个 query head 的输入。 |
 | `regression/`、`fixture/` | 标量控制、循环、别名、分配、屏障、广播、多个发送者及跨管线访问等调度回归程序。 |
 
-Litao 文件保存在 `benchmarks/litao`，来源为 `core_language_litao` 的提交 `ee071f0409535dd13fcb2e2e96fd3e5f5ce050eb`。可以使用 `--root DIR` 指定该目录。程序中的 SSA 引用、循环绑定以及跨流的令牌目标通过 JSON 读入。目录内的许可证保留在 `licenses/`。
+Litao 的原始文件和提交历史通过 `core_language` 合入。scheduler 从 `benchmark/L1` 和 `benchmark/L2` 读取包含 `execution` 配置的 14 组用例。每组的 `case.json` 提供启动参数，`buggy.program.core` 和 `fixed.program.core` 提供两个变体的程序。可使用 `--root DIR` 指定用例目录。[原始 benchmark](../benchmark/README.md) · [许可证](../benchmark/licenses)
 
 ## 具体输入的判定
 
@@ -59,7 +59,7 @@ Litao 文件保存在 `benchmarks/litao`，来源为 `core_language_litao` 的�
 
 ```sh
 dune build bin/main.exe
-python scripts/export_catalog_ast.py --litao-repo /path/to/UnifiedInterpreter --opt /path/to/bishengir-opt
+python scripts/export_catalog_ast.py --opt /path/to/bishengir-opt
 ```
 
 ```sh

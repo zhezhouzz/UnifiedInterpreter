@@ -4,7 +4,7 @@ module A = H.Module_ast
 module J = Yojson.Safe.Util
 
 let root = "../benchmarks/hivm"
-let catalog = Race_benchmarks.catalog "../benchmarks/litao"
+let catalog = Race_benchmarks.catalog "../benchmark"
 
 let consume ast first second events =
   let pending = Hashtbl.create 16 in

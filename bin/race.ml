@@ -2,7 +2,7 @@ open Unified_interpreter
 module J = Yojson.Safe.Util
 
 let run argv =
-  let command=ref [] and root=ref "benchmarks/litao" and backend=ref "bfs" in
+  let command=ref [] and root=ref "benchmark" and backend=ref "bfs" in
   let n=ref None and save=ref None and timeout=ref 5000 and heads=ref 1 and json=ref false in
   let ast=ref None and hivm=ref false in
   let entry=ref None and launch=ref None and replay=ref None and project=ref None and syntax=ref None in
@@ -56,7 +56,8 @@ let run argv =
       if !entry<>None || !launch<>None || !replay<>None || !project<>None || !syntax<>None then
         raise (Arg.Bad "MLIR options require race mlir FILE");
       let catalog=Race_benchmarks.catalog !root in
-      let directory = Filename.concat (Filename.dirname !root) "hivm" in
+      let archive = if Filename.basename !root = "benchmark" then "benchmarks/hivm" else "hivm" in
+      let directory = Filename.concat (Filename.dirname !root) archive in
       (match selected with
        | ["list"] when !json ->
            let info (name,load) =

@@ -3,7 +3,7 @@ open Unified_interpreter
 module H = Hivm_trace
 module A = H.Module_ast
 
-let catalog = Race_benchmarks.catalog "../benchmarks/litao"
+let catalog = Race_benchmarks.catalog "../benchmark"
 let file v = "../benchmarks/hivm/vectorlayout_" ^ v ^ ".ast.json"
 let reject f = match f () with exception Invalid_argument _ -> () | _ -> assert false
 

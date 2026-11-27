@@ -34,7 +34,7 @@ scheduler 返回 `H.report`，对应的 JSON 格式为 `hivm-race-1`。`benchmar
 
 分别执行 `forward` 和 `reverse`。每次从相同的入口实参、初始内存和空的待完成任务表开始。每条流独立保存程序位置、SSA 值和循环轮次，即使多条流调用同一个入口。根据 `report.inputs` 准备初始状态。
 
-- **模块格式的 fixture、regression 和 Litao** 使用 `bindings[].stream` 选择流，将 `arguments` 按入口形参顺序绑定。整数直接使用，具有相同 `storage` 名称的实参引用同一块内存，`bytes` 给出字节数。按 `initial` 初始化，再按可选的 `initial_cells` 覆盖指定元素。相同的 `descriptor_slot` 共享一个初始为空的描述符槽。Litao 的 `coordinates` 提供 block、核类型和 subblock。`initial_default` 给出默认值，`ub:流:字节偏移` 和 `cc:流:字节偏移` 从该位置初始化 `tile` 个元素，`"identity"` 表示各通道依次访问连续元素。[输入字段](../lib/hivm/catalog_inputs.ml) · [间接访存输入示例](../benchmarks/litao/L2/indirect-atomic/case.json)
+- **模块格式的 fixture、regression 和 Litao** 使用 `bindings[].stream` 选择流，将 `arguments` 按入口形参顺序绑定。整数直接使用，具有相同 `storage` 名称的实参引用同一块内存，`bytes` 给出字节数。按 `initial` 初始化，再按可选的 `initial_cells` 覆盖指定元素。相同的 `descriptor_slot` 共享一个初始为空的描述符槽。Litao 的 `coordinates` 提供 block、核类型和 subblock。`initial_default` 给出默认值，`ub:流:字节偏移` 和 `cc:流:字节偏移` 从该位置初始化 `tile` 个元素，`"identity"` 表示各通道依次访问连续元素。[输入字段](../lib/hivm/catalog_inputs.ml) · [间接访存输入示例](../benchmark/L2/indirect-atomic/case.json)
 - **vectorlayout** 使用 `inputs.coordinates` 选择 block 和 Cube 或 Vector 子块。`inputs.bindings` 以 `arg0` 至 `arg27` 为键。调用 `Vectorlayout_input.make_hivm (Device_trace.parse_config config)`，其中 `config` 取自 `inputs.config`，即可重建这组实参和初始内存。[输入构造](../lib/vectorlayout_input.ml#L72) · [配置解码](../lib/device_trace.ml#L38)
 - **三个单函数用例** 使用调用方的缓冲区。`inputs.arguments` 给出形参名称和顺序，将 `report.n` 绑定到 `inputs.n_argument` 指定的形参。例如 `@two_loads` 接收 `%a`、`%b`、`%dst`、`%n`。[two-loads 入口](../examples/kernels/two_loads_hivm.mlir) · [调用示例](../test/test_hivm_trace.ml)
 

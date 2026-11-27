@@ -3,7 +3,7 @@ module J = Yojson.Safe.Util
 module B = Bug_traces
 
 let () =
-  let cases=Race_benchmarks.catalog "../benchmarks/litao" in
+  let cases=Race_benchmarks.catalog "../benchmark" in
   let names=List.map fst cases in
   assert (List.length names=List.length (List.sort_uniq compare names));
   List.iter (fun name -> List.iter (fun variant ->

@@ -8,7 +8,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--exe", type=Path, default=Path("_build/default/bin/main.exe"))
     parser.add_argument("--output", type=Path, default=Path("_build/race-reports"))
-    parser.add_argument("--root", type=Path, default=Path("benchmarks/litao"))
+    parser.add_argument("--root", type=Path, default=Path("benchmark"))
     parser.add_argument("--filter", default="")
     parser.add_argument("--n", type=int)
     parser.add_argument("--kv-heads", type=int, default=1)

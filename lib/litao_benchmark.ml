@@ -14,10 +14,14 @@ let discover root =
     let file = Filename.concat dir "case.json" in
     if Sys.file_exists file then
       let json = Yojson.Safe.from_file file in
-      [{name=string "id" json;directory=dir;launch=field "execution" json}]
+      (match field "execution" json with
+       | `Null -> []
+       | launch -> [{name=string "id" json;directory=dir;launch}])
     else Sys.readdir dir |> Array.to_list |> List.concat_map (fun name ->
       let path = Filename.concat dir name in if Sys.is_directory path then walk path else []) in
-  walk root |> List.sort (fun x y -> String.compare x.name y.name)
+  let dirs = List.map (Filename.concat root) ["L1"; "L2"] |> List.filter Sys.file_exists in
+  List.concat_map walk (if dirs = [] then [root] else dirs)
+  |> List.sort (fun x y -> String.compare x.name y.name)
 
 let pipe = function
   | "S" -> scalar_pipe | "V" -> 0 | "MTE2" -> 1 | "MTE3" -> 2

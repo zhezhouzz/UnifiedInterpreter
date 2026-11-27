@@ -31,10 +31,6 @@ def main():
     compiler = opts.bishengir_opt.resolve()
     exe = opts.exe.resolve()
     catalog = json.loads((root/"benchmarks/ir-pairs/catalog.json").read_bytes())["benchmarks"]
-    configs = {}
-    for path in (root/"benchmarks/litao").rglob("case.json"):
-        case = json.loads(path.read_bytes())
-        configs[case["id"]] = case.get("execution",{})
 
     def invoke(argv, log, data=None):
         result = subprocess.run(argv, input=data, cwd=root, env=env, capture_output=True, timeout=opts.timeout)
@@ -63,7 +59,10 @@ def main():
             syntax = "bisheng"
         ast = json.loads(ast)
         request = json.loads(invoke([exe,"race","launch-request",name,"--"+stage],directory/"input.log"))
-        config = configs[name.split("/")[1]] if name.startswith("litao/") else {}
+        config = {}
+        if name.startswith("litao/"):
+            case_path = (root / catalog[name]["hivm"]["path"]).with_name("case.json")
+            config = json.loads(case_path.read_bytes())["execution"]
         launch = launch_for(request,ast,config)
         launch_path = directory/"launch.json"
         launch_path.write_text(json.dumps(launch,separators=(",",":")))

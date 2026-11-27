@@ -428,11 +428,11 @@
     "litao/add-Ascend910B1/buggy": {
       "origin": "compiler-source",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/add-Ascend910B1/hfusion.mlir",
+        "path": "benchmark/L1/triton-add/Ascend910B1/source.mlir",
         "sha256": "8c2afc2b75dc9e698a771a1183ccebbeaa6a26e45ef618a8ca74d203cb46a821"
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/add-Ascend910B1/buggy/hivm.mlir",
+        "path": "benchmark/L1/triton-add/Ascend910B1/buggy.hivm.mlir",
         "sha256": "27c98709e7929d46a7092dfee07241099a78322ffbcd796eb6e219658e87c266"
       },
       "source": {
@@ -444,11 +444,11 @@
     "litao/add-Ascend910B1/fixed": {
       "origin": "compiler-source",
       "hfusion": {
-        "path": "benchmarks/ir-pairs/litao/add-Ascend910B1/hfusion.mlir",
+        "path": "benchmark/L1/triton-add/Ascend910B1/source.mlir",
         "sha256": "8c2afc2b75dc9e698a771a1183ccebbeaa6a26e45ef618a8ca74d203cb46a821"
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/add-Ascend910B1/fixed/hivm.mlir",
+        "path": "benchmark/L1/triton-add/Ascend910B1/fixed.hivm.mlir",
         "sha256": "a41ec7d0feacd95c80f63cfd08dfcb3754e26a397a796eddeb78f3200c2cd02c"
       },
       "source": {
@@ -474,7 +474,7 @@
         ]
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/broadcast-guard/buggy/hivm.mlir",
+        "path": "benchmark/L2/broadcast-guard/buggy.hivm.mlir",
         "sha256": "888f870657b74680e11ee3b6f7ab8d59180ff29f03f93c965c6459f6dfa8c222"
       },
       "source": {
@@ -499,7 +499,7 @@
         ]
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/broadcast-guard/fixed/hivm.mlir",
+        "path": "benchmark/L2/broadcast-guard/fixed.hivm.mlir",
         "sha256": "0445a5817fadc8110ed6decb677882506088c55d64b1347592168a6fd5417fd1"
       },
       "source": {
@@ -514,7 +514,7 @@
         "sha256": "9d885661f7e0a021b1324921540a2d6d95b0ae0e67544d14a9c4712022b39a0b"
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/counter-capacity/buggy/hivm.mlir",
+        "path": "benchmark/L2/counter-capacity/buggy.hivm.mlir",
         "sha256": "21c71de3ad7625a5d7f7f9c52de7907704f6e9f7fd8490163744a9c791e2d034"
       },
       "source": {
@@ -529,7 +529,7 @@
         "sha256": "9d885661f7e0a021b1324921540a2d6d95b0ae0e67544d14a9c4712022b39a0b"
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/counter-capacity/fixed/hivm.mlir",
+        "path": "benchmark/L2/counter-capacity/fixed.hivm.mlir",
         "sha256": "2a0ab3b5fa2d138cdb681a7b0e1a288e6c8528eb5e0ba99be90cb8edee477568"
       },
       "source": {
@@ -544,7 +544,7 @@
         "sha256": "895b162e8d00871b0aec7ff42c81ba2754b7f98040090b803a3f6cc02888e651"
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/cross-loop-placement/buggy/hivm.mlir",
+        "path": "benchmark/L2/cross-loop-placement/buggy.hivm.mlir",
         "sha256": "416e29b953a174023a6d75c2ab1947c92119ade9b368f175aa9f41ebb6795f40"
       },
       "source": {
@@ -559,7 +559,7 @@
         "sha256": "895b162e8d00871b0aec7ff42c81ba2754b7f98040090b803a3f6cc02888e651"
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/cross-loop-placement/fixed/hivm.mlir",
+        "path": "benchmark/L2/cross-loop-placement/fixed.hivm.mlir",
         "sha256": "c0368e76327ee3e8a6e9c06a448a15d61a82a0ccaed0e2a2a13b555f3309a983"
       },
       "source": {
@@ -605,7 +605,7 @@
         ]
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/double-buffer/buggy/hivm.mlir",
+        "path": "benchmark/L2/double-buffer/buggy.hivm.mlir",
         "sha256": "17a4edfdba044486f41989330ebb98dabf6f0ba7faf9948409537de866b0613f"
       },
       "source": {
@@ -651,7 +651,7 @@
         ]
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/double-buffer/fixed/hivm.mlir",
+        "path": "benchmark/L2/double-buffer/fixed.hivm.mlir",
         "sha256": "4165198bc403a9f3b02aedea8f4e3de4478fdb7a0ecc501e5c44c6604aaa38d8"
       },
       "source": {
@@ -666,7 +666,7 @@
         "sha256": "ef73fc8867a143137e15e7ddd295570ade98340c68626af521b0ea6f0714547b"
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/empty-preload/buggy/hivm.mlir",
+        "path": "benchmark/L2/empty-preload/buggy.hivm.mlir",
         "sha256": "44b03ea7957a4c8cb5b83fb572655a3369c47924fa880342eb61ad89e17f1a55"
       },
       "source": {
@@ -681,7 +681,7 @@
         "sha256": "ef73fc8867a143137e15e7ddd295570ade98340c68626af521b0ea6f0714547b"
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/empty-preload/fixed/hivm.mlir",
+        "path": "benchmark/L2/empty-preload/fixed.hivm.mlir",
         "sha256": "b2cc45e095e0a8c95709d50ee78910f4a80cf4a3820ef05275bf81404b9dc616"
       },
       "source": {
@@ -696,7 +696,7 @@
         "sha256": "3bda86e4bbc1cd480d5951b704df7ed48adee0b889b662a20ebe6ade0cb87ef6"
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/event-collision/buggy/hivm.mlir",
+        "path": "benchmark/L2/event-collision/buggy.hivm.mlir",
         "sha256": "2441bd468b637bee157d18374d18a070f2ffa17c772ef7bbba684d3cfd1fe19c"
       },
       "source": {
@@ -711,7 +711,7 @@
         "sha256": "3bda86e4bbc1cd480d5951b704df7ed48adee0b889b662a20ebe6ade0cb87ef6"
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/event-collision/fixed/hivm.mlir",
+        "path": "benchmark/L2/event-collision/fixed.hivm.mlir",
         "sha256": "27a1417ea1d81b0dc33c910a18d92c8dad7954c89dda7e0df7e2649f45cf282e"
       },
       "source": {
@@ -739,7 +739,7 @@
         ]
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/indirect-atomic/buggy/hivm.mlir",
+        "path": "benchmark/L2/indirect-atomic/buggy.hivm.mlir",
         "sha256": "ce3d2885bcc1072f515a44d3d34124db8eed836614fadb910228702234094d54"
       },
       "source": {
@@ -767,7 +767,7 @@
         ]
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/indirect-atomic/fixed/hivm.mlir",
+        "path": "benchmark/L2/indirect-atomic/fixed.hivm.mlir",
         "sha256": "42f9cff4e746d232a9472b31ecf922755b7a91b964c6a34d3fd5d312467775ce"
       },
       "source": {
@@ -804,7 +804,7 @@
         ]
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/missing-wait/buggy/hivm.mlir",
+        "path": "benchmark/L1/missing-wait/buggy.hivm.mlir",
         "sha256": "20a2bf1bd2b26c0b99b011bc4e993bf7feeec11b04d5d23337fecfe7327a54f3"
       },
       "source": {
@@ -841,7 +841,7 @@
         ]
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/missing-wait/fixed/hivm.mlir",
+        "path": "benchmark/L1/missing-wait/fixed.hivm.mlir",
         "sha256": "271c627dacb085cc439687cdb3f9908acc81ef4b0333cbaf67e8f4adcea0104d"
       },
       "source": {
@@ -880,7 +880,7 @@
         ]
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/mix-handoff/buggy/hivm.mlir",
+        "path": "benchmark/L1/mix-handoff/buggy.hivm.mlir",
         "sha256": "befa31858cae4117eb946c3c7dfbbe4e1c2be20b05f46b072d5f2e579ddcfccc"
       },
       "source": {
@@ -919,7 +919,7 @@
         ]
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/mix-handoff/fixed/hivm.mlir",
+        "path": "benchmark/L1/mix-handoff/fixed.hivm.mlir",
         "sha256": "209c3929285068707f8ead6892d7c3e561dca14c18f025a1d3b1727b37f748d0"
       },
       "source": {
@@ -956,7 +956,7 @@
         ]
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/scalar-fallback/buggy/hivm.mlir",
+        "path": "benchmark/L2/scalar-fallback/buggy.hivm.mlir",
         "sha256": "1a3c4f2fcbdc07742ab6930e03a2999d42c421ab2a72c0d1e47ad30e16aea2a4"
       },
       "source": {
@@ -993,7 +993,7 @@
         ]
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/scalar-fallback/fixed/hivm.mlir",
+        "path": "benchmark/L2/scalar-fallback/fixed.hivm.mlir",
         "sha256": "ffc5945aa3297e5f85355225d02e9a75354e5f61e473c398648eaf67548ce483"
       },
       "source": {
@@ -1030,7 +1030,7 @@
         ]
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/slot-release/buggy/hivm.mlir",
+        "path": "benchmark/L2/slot-release/buggy.hivm.mlir",
         "sha256": "018e021a90702ca446bc56981550128de9e7a368c6cf7f2398cc1e383a82b44f"
       },
       "source": {
@@ -1067,7 +1067,7 @@
         ]
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/slot-release/fixed/hivm.mlir",
+        "path": "benchmark/L2/slot-release/fixed.hivm.mlir",
         "sha256": "76e9278abdc418452c21bcdd4954bdd3f49a8a5195b4a014e6daff886444b576"
       },
       "source": {
@@ -1104,7 +1104,7 @@
         ]
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/wrong-event/buggy/hivm.mlir",
+        "path": "benchmark/L1/wrong-event/buggy.hivm.mlir",
         "sha256": "35e3cf7feb0c25ced6624ab487598eca6eaefbd74627236103cbb076f541c46e"
       },
       "source": {
@@ -1141,7 +1141,7 @@
         ]
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/wrong-event/fixed/hivm.mlir",
+        "path": "benchmark/L1/wrong-event/fixed.hivm.mlir",
         "sha256": "271c627dacb085cc439687cdb3f9908acc81ef4b0333cbaf67e8f4adcea0104d"
       },
       "source": {
@@ -1178,7 +1178,7 @@
         ]
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/zero-trip-alias/buggy/hivm.mlir",
+        "path": "benchmark/L2/zero-trip-alias/buggy.hivm.mlir",
         "sha256": "04caa4ef1fcc4b12b6bb8f051425b9c30160d4493693a1c89029d8902362f5fb"
       },
       "source": {
@@ -1215,7 +1215,7 @@
         ]
       },
       "hivm": {
-        "path": "benchmarks/ir-pairs/litao/zero-trip-alias/fixed/hivm.mlir",
+        "path": "benchmark/L2/zero-trip-alias/fixed.hivm.mlir",
         "sha256": "ef0a0a72e759cba2619d2a4b2f724643605eba803f38a6af81a9f5a4b9010fd7"
       },
       "source": {

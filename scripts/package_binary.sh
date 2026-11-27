@@ -18,7 +18,10 @@ cp requirements-attention.txt "$bundle/"
 cp docs/binary-distribution.md "$bundle/README.md"
 cp -R examples "$bundle/"
 mkdir -p "$bundle/benchmarks"
-cp -R benchmarks/hfusion benchmarks/ir-pairs benchmarks/scheduler benchmarks/hivm benchmarks/litao "$bundle/benchmarks/"
+cp -R benchmarks/hfusion benchmarks/ir-pairs benchmarks/scheduler benchmarks/hivm "$bundle/benchmarks/"
+mkdir -p "$bundle/benchmark"
+cp -R benchmark/L1 benchmark/L2 benchmark/licenses "$bundle/benchmark/"
+ln -s ../benchmark "$bundle/benchmarks/litao"
 cp artifacts/flash_attention/ir/hfusion_level.mlir \
   artifacts/flash_attention/ir/attention_hivm_compute.mlir \
   "$bundle/artifacts/flash_attention/ir/"

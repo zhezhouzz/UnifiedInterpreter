@@ -22,6 +22,16 @@ for stage in ("hfusion", "hivm"):
     if set(race("list", "--"+stage).splitlines()) != required:
         raise ValueError(f"incomplete {stage} scheduler catalog")
 for name, case in cases.items():
+    if name.startswith("litao/"):
+        hivm = Path(case["hivm"]["path"])
+        if hivm.parts[0] != "benchmark" or str(hivm) != case["source"]["hivm_path"]:
+            raise ValueError(f"{name}: HIVM must use the original Litao file")
+        original = json.loads((root / hivm.with_name("case.json")).read_bytes())
+        _, case_id, variant = name.split("/")
+        if original["id"] != case_id or hivm.name != f"{variant}.hivm.mlir":
+            raise ValueError(f"{name}: incorrect Litao variant")
+        if case["origin"] == "compiler-source" and case["hfusion"]["path"] != case["source"]["hfusion_path"]:
+            raise ValueError(f"{name}: HFusion must use the original compiler input")
     for stage in ("hfusion", "hivm"):
         file = case[stage]
         if sha256((root / file["path"]).read_bytes()).hexdigest() != file["sha256"]:
