@@ -1,0 +1,3 @@
+(executable
+ (name first_analysis)
+ (libraries hivm_trace unix))

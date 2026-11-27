@@ -1,0 +1,10 @@
+benchmark,stage,terminal,dispatch_events,detail
+fixture/blocked-before-loop,hivm,deadlock,0,"[""stream 0 S @stream_0/2 hivm.hir.sync_block_wait""]"
+fixture/duplicate-set,hivm,deadlock,7,"[""stream 0 V @stream_0/3 hivm.hir.set_flag""]"
+fixture/repeated-broadcast,hivm,deadlock,6,"[""stream 0 V @stream_0/3 hivm.hir.sync_block_set"", ""stream 1 S @stream_1/3 hivm.hir.sync_block_wait""]"
+fixture/wrong-flag,hivm,deadlock,6,"[""stream 0 MTE2 @stream_0/2 hivm.hir.wait_flag"", ""stream 0 MTE2 @stream_0/13 func.call""]"
+issue316/missing-ready,hivm,deadlock,45,"[""stream 0 MTE2 @issue316_vexp/8.0.0.8 hivm.hir.set_flag"", ""stream 0 MTE2 @issue316_vexp/11 hivm.hir.pipe_barrier""]"
+litao/cross-loop-placement/buggy,hivm,deadlock,5,"[""stream 1 MTE2 @consumer/2.0.0.0 hivm.hir.sync_block_wait""]"
+regression/single-broadcast,hivm,deadlock,3,"[""stream 1 S @stream_2/3 hivm.hir.sync_block_wait""]"
+fixture/invalid-allocation-offset,hivm,invalid-memory,3,"""@write_shared/3.0.0.2 memref.store: allocation index 1 outside dimension 1"""
+fixture/invalid-allocation-offset,hfusion,invalid-memory,3,"""@write_shared/4.0.0.1 memref.store: allocation index 1 outside dimension 1"""

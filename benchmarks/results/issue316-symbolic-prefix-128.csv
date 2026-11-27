@@ -1,0 +1,4 @@
+benchmark,stage,rounds,backend,ms_1,ms_2,ms_3,median_ms,status,prefix_rounds
+issue316/missing-ready,hfusion,128,bfs-before,262.989044,259.855032,260.578156,260.578156,race,1
+issue316/missing-ready,hfusion,128,bfs,26.404858,26.051998,25.748968,26.051998,race,1
+issue316/missing-ready,hfusion,128,smt,340.235949,339.684010,336.427927,339.684010,race,1
