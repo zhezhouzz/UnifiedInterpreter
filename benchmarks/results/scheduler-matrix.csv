@@ -1,8 +1,8 @@
 benchmark,stage,bfs_status,bfs_pairs,smt_status,smt_pairs
 cv/scene1/correct,hfusion,complete,0,complete,0
-cv/scene1/correct,hivm,race,1,race,1
+cv/scene1/correct,hivm,unknown,0,unknown,0
 cv/scene1/error,hfusion,complete,0,complete,0
-cv/scene1/error,hivm,race,1,race,1
+cv/scene1/error,hivm,unknown,0,unknown,0
 fixture/all-barrier,hfusion,complete,0,complete,0
 fixture/all-barrier,hivm,complete,0,complete,0
 fixture/allocation,hfusion,complete,0,complete,0
@@ -20,14 +20,14 @@ fixture/concurrent-loop,hivm,complete,3,complete,3
 fixture/disjoint-reads-writes,hfusion,complete,0,complete,0
 fixture/disjoint-reads-writes,hivm,complete,0,complete,0
 fixture/duplicate-set,hfusion,complete,0,complete,0
-fixture/duplicate-set,hivm,complete,1,complete,1
+fixture/duplicate-set,hivm,complete,0,complete,0
 fixture/else-branch,hfusion,complete,0,complete,0
 fixture/else-branch,hivm,complete,1,complete,1
 fixture/fifo-copy,hfusion,complete,0,complete,0
 fixture/fifo-copy,hivm,complete,1,complete,1
 fixture/hivm-two-loads,hfusion,complete,0,complete,0
 fixture/hivm-two-loads,hivm,complete,1,complete,1
-fixture/invalid-allocation-offset,hfusion,complete,0,complete,0
+fixture/invalid-allocation-offset,hfusion,unknown,0,unknown,0
 fixture/invalid-allocation-offset,hivm,complete,0,complete,0
 fixture/large-bound-return,hfusion,complete,0,complete,0
 fixture/large-bound-return,hivm,complete,0,complete,0
@@ -70,7 +70,7 @@ fixture/zero-step,hivm,complete,0,complete,0
 flash-attention,hfusion,complete,0,complete,0
 flash-attention,hivm,complete,0,complete,0
 issue316/missing-ready,hfusion,complete,9,complete,9
-issue316/missing-ready,hivm,complete,5,complete,5
+issue316/missing-ready,hivm,complete,0,complete,0
 issue316/ordered,hfusion,complete,0,complete,0
 issue316/ordered,hivm,complete,0,complete,0
 litao/add-Ascend910B1/buggy,hfusion,complete,0,complete,0

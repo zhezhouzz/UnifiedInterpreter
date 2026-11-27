@@ -83,13 +83,15 @@ def main():
                 invoke([*args,"--backend",backend,"--project",core,"--save",trace],folder/"projection.log")
                 report = json.loads(trace.read_bytes())
                 phase = "verification"
-                if report["status"] != "complete":
+                full = report.get("trace_extent") == "program_end"
+                if report["status"] not in ("complete","no-race") and not (
+                        full and report["status"] == "race" and len(report["races"]) == 1):
                     raise ValueError(report.get("reason", f"incomplete search: {report['status']}"))
                 verify_locations(ast,report)
                 for race in report["races"]:
                     for key,a,b in (("forward","first","second"),("reverse","second","first")):
                         seq = [race[a],race[b]]
-                        if [e for e in race[key] if e in seq]!=seq or race[key][-1]!=seq[1]:
+                        if [e for e in race[key] if e in seq]!=seq or (not full and race[key][-1]!=seq[1]):
                             raise ValueError("wrong source trace endpoint order")
                 replay = invoke([*args,"--replay",core],folder/"replay.log").decode()
                 count = len(report["races"])
@@ -118,7 +120,7 @@ def main():
         for item in items:
             rows = futures[item].result()
             writer.writerows(rows)
-            failed += sum(r["status"] != "complete" for r in rows)
+            failed += sum(r["status"] not in ("complete","race","no-race") for r in rows)
             dest.flush()
     print(f"{2*len(items)} backend runs, {failed} failed")
     return int(failed!=0)

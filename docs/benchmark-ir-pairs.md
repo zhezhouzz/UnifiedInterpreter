@@ -7,7 +7,9 @@ dune exec unified-interpreter -- race pairs
 dune exec unified-interpreter -- race pairs cv/scene1/error --json
 ```
 
-目录按变体计数，共 84 对，包括 32 个 fixture、14 个 regression、28 个 Litao 变体、2 个 Issue #316 变体、2 个 vectorlayout 变体、4 个张量计算用例和 2 个 CV 场景 1 变体。每个条目都有 HFusion 和 HIVM 两份 MLIR。两层均支持 BFS 和 SMT，分别通过 `race list --hfusion` 和 `race list --hivm` 查看。[完整目录](../benchmarks/ir-pairs/catalog.json) · [调度测试结果](../benchmarks/results/scheduler-matrix.csv)
+目录按变体计数，共 84 对，包括 32 个 fixture、14 个 regression、28 个 Litao 变体、2 个 Issue #316 变体、2 个 vectorlayout 变体、4 个张量计算用例和 2 个 CV 场景 1 变体。每个条目都有 HFusion 和 HIVM 两份 MLIR。两层均支持 BFS 和 SMT，分别通过 `race list --hfusion` 和 `race list --hivm` 查看。[完整目录](../benchmarks/ir-pairs/catalog.json) · [从 MLIR 源码运行的结果](../benchmarks/results/scheduler-mlir-matrix.csv)
+
+使用归档模块时，两个 CV 场景 1 的 HIVM 模型和 `fixture/invalid-allocation-offset` 的 HFusion 模型只覆盖执行前缀，scheduler 返回 `unknown`。直接使用这三个条目的 MLIR 源码和测试启动参数时，BFS 和 SMT 均完成了分析。[归档模块测试结果](../benchmarks/results/scheduler-matrix.csv) · [源码测试入口](mlir-to-core.md)
 
 ## 文件来源
 
