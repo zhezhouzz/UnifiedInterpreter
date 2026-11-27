@@ -88,7 +88,11 @@ let () =
   (match report.races with [r] ->
     assert (r.first.iterations=[3] && r.second.iterations=[0]);
     H.verify_race ?n:report.n model r;
-    H.verify_race ~n:(Z.of_string "1000000000000") model r | _ -> assert false);
+    H.replay ~n:(Z.of_string "1000000000000") model r.forward;
+    let invalid=H.prepare program [args 0 "out";args 3 "out";args 6 "other"] in
+    H.replay ?n:report.n invalid r.forward;
+    (match H.verify_race ?n:report.n invalid r with
+     | exception Invalid_argument _ -> () | () -> failwith "accepted out-of-bounds continuation") | _ -> assert false);
   assert (H.replay_report program (H.to_json report)=1);
   assert ((H.generate H.Symbolic (H.prepare program [args 0 "one";args 3 "two"])).status=H.No_race);
   assert ((H.generate H.Symbolic (H.prepare program [args 0 "out";args 4 "out"])).status=H.No_race);

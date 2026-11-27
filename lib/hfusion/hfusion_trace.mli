@@ -8,7 +8,7 @@ type launch = (string * argument) list list
 type event = { stream : int; entry : string; path : int list; opcode : string;
                iterations : int list }
 type race = { first : event; second : event; forward : event list; reverse : event list }
-type status = Complete | Race | No_race | Unknown of string
+type status = Complete | Race | Full_race of int | No_race | Unknown of string
 type report = { entry : string; launch : launch; n : Z.t option; status : status; races : race list }
 type backend = Bfs | Smt | Symbolic
 type t

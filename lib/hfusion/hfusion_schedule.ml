@@ -4,7 +4,8 @@ type footprint = { allocation : storage * int list; initial : bool; ranges : int
 type node = { event : event; reads : footprint list; writes : footprint list;
               claims : footprint list; previous : int option }
 type dependencies = { writers : int list list; incompatible : int list }
-type t = { nodes : node array; dependencies : dependencies array; by_event : (event,int) Hashtbl.t }
+type t = { nodes : node array; dependencies : dependencies array; by_event : (event,int) Hashtbl.t;
+           rounds : int array; max_rounds : int; complete : bool }
 
 let rec take n xs = if n=0 then [] else List.hd xs::take (n-1) (List.tl xs)
 let intersect a b = a.allocation=b.allocation && overlaps a.ranges b.ranges
@@ -20,10 +21,10 @@ let instantiate ?through model n =
       if e.stream<0 || e.stream>=Array.length streams then invalid_arg "unknown HFusion stream";
       Hashtbl.replace streams.(e.stream) e ()) events;
     streams) through in
-  let count=ref 0 and nodes=ref [] in
+  let count=ref 0 and nodes=ref [] and rounds=ref [] and maximum=ref 0 and complete=ref true in
   List.iteri (fun stream body ->
     let pending=Option.map (fun streams -> streams.(stream)) targets in
-    let previous=ref None in
+    let previous=ref None and visited=ref 0 in
     let rec execute ivs iterations body =
       let value=eval n ivs in
       let footprint v =
@@ -35,6 +36,7 @@ let instantiate ?through model n =
             if Z.sign step<=0 then raise Invalid_iteration;
             let rec iter i ordinal =
               if Z.lt i stop then begin
+                visited:=max !visited (ordinal+1); maximum:=max !maximum !visited;
                 execute (ivs@[i]) (iterations@[ordinal]) body;
                 let next=eval_binary E.ArithAddI loop.ty i step in
                 if Z.leq next i then raise Invalid_iteration;
@@ -52,14 +54,15 @@ let instantiate ?through model n =
             let event={stream;entry=model.program.name;path=site.path;opcode=site.opcode;iterations} in
             let node={event;previous= !previous;reads=List.map footprint site.reads;
                       writes=List.map footprint site.writes;claims=List.map footprint site.claims} in
-            nodes:=node::!nodes;previous:=Some !count;incr count;
+            nodes:=node::!nodes;rounds:= !visited::!rounds;previous:=Some !count;incr count;
             Option.iter (fun events ->
               Hashtbl.remove events event;
               if Hashtbl.length events=0 then raise Prefix_complete) pending) body in
     (* 一个实例的错误操作无法完成。之前已经完成的操作仍属于合法前缀。 *)
     if Option.fold ~none:true ~some:(fun events -> Hashtbl.length events>0) pending then
-      match execute [] [] body with () -> () | exception (Invalid_iteration | Prefix_complete) -> ()) model.streams;
-  Array.of_list (List.rev !nodes)
+      match execute [] [] body with () -> () | exception Invalid_iteration -> complete:=false
+      | exception Prefix_complete -> ()) model.streams;
+  Array.of_list (List.rev !nodes),Array.of_list (List.rev !rounds), !maximum, !complete
 
 (* 每段未初始化的地址需要至少一个先前写入者。写入覆盖范围的端点
    把读取区间划分为若干段，同一段的每个元素有相同的候选写入者。 *)
@@ -89,10 +92,10 @@ let dependencies nodes =
     {writers=List.concat_map read node.reads |> List.sort_uniq compare;incompatible}) nodes
 
 let build ?through model n =
-  let nodes=instantiate ?through model n in
+  let nodes,rounds,max_rounds,complete=instantiate ?through model n in
   let by_event=Hashtbl.create (Array.length nodes) in
   Array.iteri (fun i node -> Hashtbl.add by_event node.event i) nodes;
-  {nodes;dependencies=dependencies nodes;by_event}
+  {nodes;dependencies=dependencies nodes;by_event;rounds;max_rounds;complete}
 
 let enabled schedule seen i =
   let present=Z.testbit seen and deps=schedule.dependencies.(i) in
@@ -154,12 +157,14 @@ let check solver assumptions = match Z3.Solver.check solver assumptions with
   | UNKNOWN -> raise (Inconclusive (Z3.Solver.get_reason_unknown solver))
 let number model e=Z3.Arithmetic.Integer.get_big_int (Option.get (Z3.Model.eval model e true))
 
-let generate ?timeout_ms ?first_only backend schedule pairs =
-  let rules = Array.mapi (fun i node ->
+let rules schedule = Array.mapi (fun i node ->
     let deps = schedule.dependencies.(i) in
     Order.{requires=List.map (fun n -> [n]) (Option.to_list node.previous) @ deps.writers;
-           excludes=deps.incompatible}) schedule.nodes in
-  Order.generate ?timeout_ms ?first_only backend rules pairs
+           excludes=deps.incompatible}) schedule.nodes
+
+let generate ?timeout_ms ?first_only backend schedule pairs =
+  if not schedule.complete then [] else
+  Order.generate ?timeout_ms ?first_only backend (rules schedule) pairs
   |> List.map (fun (a,b,f,r) -> race schedule a b f r)
 
 let bfs schedule pairs = generate Bfs schedule pairs

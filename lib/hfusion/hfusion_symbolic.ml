@@ -88,17 +88,18 @@ let query ?(timeout_ms=5000) model maximum =
           if List.exists (fun i -> not (Z.fits_int i)) iterations then None else
           let iterations=List.map Z.to_int iterations in
           Some {stream=site.stream;entry=model.program.name;path=site.path;opcode=site.opcode;iterations} in
+        let concrete=lazy (S.build model count) in
         let targeted=match event left,event right with
           | Some a,Some b ->
-              let prefix=S.build ~through:[a;b] model count in
-              (match Hashtbl.find_opt prefix.by_event a,Hashtbl.find_opt prefix.by_event b with
-               | Some i,Some j when S.conflict prefix.nodes.(i) prefix.nodes.(j) ->
-                   S.smt ~first_only:true ~timeout_ms prefix [i,j]
+              let schedule=Lazy.force concrete in
+              (match Hashtbl.find_opt schedule.by_event a,Hashtbl.find_opt schedule.by_event b with
+               | Some i,Some j when S.conflict schedule.nodes.(i) schedule.nodes.(j) ->
+                   S.smt ~first_only:true ~timeout_ms schedule [i,j]
                | _ -> [])
           | _ -> [] in
         let races=match targeted with
           | [] ->
-              let full=S.build model count in
+              let full=Lazy.force concrete in
               S.smt ~first_only:true ~timeout_ms full (S.candidates full)
           | found -> found in
         match races with

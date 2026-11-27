@@ -23,6 +23,12 @@ let generate ?n ?timeout_ms backend model =
   | _ ->
       let schedule=S.build model (concrete_n model n) in
       let pairs=S.candidates schedule in
+      if backend<>Symbolic && schedule.max_rounds>Unified_interpreter.Loop_trace.threshold then (
+        if not schedule.complete then report n (Unknown "the launch does not reach program end") [] else
+        match S.Order.complete_race ?timeout_ms (S.rules schedule) schedule.rounds pairs with
+        | Found (k,(a,b,f,r)) -> report n (Full_race k) [S.race schedule a b f r]
+        | No_race -> report n No_race [] | Incomplete why -> report n (Unknown why) [])
+      else
       let races=match backend with Bfs -> S.bfs schedule pairs
         | Smt | Symbolic -> S.smt ?timeout_ms ~first_only:(backend=Symbolic) schedule pairs in
       (match backend,races with Symbolic,[] -> report n No_race []
@@ -30,18 +36,22 @@ let generate ?n ?timeout_ms backend model =
   with S.Inconclusive reason -> report n (Unknown reason) []
 
 let replay ?n model prefix=S.replay (S.build ~through:prefix model (concrete_n model n)) prefix
-let verify (schedule:S.t) r =
+let verify ?(full=false) (schedule:S.t) r =
   let node event=match Hashtbl.find_opt schedule.by_event event with
     | Some i -> schedule.nodes.(i) | None -> invalid_arg "unknown HFusion race endpoint" in
   if not (S.conflict (node r.first) (node r.second)) then invalid_arg "unrelated HFusion race endpoints";
   let check first second events=
     S.replay schedule events;
-    match List.rev events with
-    | last::rest when last=second && List.mem first rest -> ()
-    | _ -> invalid_arg "wrong HFusion race endpoint order" in
+    if not schedule.complete || (not full && not (S.Order.can_extend (S.rules schedule)
+       (List.map (Hashtbl.find schedule.by_event) events))) then invalid_arg "HFusion race prefix cannot reach program end";
+    if List.filter (fun e -> e=first || e=second) events<>[first;second] ||
+       (if full then not schedule.complete || List.length events<>Array.length schedule.nodes
+        else List.hd (List.rev events)<>second) then invalid_arg "wrong HFusion race endpoint order" in
   check r.first r.second r.forward;check r.second r.first r.reverse
 let verify_race ?n model r =
-  verify (S.build ~through:(r.forward@r.reverse) model (concrete_n model n)) r
+  let ends e events=List.nth_opt (List.rev events) 0=Some e in
+  let full=not (ends r.second r.forward && ends r.first r.reverse) in
+  verify ~full (S.build model (concrete_n model n)) r
 
 module J = Yojson.Safe.Util
 let ints xs=`List (List.map (fun i -> `Int i) xs)
@@ -66,6 +76,7 @@ let to_json report =
   let race r=`Assoc ["first",event r.first;"second",event r.second;
     "forward",events r.forward;"reverse",events r.reverse] in
   let status,detail=match report.status with Complete -> "complete",[] | Race -> "race",[]
+    | Full_race k -> "race",["trace_extent",`String "program_end";"prefix_rounds",`Int k]
     | No_race -> "no-race",[] | Unknown why -> "unknown",["reason",`String why] in
   let inputs=`List (List.map (fun args -> `Assoc (List.map (fun (k,v) -> k,argument_json v) args)) report.launch) in
   `Assoc (["format",`String "hfusion-race-1";"entry",`String report.entry;
@@ -97,6 +108,8 @@ let replay_report (program:Ast.program) doc =
    | _ -> invalid_arg "inconsistent HFusion report status");
   List.iter (fun r ->
     let prefix key=List.map event (J.to_list (J.member key r)) in
-    verify_race ?n model {first=event (J.member "first" r);second=event (J.member "second" r);
-                          forward=prefix "forward";reverse=prefix "reverse"}) races;
+    let race={first=event (J.member "first" r);second=event (J.member "second" r);
+              forward=prefix "forward";reverse=prefix "reverse"} in
+    if J.member "trace_extent" doc=`String "program_end" then verify ~full:true (S.build model (concrete_n model n)) race
+    else verify_race ?n model race) races;
   List.length races
