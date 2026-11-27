@@ -9,7 +9,7 @@ type segment = {path : int list; guard : Expr.expr; reads : (space * Expr.expr *
 
 let find_model ~timeout_ms variant config =
   let ctx = mk_context [] in
-  let open Parametric_lang.Formula in
+  let open Historical_lang.Formula in
   let n = fresh ctx "tokens" and zero = int ctx 0 and one = int ctx 1 in
   let add = add ctx and mul = mul ctx and lt = lt ctx in
   let sub a b = Arithmetic.mk_sub ctx [a;b] and div = Arithmetic.mk_div ctx in
@@ -89,7 +89,7 @@ let find_model ~timeout_ms variant config =
         | Solver.UNSATISFIABLE -> query tail
         | Solver.SATISFIABLE ->
             let model = Option.get (Solver.get_model solver) in
-            let length = Z.to_int (Parametric_lang.numeral (Option.get (Model.eval model n true))) in
+            let length = Z.to_int (Historical_lang.numeral (Option.get (Model.eval model n true))) in
             let input = Vectorlayout_input.make {config with length} in
             let schedule = Device_races.compile ~backend:Solve variant input in
             let find path = List.find_opt (fun (s : Device_races.access_site) ->

@@ -1,7 +1,7 @@
 open Z3
-open Parametric_lang
+open Historical_lang
 open Formula
-open Parametric_events
+open Historical_events
 
 type outcome =
   | Race of { n : Z.t; witness : Race_schedule.Result.race_witness }
@@ -16,14 +16,14 @@ let solve ~timeout_ms family =
   let sites = compile ctx family n in
   let accesses = List.filter (fun s -> match s.kind with Access _ -> true | _ -> false) sites in
   let barriers = List.filter (fun s -> s.kind = Barrier) sites in
-  let has_flags = Parametric_order.touches sites <> [] in
+  let has_flags = Historical_order.touches sites <> [] in
   let candidates = solver () in
-  let counts = lazy (Parametric_fifo.counters ctx (solver ()) n sites) in
+  let counts = lazy (Historical_fifo.counters ctx (solver ()) n sites) in
   (* 两个解释独立选择合法前缀，共享入口参数及目标操作的动态身份。 *)
   let full = lazy (
     let s = solver () in
-    let forward = Parametric_order.execution ctx s sites in
-    let reverse = Parametric_order.execution ctx s sites in
+    let forward = Historical_order.execution ctx s sites in
+    let reverse = Historical_order.execution ctx s sites in
     s, forward, reverse) in
   let concretize solver assumptions a b =
     (* 整数模型可任意选取很大的 N。收紧已满足公式中 N 的上界，
@@ -74,7 +74,7 @@ let solve ~timeout_ms family =
     | Solver.UNKNOWN -> exact ()
     | Solver.SATISFIABLE ->
         let query,status = if has_flags then
-          let query = [overlap; Parametric_fifo.orders ctx sites (Lazy.force counts) a b] in
+          let query = [overlap; Historical_fifo.orders ctx sites (Lazy.force counts) a b] in
           query,Solver.check candidates query
           else [overlap],Solver.SATISFIABLE in
         match status with

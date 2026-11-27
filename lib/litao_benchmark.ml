@@ -1,5 +1,5 @@
 open Core_lang
-open Parametric_lang
+open Historical_lang
 
 module Json = Yojson.Safe.Util
 let field key json = Json.member key json

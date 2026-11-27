@@ -1,12 +1,12 @@
 include Race_schedule.Result
 type backend = Search | Solve
-module Symbolic = Parametric_lang
-type symbolic_result = Parametric_race.outcome =
+module Symbolic = Historical_lang
+type symbolic_result = Historical_race.outcome =
   | Race of { n : Z.t; witness : race_witness }
   | No_race
   | Unknown of string
 
-let find_symbolic_race = Parametric_race.find
+let find_symbolic_race = Historical_race.find
 
 let replay ?loop_bound ?capacity program trace =
   let schedule = Race_schedule.compile ?loop_bound ?capacity program in

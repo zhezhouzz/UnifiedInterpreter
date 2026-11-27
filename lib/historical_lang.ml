@@ -1,7 +1,7 @@
 open Core_lang
 open Z3
 
-(** 原语的声明同时解释为 SMT 表达式和具体程序的标量值、读写足迹。 *)
+(** 历史模型中的原语声明用于构造 SMT 表达式，也用于计算具体实例的标量值和读写足迹。 *)
 type expr =
   | Arg of int | Const of value
   | Add of expr * expr | Sub of expr * expr | Mul of expr * expr

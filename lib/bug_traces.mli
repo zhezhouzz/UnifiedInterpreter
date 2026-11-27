@@ -22,7 +22,7 @@ val generate_bug_traces : ?backend:backend -> ?loop_bound:int -> ?capacity:int -
 val replay : ?loop_bound:int -> ?capacity:int -> Core_lang.program -> Core_lang.event list -> unit
 
 module Symbolic : sig
-  type expr = Parametric_lang.expr =
+  type expr = Historical_lang.expr =
     | Arg of int | Const of Core_lang.value
     | Add of expr * expr | Sub of expr * expr | Mul of expr * expr
     | Mod of expr * int | Eq of expr * expr | Lt of expr * expr
@@ -30,7 +30,7 @@ module Symbolic : sig
     | Input_slice of int * expr * expr
     | Subview of expr * expr * expr
     | Remainder of expr * expr
-  type family = Parametric_lang.family = {
+  type family = Historical_lang.family = {
     streams : Core_lang.stream list;
     parameter : (int * int) list;
     scalar : int -> int -> expr;

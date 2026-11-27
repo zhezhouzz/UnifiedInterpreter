@@ -1,5 +1,5 @@
 open Core_lang
-open Parametric_lang
+open Historical_lang
 open Formula
 open Z3
 
@@ -46,7 +46,7 @@ let compile ctx family n =
           let v = eval ctx (args vs) (family.scalar stream.id op) in
           child 0 ((x,v) :: env) next
       | Alloc (x,_,dims,next) ->
-          let dims = List.map (fun d -> Parametric_lang.integer (operand d)) dims in
+          let dims = List.map (fun d -> Historical_lang.integer (operand d)) dims in
           let size = List.fold_left (mul ctx) (int ctx 1) dims in
           let storage = Local (stream.id, List.rev path, List.rev indices) in
           let ok = and_ ctx (List.map (le ctx zero) dims) in
@@ -80,7 +80,7 @@ let compile ctx family n =
           restrict guard left @ restrict (Boolean.mk_not ctx guard) right @ restrict falls rest,
           and_ ctx [falls; finish]
       | For (x,lo,hi,step,body,next) ->
-          let number v = Parametric_lang.integer (operand v) in
+          let number v = Historical_lang.integer (operand v) in
           let lo,hi,step = number lo, number hi, number step in
           let i = fresh ctx "iteration" in
           let index = add ctx lo (mul ctx i step) in

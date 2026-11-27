@@ -58,7 +58,7 @@ let read_core_race schedule j =
 let replay_core schedule j = ignore (read_core_race schedule j)
 
 let schedule launch n =
-  Race_schedule.compile ~capacity:launch.Litao_benchmark.capacity (Parametric_lang.instantiate launch.family n)
+  Race_schedule.compile ~capacity:launch.Litao_benchmark.capacity (Historical_lang.instantiate launch.family n)
 
 let events_of op_name schedule =
   let item = function Operation (op,_) -> op_name op
