@@ -1,0 +1,13 @@
+{
+  "issue": 1019,
+  "mr": "5333",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/5333",
+  "commit": "072e232418e1dafcd7c5eedf04b2457c3ebcf800",
+  "parent": "6674d03a8d189f1599fd374e2e7e94c88cba02a9",
+  "title": "[HIVM][V2] fix: lower A6 integer selects and shuffle intrinsics",
+  "tests": [
+    "bishengir/test/Conversion/HIVMToLLVM/v2-integer-interleave-abi.mlir",
+    "bishengir/test/Dialect/HIVM/Vectorize/phase-backend-i64-select.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

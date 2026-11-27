@@ -1,0 +1,8 @@
+[
+  {
+    "function": "test_unique_memory_with_multi_buffer",
+    "location": "loc(\"<stdin>\":4:5)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  }
+]

@@ -1,0 +1,8 @@
+{
+  "title": "[Bug]: SIMD-SIMT混编SIMT VF的同步问题",
+  "iid": 708,
+  "updated_at": "2026-10-15T21:04:19.090+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/708",
+  "linked_mrs": []
+}

@@ -1,0 +1,12 @@
+{
+  "issue": null,
+  "mr": "3547",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/3547",
+  "commit": "faccda209161c8b481555abba1fe38c5a478830f",
+  "parent": "bd97ddcc62b62713bfb53e9546b4c794642222c4",
+  "title": "[AscendNPU IR][CV][InsertFixpipe] fix: nz2nz shape",
+  "tests": [
+    "bishengir/test/Dialect/HIVM/Regbase/inline-fixpipe-enable-fixpipe-nz2nz.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

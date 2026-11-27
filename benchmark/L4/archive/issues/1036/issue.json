@@ -1,0 +1,8 @@
+{
+  "title": "[Bufferization] normalize-to-tensor 支持 arith.select 别名追踪并增强写识别",
+  "iid": 1036,
+  "updated_at": "2026-11-23T11:45:53.181+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1036",
+  "linked_mrs": []
+}

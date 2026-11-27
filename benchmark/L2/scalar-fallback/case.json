@@ -1,0 +1,36 @@
+{
+  "id": "scalar-fallback",
+  "tier": "L2",
+  "category": "protocol-model",
+  "source_ref": "#1047 scalar fallback minimal model",
+  "chip_profile": "Ascend910B1",
+  "core_ratio": "0:1",
+  "compile_argv": [
+    "bishengir-opt",
+    "-canonicalize"
+  ],
+  "entry_functions": [
+    "kernel"
+  ],
+  "expected_verdict": {
+    "buggy": "race",
+    "fixed": "safe"
+  },
+  "oracle_note": "One UB lane initially -3. Scalar writes 7 between two vector accesses. The first must see -3 and the second 7.",
+  "execution": {
+    "streams": [
+      "kernel"
+    ],
+    "initial": {
+      "ub:0:0": -3
+    },
+    "read_sequence": {
+      "vabs": [
+        -3,
+        7
+      ]
+    },
+    "tile": 1
+  },
+  "semantics_profile": "local-scalar-memory"
+}

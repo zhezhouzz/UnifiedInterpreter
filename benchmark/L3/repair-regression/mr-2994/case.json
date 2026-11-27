@@ -1,0 +1,21 @@
+{
+  "id": "repair-regression/mr-2994",
+  "tier": "L3",
+  "category": "repair-regression",
+  "source_ref": "https://gitcode.com/Ascend/AscendNPU-IR/blob/1e2a10ed0dd83d4f9f07ff7689667f8c2a9d8ee8/bishengir/test/Dialect/HIVM/normalize-matmul.mlir",
+  "chip_profile": "Ascend910B4",
+  "core_ratio": null,
+  "compile_argv": [
+    "bishengir-opt",
+    "-hivm-normalize-matmul",
+    "-allow-unregistered-dialect"
+  ],
+  "entry_functions": [
+    "test_MmadL1_Normalize_decompose_matmul"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "split_index": 2,
+  "upstream_path": "bishengir/test/Dialect/HIVM/normalize-matmul.mlir"
+}

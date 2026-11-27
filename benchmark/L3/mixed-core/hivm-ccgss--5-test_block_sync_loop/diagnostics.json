@@ -1,0 +1,74 @@
+[
+  {
+    "function": "test_block_sync_loop",
+    "location": "loc(\"<stdin>\":5:5)",
+    "op": "hivm.hir.set_ffts_base_addr",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_block_sync_loop",
+    "location": "loc(\"<stdin>\":9:14)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "test_block_sync_loop",
+    "location": "loc(\"<stdin>\":12:16)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "test_block_sync_loop",
+    "location": "loc(\"<stdin>\":15:16)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "test_block_sync_loop",
+    "location": "loc(\"<stdin>\":21:5)",
+    "op": "hivm.hir.mmadL1",
+    "reason": "mmadL1 sync_related_args require internal MTE1/M protocol"
+  },
+  {
+    "function": "test_block_sync_loop",
+    "location": "loc(\"<stdin>\":28:10)",
+    "op": "bufferization.to_tensor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_block_sync_loop",
+    "location": "loc(\"<stdin>\":29:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_block_sync_loop",
+    "location": "loc(\"<stdin>\":31:10)",
+    "op": "hivm.hir.load",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_block_sync_loop",
+    "location": "loc(\"<stdin>\":33:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_block_sync_loop",
+    "location": "loc(\"<stdin>\":35:10)",
+    "op": "hivm.hir.vsub",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "test_block_sync_loop",
+    "location": "loc(\"<stdin>\":37:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_block_sync_loop",
+    "location": "loc(\"<stdin>\":39:10)",
+    "op": "hivm.hir.store",
+    "reason": "requires bufferization"
+  }
+]

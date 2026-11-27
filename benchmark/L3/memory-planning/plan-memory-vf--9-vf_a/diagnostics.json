@@ -1,0 +1,56 @@
+[
+  {
+    "function": "vf_a",
+    "location": "loc(\"<stdin>\":5:10)",
+    "op": "vector.transfer_read",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "vf_a",
+    "location": "loc(\"<stdin>\":6:5)",
+    "op": "vector.transfer_write",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_tightly_coupled_buffer_in_AIC",
+    "location": "loc(\"<stdin>\":11:5)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_tightly_coupled_buffer_in_AIC",
+    "location": "loc(\"<stdin>\":13:5)",
+    "op": "hivm.hir.set_flag",
+    "reason": "intra-stream scalar endpoint requires local-scalar-memory profile"
+  },
+  {
+    "function": "test_tightly_coupled_buffer_in_AIC",
+    "location": "loc(\"<stdin>\":14:5)",
+    "op": "hivm.hir.wait_flag",
+    "reason": "intra-stream scalar endpoint requires local-scalar-memory profile"
+  },
+  {
+    "function": "test_tightly_coupled_buffer_in_AIC",
+    "location": "loc(\"<stdin>\":15:5)",
+    "op": "hivm.hir.debug",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_tightly_coupled_buffer_in_AIV",
+    "location": "loc(\"<stdin>\":31:7)",
+    "op": "func.call",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_tightly_coupled_buffer_in_AIV",
+    "location": "loc(\"<stdin>\":35:7)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_tightly_coupled_buffer_in_AIV",
+    "location": "loc(\"<stdin>\":37:7)",
+    "op": "hivm.hir.copy",
+    "reason": "missing Core interpretation"
+  }
+]

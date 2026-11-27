@@ -1,0 +1,18 @@
+{
+  "id": "attention",
+  "tier": "L3",
+  "category": "MIX attention",
+  "source_ref": "../artifacts/flash_attention/ir/attention_hivm_lowered.mlir",
+  "chip_profile": null,
+  "core_ratio": "1:1",
+  "compile_argv": [
+    "bishengir-opt",
+    "-allow-unregistered-dialect"
+  ],
+  "entry_functions": [
+    "_attn_fwd_mix_aic",
+    "_attn_fwd_mix_aiv"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Post-lowering snapshot reprinted by pinned parser. 1:1 launch selected following the opsem example."
+}

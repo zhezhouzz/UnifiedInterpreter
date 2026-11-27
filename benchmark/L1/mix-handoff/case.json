@@ -1,0 +1,39 @@
+{
+  "id": "mix-handoff",
+  "tier": "L1",
+  "category": "protocol-model",
+  "source_ref": "attention_hivm_lowered.mlir; opsem AIC/AIV handoff minimal model",
+  "chip_profile": "Ascend910B1",
+  "core_ratio": "1:1",
+  "compile_argv": [
+    "bishengir-opt",
+    "-canonicalize"
+  ],
+  "entry_functions": [
+    "cube",
+    "vector"
+  ],
+  "expected_verdict": {
+    "buggy": "race",
+    "fixed": "safe"
+  },
+  "oracle_note": "Each L0C lane is 7, workspace initially 2. Load must read 7 after Fixpipe completes.",
+  "execution": {
+    "streams": [
+      "cube",
+      "vector"
+    ],
+    "kinds": [
+      "AIC",
+      "AIV"
+    ],
+    "tile": 256,
+    "initial": {
+      "cc:0:0": 7,
+      "gm:0": 2
+    },
+    "reads": {
+      "load": 7
+    }
+  }
+}

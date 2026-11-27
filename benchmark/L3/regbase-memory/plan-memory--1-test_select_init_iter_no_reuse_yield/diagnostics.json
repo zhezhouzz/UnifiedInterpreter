@@ -1,0 +1,8 @@
+[
+  {
+    "function": "test_select_init_iter_no_reuse_yield",
+    "location": "loc(\"<stdin>\":12:10)",
+    "op": "scf.for",
+    "reason": "iteration-dependent carried view"
+  }
+]

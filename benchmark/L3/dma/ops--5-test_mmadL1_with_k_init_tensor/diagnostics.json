@@ -1,0 +1,14 @@
+[
+  {
+    "function": "test_mmadL1_with_k_init_tensor",
+    "location": "loc(\"<stdin>\":3:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_mmadL1_with_k_init_tensor",
+    "location": "loc(\"<stdin>\":11:10)",
+    "op": "scf.for",
+    "reason": "expected one invariant yielded view"
+  }
+]

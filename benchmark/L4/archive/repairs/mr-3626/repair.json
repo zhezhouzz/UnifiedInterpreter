@@ -1,0 +1,13 @@
+{
+  "issue": null,
+  "mr": "3626",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/3626",
+  "commit": "60f7b219fbacbcbf2a3130d5fabec5894be60f30",
+  "parent": "7cc2bcd383ab6e46bf73380e50dda03b8f713970",
+  "title": "[HIVM][PlanMemory] fix: skip alloc size align for high-rank VCast",
+  "tests": [
+    "bishengir/test/Dialect/HIVM/alloc-extra-buffer.mlir",
+    "bishengir/test/Dialect/HIVM/hivm-align-alloc-size.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

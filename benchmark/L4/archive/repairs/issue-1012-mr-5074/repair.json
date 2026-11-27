@@ -1,0 +1,13 @@
+{
+  "issue": 1012,
+  "mr": "5074",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/5074",
+  "commit": "650fcce691dac5643bc195af3bc008eaf873f387",
+  "parent": "518d1d2f0d26a4d2d86582ebf432f3068598c2c7",
+  "title": "[HIVM][Pipelines] fix: Honor v2 auto-sync options",
+  "tests": [
+    "bishengir/test/Dialect/HIVM/hivm-v2-pipeline-a6-order.mlir",
+    "bishengir/test/Dialect/HIVM/hivm-v2-pipeline-sync.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

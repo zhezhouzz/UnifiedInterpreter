@@ -1,0 +1,8 @@
+{
+  "title": "[Bug]: [HIVMAVE][AnalyzeVectorLayout] Parallel causes occasional card death/crash",
+  "iid": 983,
+  "updated_at": "2026-11-18T13:10:38.921+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/983",
+  "linked_mrs": []
+}

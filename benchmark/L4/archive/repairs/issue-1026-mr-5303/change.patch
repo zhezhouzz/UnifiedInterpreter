@@ -1,0 +1,605 @@
+diff --git a/bishengir/include/bishengir/Dialect/HIVM/Transforms/ConvertLayoutUtils.h b/bishengir/include/bishengir/Dialect/HIVM/Transforms/ConvertLayoutUtils.h
+index dc81dedb3..81f31f297 100644
+--- a/bishengir/include/bishengir/Dialect/HIVM/Transforms/ConvertLayoutUtils.h
++++ b/bishengir/include/bishengir/Dialect/HIVM/Transforms/ConvertLayoutUtils.h
+@@ -124,6 +124,7 @@ Value createInverseConvertLayout(PatternRewriter& rewriter,
+ /// Mark `op` with specific attribute preventing it to be propagated up.
+ void markAsNotPropagatingUp(PatternRewriter &rewriter, ConvertLayoutOp op);
+ 
++bool isMarkedAsNotPropagatingUp(ConvertLayoutOp op);
+ bool isPropagatingUp(ConvertLayoutOp op);
+ 
+ bool isPropagatingDown(ConvertLayoutOp op);
+diff --git a/bishengir/lib/Dialect/HFusion/Transforms/UpliftWhileToFor.cpp b/bishengir/lib/Dialect/HFusion/Transforms/UpliftWhileToFor.cpp
+index d299ce669..1b2b05766 100644
+--- a/bishengir/lib/Dialect/HFusion/Transforms/UpliftWhileToFor.cpp
++++ b/bishengir/lib/Dialect/HFusion/Transforms/UpliftWhileToFor.cpp
+@@ -37,8 +37,11 @@
+ 
+ #include "mlir/Dialect/Arith/IR/Arith.h"
+ #include "mlir/Dialect/Func/IR/FuncOps.h"
++#include "mlir/Dialect/Linalg/IR/Linalg.h"
+ #include "mlir/Dialect/SCF/IR/SCF.h"
+ #include "mlir/Dialect/SCF/Transforms/Patterns.h"
++#include "mlir/Dialect/Tensor/IR/Tensor.h"
++#include "mlir/IR/Matchers.h"
+ #include "mlir/IR/PatternMatch.h"
+ #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+ #include "llvm/ADT/APInt.h"
+@@ -113,6 +116,84 @@ struct NormalizeSignExtendedWhileCondition
+   }
+ };
+ 
++/// Peel scalar constructors so filled tensors and dense constants can be
++/// matched as the same induction variable or step.
++static Value unwrapSingleton(Value value) {
++  if (auto fill = value.getDefiningOp<linalg::FillOp>()) {
++    Value scalar = fill.getInputs().front();
++    if (scalar.getType() ==
++        cast<RankedTensorType>(value.getType()).getElementType())
++      return scalar;
++  }
++  if (auto elements = value.getDefiningOp<tensor::FromElementsOp>())
++    return elements.getElements().front();
++  return value;
++}
++
++/// Keep a unit-step loop counter in scalar SSA. A tensor-backed predicate
++/// otherwise makes Cube read the vector counter from L1 after core splitting.
++struct ScalarizeWhileInductionVariable : OpRewritePattern<scf::WhileOp> {
++  using OpRewritePattern::OpRewritePattern;
++
++  LogicalResult matchAndRewrite(scf::WhileOp loop,
++                                PatternRewriter &rewriter) const override {
++    auto condition = loop.getConditionOp();
++    auto cmp = condition.getCondition().getDefiningOp<arith::CmpIOp>();
++    if (!cmp || cmp.getPredicate() != arith::CmpIPredicate::slt ||
++        condition.getArgs() != ValueRange(loop.getBeforeArguments()))
++      return failure();
++
++    auto extract = cmp.getLhs().getDefiningOp<tensor::ExtractOp>();
++    if (!extract || !extract.getType().isIntOrIndex() ||
++        extract.getType().isInteger(1))
++      return failure();
++    auto iv = dyn_cast<BlockArgument>(extract.getTensor());
++    auto type = extract.getTensor().getType();
++    if (!iv || iv.getOwner() != loop.getBeforeBody() || type.getEncoding() ||
++        !type.hasStaticShape() || type.getNumElements() != 1 ||
++        !llvm::hasNItems(iv.getUses(), 2) ||
++        !llvm::all_of(extract.getIndices(),
++                      [](Value i) { return matchPattern(i, m_Zero()); }))
++      return failure();
++
++    unsigned index = iv.getArgNumber();
++    BlockArgument bodyIV = loop.getAfterArguments()[index];
++    auto add =
++        loop.getYieldOp().getOperand(index).getDefiningOp<arith::AddIOp>();
++    if (!add || !bodyIV.hasOneUse() || *bodyIV.user_begin() != add ||
++        !add->hasOneUse() || !loop.getResult(index).use_empty())
++      return failure();
++    Value step = add.getLhs() == bodyIV ? add.getRhs() : add.getLhs();
++    // A signed IV below its bound can always advance by one without overflow.
++    if (!matchPattern(unwrapSingleton(step), m_One()))
++      return failure();
++
++    Value initial = unwrapSingleton(loop.getInits()[index]);
++    Type scalarType = extract.getType();
++    if (isa<ShapedType>(initial.getType())) {
++      DenseIntElementsAttr constant;
++      if (!matchPattern(initial, m_Constant(&constant)))
++        return failure();
++      initial = rewriter.create<arith::ConstantOp>(
++          loop.getLoc(), constant.getSplatValue<IntegerAttr>());
++    }
++    Value one = rewriter.create<arith::ConstantOp>(
++        add.getLoc(), rewriter.getIntegerAttr(scalarType, 1));
++    rewriter.modifyOpInPlace(loop, [&] {
++      loop.getInitsMutable()[index].set(initial);
++      iv.setType(scalarType);
++      bodyIV.setType(scalarType);
++      loop.getResult(index).setType(scalarType);
++    });
++    rewriter.replaceOp(extract, iv);
++    rewriter.modifyOpInPlace(add, [&] {
++      add->setOperands({bodyIV, one});
++      add.getResult().setType(scalarType);
++    });
++    return success();
++  }
++};
++
+ struct UpliftWhileToForPass
+     : public impl::UpliftWhileToForBase<UpliftWhileToForPass> {
+   using Base = impl::UpliftWhileToForBase<UpliftWhileToForPass>;
+@@ -128,6 +209,7 @@ struct UpliftWhileToForPass
+     if (this->bypassShapeRegistry ||
+         hivm::isLoopShapeRegistered(funcOp.getName()))
+       patterns.add<NormalizeSignExtendedWhileCondition>(ctx);
++    patterns.add<ScalarizeWhileInductionVariable>(ctx);
+     scf::populateUpliftWhileToForPatterns(patterns);
+ 
+     if (failed(applyPatternsGreedily(funcOp, std::move(patterns))))
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/ConvertLayoutToTranspose.cpp b/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/ConvertLayoutToTranspose.cpp
+index dc462c4c2..01ffce651 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/ConvertLayoutToTranspose.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/ConvertLayoutToTranspose.cpp
+@@ -212,8 +212,8 @@ struct NDToFractalDecompose : public OpRewritePattern<ConvertLayoutOp> {
+ 
+   /// Create a zero-padded 2D base tensor for ND -> Fractal conversion.
+   ///
+-  /// The source tensor is padded on M/N dimensions to the nearest multiples of
+-  /// `fractalSizes[0]` and `fractalSizes[1]` respectively. Padding values are
++  /// The source tensor is padded to the inner M/N extents of its result.
++  /// A live slice can occupy only part of a hardware tile. Padding values are
+   /// initialized to zero using `hivm::VBrcOp`, then the original source is
+   /// inserted at offset [0, 0] via `tensor::InsertSliceOp`.
+   ///
+@@ -224,15 +224,21 @@ struct NDToFractalDecompose : public OpRewritePattern<ConvertLayoutOp> {
+                         const LayoutConversionInfo &info) {
+     auto fractalSizes = op.getDstLayout().getFractalSizesArray().value_or(
+         SmallVector<int64_t>());
+-    if (fractalSizes.size() != 2)
++    if (fractalSizes.size() != 2 || fractalSizes[0] <= 0 ||
++        fractalSizes[1] <= 0)
+       return rewriter.notifyMatchFailure(op, "invalid fractal size");
+ 
+     Value src = op.getSource();
+     auto srcTy = cast<RankedTensorType>(src.getType());
+     Type elemTy = srcTy.getElementType();
+ 
+-    int64_t tileM = fractalSizes[0];
+-    int64_t tileN = fractalSizes[1];
++    auto resultShape = op.getMixedOutputShape();
++    if (resultShape.size() != 4)
++      return rewriter.notifyMatchFailure(op, "expected a rank-4 fractal shape");
++    int64_t tileM =
++        getConstantIntValue(resultShape[2]).value_or(fractalSizes[0]);
++    int64_t tileN =
++        getConstantIntValue(resultShape[3]).value_or(fractalSizes[1]);
+     if (tileM <= 0 || tileN <= 0)
+       return rewriter.notifyMatchFailure(op, "fractal sizes must be > 0");
+ 
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/ConvertLayoutUtils.cpp b/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/ConvertLayoutUtils.cpp
+index 4c285f73c..8e3d80bf0 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/ConvertLayoutUtils.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/ConvertLayoutUtils.cpp
+@@ -109,12 +109,16 @@ void markAsNotPropagatingUp(PatternRewriter &rewriter, ConvertLayoutOp op) {
+   op->setAttr(convertLayoutNotToPropagateUp, rewriter.getBoolAttr(true));
+ }
+ 
++bool isMarkedAsNotPropagatingUp(ConvertLayoutOp op) {
++  return op->hasAttr(convertLayoutNotToPropagateUp);
++}
++
+ bool isPropagatingUp(ConvertLayoutOp op) {
+   auto dstLayout = op.getDstLayout().getDataLayout();
+   bool propagatesUp = (dstLayout == DataLayout::Fractal) ||
+                       (dstLayout == DataLayout::SCALEA_zZ) ||
+                       (dstLayout == DataLayout::SCALEB_nN);
+-  return propagatesUp && !(op->getAttr(convertLayoutNotToPropagateUp));
++  return propagatesUp && !isMarkedAsNotPropagatingUp(op);
+ }
+ 
+ bool isPropagatingDown(ConvertLayoutOp op) { return !isPropagatingUp(op); }
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/HoistConvertLayout.cpp b/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/HoistConvertLayout.cpp
+index b57508f2a..61484bf60 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/HoistConvertLayout.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/HoistConvertLayout.cpp
+@@ -40,6 +40,9 @@ struct MoveConvertLayoutToSourcePattern
+ 
+   LogicalResult matchAndRewrite(ConvertLayoutOp op,
+                                 PatternRewriter &rewriter) const override {
++    // A buffer-backed source can be initialized after its tensor view.
++    if (isMarkedAsNotPropagatingUp(op))
++      return failure();
+     Value source = op.getSource();
+     Operation *sourceOp = source.getDefiningOp();
+     Block *currentBlock = op->getBlock();
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/Propagate/PropagateConvertLayout.cpp b/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/Propagate/PropagateConvertLayout.cpp
+index 3f559a275..458a3a49e 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/Propagate/PropagateConvertLayout.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/ConvertLayout/Propagate/PropagateConvertLayout.cpp
+@@ -26,6 +26,7 @@
+ #include "mlir/Dialect/Linalg/Transforms/Transforms.h"
+ #include "mlir/Dialect/SCF/IR/SCF.h"
+ #include "mlir/Dialect/Tensor/IR/Tensor.h"
++#include "mlir/IR/Dominance.h"
+ #include "mlir/IR/IRMapping.h"
+ #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+ 
+@@ -41,6 +42,32 @@ using namespace mlir::hivm;
+ 
+ namespace {
+ 
++/// Find the single writer of an L1 tensor read only by `reader`.
++static CopyOp getPrivateL1Copy(bufferization::ToTensorOp view,
++                               Operation *reader) {
++  if (!view || !view->hasOneUse())
++    return {};
++  auto alloc = view.getMemref().getDefiningOp<memref::AllocOp>();
++  if (!alloc ||
++      getOptionalHIVMAddressSpace(alloc.getType()) != AddressSpace::L1)
++    return {};
++  CopyOp copy;
++  for (Operation *user : alloc->getUsers()) {
++    if (user == view)
++      continue;
++    auto writer = dyn_cast<CopyOp>(user);
++    if (!writer || copy || writer.getDst() != alloc.getResult())
++      return {};
++    copy = writer;
++  }
++  if (!copy || copy.getSrc().getType() != view.getType() ||
++      copy.getResultTensor() || copy.getPadMode() || copy.getPadValue() ||
++      copy.getCollapseReassociation() ||
++      copy->getBlock() != reader->getBlock() || !copy->isBeforeInBlock(reader))
++    return {};
++  return copy;
++}
++
+ /// Move a static expand through its private UB-to-L1 copy. This exposes a
+ /// direct to_tensor source to the existing layout-conversion rewrite.
+ struct MoveExpandBeforeUBToCBufCopy
+@@ -63,30 +90,10 @@ struct MoveExpandBeforeUBToCBufCopy
+       return failure();
+ 
+     auto toTensor = expand.getSrc().getDefiningOp<bufferization::ToTensorOp>();
+-    if (!toTensor || !toTensor->hasOneUse())
++    auto copy = getPrivateL1Copy(toTensor, expand);
++    if (!copy)
+       return failure();
+     auto alloc = toTensor.getMemref().getDefiningOp<memref::AllocOp>();
+-    if (!alloc ||
+-        getOptionalHIVMAddressSpace(alloc.getType()) != AddressSpace::L1)
+-      return failure();
+-
+-    // The allocation must have exactly one writer and no other readers.
+-    CopyOp copy;
+-    for (Operation *user : alloc->getUsers()) {
+-      if (user == toTensor)
+-        continue;
+-      auto writer = dyn_cast<CopyOp>(user);
+-      if (!writer || copy || writer.getDst() != alloc.getResult())
+-        return failure();
+-      copy = writer;
+-    }
+-    if (!copy || copy.getResultTensor() ||
+-        copy.getSrc().getType() != expand.getSrcType() || copy.getPadMode() ||
+-        copy.getPadValue() || copy.getCollapseReassociation())
+-      return failure();
+-    if (copy->getBlock() != expand->getBlock() ||
+-        !copy->isBeforeInBlock(expand))
+-      return failure();
+ 
+     rewriter.setInsertionPoint(alloc);
+     auto expandedType = MemRefType::get(
+@@ -111,6 +118,110 @@ struct MoveExpandBeforeUBToCBufCopy
+   }
+ };
+ 
++/// Pack a sliced matmul operand at its UB-to-L1 copy. The conversion can
++/// apply to the completed matrix or to the live slice before insertion.
++struct PackSlicedMatmulOperand : OpRewritePattern<ConvertLayoutOp> {
++  using OpRewritePattern::OpRewritePattern;
++
++  LogicalResult matchAndRewrite(ConvertLayoutOp convert,
++                                PatternRewriter &rewriter) const override {
++    auto type = dyn_cast<RankedTensorType>(convert.getType());
++    if (convert.getSrcLayout().getDataLayout() != hivm::DataLayout::ND ||
++        convert.getDstLayout().getDataLayout() != hivm::DataLayout::Fractal ||
++        !isPropagatingUp(convert) || !convert.getOutputShape().empty() ||
++        !type || type.getRank() != 4 || !type.hasStaticShape() ||
++        type.getEncoding())
++      return failure();
++
++    auto insert = convert.getSource().getDefiningOp<tensor::InsertSliceOp>();
++    bool packMatrix = static_cast<bool>(insert);
++    if (!packMatrix) {
++      if (!convert->hasOneUse())
++        return failure();
++      insert = dyn_cast<tensor::InsertSliceOp>(*convert->user_begin());
++      if (!insert || insert.getSource() != convert.getResult())
++        return failure();
++    }
++    Value packed = packMatrix ? convert.getResult() : insert.getResult();
++    if (llvm::none_of(packed.getUsers(), [](Operation *user) {
++          return isa<LocalMatmulLikeOpInterface>(user);
++        }))
++      return failure();
++
++    auto slice = (packMatrix ? insert.getSource() : convert.getSource())
++                     .getDefiningOp<tensor::ExtractSliceOp>();
++    auto fill = insert.getDest().getDefiningOp<VBrcOp>();
++    // Only static slice coordinates and a scalar fill can be replayed here.
++    if (!slice || slice.getType().getRank() != 2 || !slice->hasOneUse() ||
++        slice->getNumOperands() != 1 || insert->getNumOperands() != 2 ||
++        insert->hasAttr("elide_after_bufferize") ||
++        insert.getType().getRank() != (packMatrix ? 2 : 4) ||
++        !insert.getType().hasStaticShape() || insert.getType().getEncoding() ||
++        !fill || !fill.hasPureTensorSemantics() ||
++        !fill.getSrc().getDefiningOp<arith::ConstantOp>() ||
++        isa<ShapedType>(fill.getSrc().getType()) ||
++        !fill.getDst().getDefiningOp<tensor::EmptyOp>())
++      return failure();
++    auto view = slice.getSource().getDefiningOp<bufferization::ToTensorOp>();
++    auto copy = getPrivateL1Copy(view, slice);
++    if (!copy || copy->getBlock() != insert->getBlock())
++      return failure();
++
++    IRMapping mapping;
++    rewriter.setInsertionPoint(DominanceInfo().properlyDominates(fill, copy)
++                                   ? fill.getOperation()
++                                   : copy.getOperation());
++    rewriter.clone(*fill.getSrc().getDefiningOp(), mapping);
++    auto fillType = insert.getType();
++    auto empty = rewriter.create<tensor::EmptyOp>(
++        fill.getLoc(), fillType.getShape(), fillType.getElementType());
++    mapping.map(fill.getDst(), empty);
++    auto vectorFill = rewriter.clone(*fill, mapping);
++    vectorFill->setAttr(TCoreTypeAttr::name,
++                        rewriter.getAttr<TCoreTypeAttr>(TCoreType::VECTOR));
++
++    rewriter.setInsertionPoint(copy);
++    auto alloc = view.getMemref().getDefiningOp<memref::AllocOp>();
++    auto packedType = cast<RankedTensorType>(packed.getType());
++    auto memType = MemRefType::get(
++        packedType.getShape(), packedType.getElementType(),
++        MemRefLayoutAttrInterface(), alloc.getType().getMemorySpace());
++    auto buffer = rewriter.create<memref::AllocOp>(alloc.getLoc(), memType,
++                                                   alloc.getAlignmentAttr());
++    auto packedView = rewriter.create<bufferization::ToTensorOp>(
++        view.getLoc(), buffer, view.getRestrict(), view.getWritable());
++
++    mapping.map(view.getResult(), copy.getSrc());
++    rewriter.clone(*slice, mapping);
++    if (packMatrix)
++      rewriter.clone(*insert, mapping);
++    auto ubConvert = cast<ConvertLayoutOp>(rewriter.clone(*convert, mapping));
++    markAsNotPropagatingUp(rewriter, ubConvert);
++    if (!packMatrix)
++      rewriter.clone(*insert, mapping);
++    mapping.map(copy.getSrc(), mapping.lookup(packed));
++    mapping.map(copy.getDst(), buffer);
++    rewriter.clone(*copy, mapping);
++
++    if (packMatrix) {
++      // Branches using the same packing can read the same initialized L1 tile.
++      for (Operation *user : llvm::make_early_inc_range(insert->getUsers()))
++        if (user != convert &&
++            OperationEquivalence::isEquivalentTo(
++                convert, user, OperationEquivalence::IgnoreLocations))
++          rewriter.replaceOp(user, packedView.getResult());
++      rewriter.replaceOp(convert, packedView.getResult());
++      if (!insert->use_empty())
++        return success(); // Other readers still need the original ND copy.
++    } else {
++      rewriter.replaceOp(insert, packedView.getResult());
++      rewriter.eraseOp(convert);
++    }
++    rewriter.eraseOp(copy);
++    return success();
++  }
++};
++
+ //===----------------------------------------------------------------------===//
+ // Move ConvertLayout from UB->CBuf copy destination to its source
+ //===----------------------------------------------------------------------===//
+@@ -320,7 +431,8 @@ struct PropagateConvertLayoutPass
+     // Run these prioritized copy-boundary rewrites before the generic
+     // propagation patterns, so later patterns see the intended converted value.
+     RewritePatternSet firstPatterns(context);
+-    firstPatterns.add<MoveExpandBeforeUBToCBufCopy>(context);
++    firstPatterns.add<MoveExpandBeforeUBToCBufCopy, PackSlicedMatmulOperand>(
++        context);
+     firstPatterns.add<MoveConvertLayoutToSourceOfUBToCBufCopy>(context);
+     firstPatterns.add<MoveConvertLayoutBeforeTensorCopy>(context);
+     if (failed(applyPatternsGreedily(module, std::move(firstPatterns))))
+diff --git a/bishengir/test/Dialect/HFusion/hfusion-uplift-while-to-for/hfusion-uplift-singleton-counter.mlir b/bishengir/test/Dialect/HFusion/hfusion-uplift-while-to-for/hfusion-uplift-singleton-counter.mlir
+new file mode 100644
+index 000000000..71d1582a2
+--- /dev/null
++++ b/bishengir/test/Dialect/HFusion/hfusion-uplift-while-to-for/hfusion-uplift-singleton-counter.mlir
+@@ -0,0 +1,73 @@
++// RUN: bishengir-opt %s --hfusion-uplift-while-to-for | FileCheck %s
++
++func.func private @update(tensor<16xf32>) -> tensor<16xf32>
++
++// GEN-1749 carries a scalar loop counter alongside the tensor being computed.
++// CHECK-LABEL: func.func @singleton_counter(
++// CHECK-SAME:    %[[START:[^:]+]]: i32, %[[END:[^:]+]]: i32, %[[INPUT:[^:]+]]: tensor<16xf32>
++// CHECK:       %[[ONE:.*]] = arith.constant 1 : i32
++// CHECK:       %[[OUT:.*]] = scf.for %{{.*}} = %[[START]] to %[[END]] step %[[ONE]] iter_args(%[[T:.*]] = %[[INPUT]])
++// CHECK:         %[[NEXT:.*]] = {{.*}}call @update(%[[T]])
++// CHECK:         scf.yield %[[NEXT]] : tensor<16xf32>
++// CHECK:       return %[[OUT]] : tensor<16xf32>
++func.func @singleton_counter(%start: i32, %end: i32, %input: tensor<16xf32>) -> tensor<16xf32> {
++  %c0 = arith.constant 0 : index
++  %c1 = arith.constant 1 : i32
++  %empty = tensor.empty() : tensor<1xi32>
++  %init = linalg.fill ins(%start : i32) outs(%empty : tensor<1xi32>) -> tensor<1xi32>
++  %step = linalg.fill ins(%c1 : i32) outs(%empty : tensor<1xi32>) -> tensor<1xi32>
++  %r:2 = scf.while (%t = %input, %iv = %init) : (tensor<16xf32>, tensor<1xi32>) -> (tensor<16xf32>, tensor<1xi32>) {
++    %i = tensor.extract %iv[%c0] : tensor<1xi32>
++    %lt = arith.cmpi slt, %i, %end : i32
++    scf.condition(%lt) %t, %iv : tensor<16xf32>, tensor<1xi32>
++  } do {
++  ^bb0(%t: tensor<16xf32>, %iv: tensor<1xi32>):
++    %v = func.call @update(%t) : (tensor<16xf32>) -> tensor<16xf32>
++    %next = arith.addi %step, %iv : tensor<1xi32>
++    scf.yield %v, %next : tensor<16xf32>, tensor<1xi32>
++  }
++  return %r#0 : tensor<16xf32>
++}
++
++// A tensor step can be zero or negative.
++// CHECK-LABEL: func.func @unknown_step(
++// CHECK:       scf.while
++// CHECK:         tensor.extract
++// CHECK:         arith.addi {{.*}} : tensor<1xi32>
++func.func @unknown_step(%end: i32, %step: tensor<1xi32>, %input: tensor<16xf32>) -> tensor<16xf32> {
++  %c0 = arith.constant 0 : index
++  %zero = arith.constant dense<0> : tensor<1xi32>
++  %r:2 = scf.while (%iv = %zero, %t = %input) : (tensor<1xi32>, tensor<16xf32>) -> (tensor<1xi32>, tensor<16xf32>) {
++    %i = tensor.extract %iv[%c0] : tensor<1xi32>
++    %lt = arith.cmpi slt, %i, %end : i32
++    scf.condition(%lt) %iv, %t : tensor<1xi32>, tensor<16xf32>
++  } do {
++  ^bb0(%iv: tensor<1xi32>, %t: tensor<16xf32>):
++    %v = func.call @update(%t) : (tensor<16xf32>) -> tensor<16xf32>
++    %next = arith.addi %iv, %step : tensor<1xi32>
++    scf.yield %next, %v : tensor<1xi32>, tensor<16xf32>
++  }
++  return %r#1 : tensor<16xf32>
++}
++
++// linalg.fill casts its input to the output element type.
++// CHECK-LABEL: func.func @widened_initial_value(
++// CHECK:       linalg.fill ins(%{{.*}} : i16)
++// CHECK:       scf.while
++func.func @widened_initial_value(%start: i16, %end: i32, %input: tensor<16xf32>) -> tensor<16xf32> {
++  %c0 = arith.constant 0 : index
++  %step = arith.constant dense<1> : tensor<1xi32>
++  %empty = tensor.empty() : tensor<1xi32>
++  %init = linalg.fill ins(%start : i16) outs(%empty : tensor<1xi32>) -> tensor<1xi32>
++  %r:2 = scf.while (%iv = %init, %t = %input) : (tensor<1xi32>, tensor<16xf32>) -> (tensor<1xi32>, tensor<16xf32>) {
++    %i = tensor.extract %iv[%c0] : tensor<1xi32>
++    %lt = arith.cmpi slt, %i, %end : i32
++    scf.condition(%lt) %iv, %t : tensor<1xi32>, tensor<16xf32>
++  } do {
++  ^bb0(%iv: tensor<1xi32>, %t: tensor<16xf32>):
++    %v = func.call @update(%t) : (tensor<16xf32>) -> tensor<16xf32>
++    %next = arith.addi %iv, %step : tensor<1xi32>
++    scf.yield %next, %v : tensor<1xi32>, tensor<16xf32>
++  }
++  return %r#1 : tensor<16xf32>
++}
+diff --git a/bishengir/test/Dialect/HIVM/convert-layout-to-transpose.mlir b/bishengir/test/Dialect/HIVM/convert-layout-to-transpose.mlir
+index d8ba8940f..d97c02538 100644
+--- a/bishengir/test/Dialect/HIVM/convert-layout-to-transpose.mlir
++++ b/bishengir/test/Dialect/HIVM/convert-layout-to-transpose.mlir
+@@ -390,3 +390,18 @@ func.func @nd_to_fractal_from_ub_uninit() -> tensor<12x8x16x16xbf16> {
+        : (tensor<128x192xbf16>) -> tensor<12x8x16x16xbf16>
+   return %0 : tensor<12x8x16x16xbf16>
+ }
++
++// -----
++
++// A live column occupies one lane of the [16, 8] tile.
++// CHECK-LABEL: func.func @nd_to_fractal_live_column(
++// CHECK-SAME:    %[[COL:[^:]+]]: tensor<16x1xf32>
++// CHECK-NOT:     tensor<16x8xf32>
++// CHECK:         tensor.expand_shape %[[COL]]
++// CHECK:         return %{{.*}} : tensor<1x1x16x1xf32>
++func.func @nd_to_fractal_live_column(%col: tensor<16x1xf32>) -> tensor<1x1x16x1xf32> {
++  %live = hivm.hir.convert_layout %col output_shape [1, 1, 16, 1]
++      {srcLayout = #hivm.data_layout<ND>, dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 8]>}
++      : (tensor<16x1xf32>) -> tensor<1x1x16x1xf32>
++  return %live : tensor<1x1x16x1xf32>
++}
+diff --git a/bishengir/test/Dialect/HIVM/propagate-convert-layout-cbuf-reshape.mlir b/bishengir/test/Dialect/HIVM/propagate-convert-layout-cbuf-reshape.mlir
+index 9dceec229..d959007c3 100644
+--- a/bishengir/test/Dialect/HIVM/propagate-convert-layout-cbuf-reshape.mlir
++++ b/bishengir/test/Dialect/HIVM/propagate-convert-layout-cbuf-reshape.mlir
+@@ -125,3 +125,102 @@ func.func @static_result_late_extent(%input: tensor<1024xf32>, %rows: index, %co
+       : (tensor<32x32xf32>) -> tensor<4x2x16x8xf32>
+   return %fractal : tensor<4x2x16x8xf32>
+ }
++
++// -----
++
++// GEN-1749 just before transpose lowering. A's conversion has reached the
++// live column. B's conversion still applies to the completed matrix.
++// CHECK-LABEL: func.func @packed_column_and_row(
++// CHECK-SAME:    %[[COLS:[^:]+]]: tensor<16x16xf32>, %[[ROWS:[^:]+]]: tensor<16x16xf32>
++// CHECK-DAG:   %[[EMPTY:.*]] = tensor.empty() : tensor<2x1x16x8xf32>
++// CHECK-DAG:   %[[AZ:.*]] = hivm.hir.vbrc {hivm.tcore_type = #hivm.tcore_type<VECTOR>} {{.*}}outs(%[[EMPTY]] : tensor<2x1x16x8xf32>)
++// CHECK-DAG:   %[[BZ:.*]] = hivm.hir.vbrc {hivm.tcore_type = #hivm.tcore_type<VECTOR>} {{.*}} -> tensor<16x16xf32>
++// CHECK-DAG:   %[[ABUF:.*]] = memref.alloc() : memref<2x1x16x8xf32, #hivm.address_space<cbuf>>
++// CHECK-DAG:   %[[A:.*]] = bufferization.to_tensor %[[ABUF]]
++// CHECK:       %[[COL:.*]] = tensor.extract_slice %[[COLS]][0, 0] [16, 1]
++// CHECK:       %[[LIVE:.*]] = hivm.hir.convert_layout %[[COL]] output_shape [1, 1, 16, 1]
++// CHECK-SAME:  not_to_propagate_up = true
++// CHECK:       %[[AP:.*]] = tensor.insert_slice %[[LIVE]] into %[[AZ]][0, 0, 0, 0] [1, 1, 16, 1]
++// CHECK:       hivm.hir.copy ins(%[[AP]] : tensor<2x1x16x8xf32>) outs(%[[ABUF]]
++// CHECK-DAG:   %[[BBUF:.*]] = memref.alloc() : memref<2x1x16x8xf32, #hivm.address_space<cbuf>>
++// CHECK-DAG:   %[[B:.*]] = bufferization.to_tensor %[[BBUF]]
++// CHECK:       %[[ROW:.*]] = tensor.extract_slice %[[ROWS]][0, 0] [1, 16]
++// CHECK:       %[[BM:.*]] = tensor.insert_slice %[[ROW]] into %[[BZ]]
++// CHECK:       %[[BP:.*]] = hivm.hir.convert_layout %[[BM]] output_shape [2, 1, 16, 8]
++// CHECK:       hivm.hir.copy ins(%[[BP]] : tensor<2x1x16x8xf32>) outs(%[[BBUF]]
++// CHECK:       hivm.hir.mmadL1 ins(%[[A]], %[[B]],
++// LOWER-LABEL: func.func @packed_column_and_row(
++// LOWER-NOT:   tensor<16x8xf32>
++// LOWER:       hivm.hir.copy ins(%{{.*}} : tensor<2x1x16x8xf32>)
++// LOWER:       hivm.hir.vtranspose
++// LOWER:       hivm.hir.copy ins(%{{.*}} : tensor<2x1x16x8xf32>)
++// LOWER:       hivm.hir.mmadL1
++func.func @packed_column_and_row(%cols: tensor<16x16xf32>, %rows: tensor<16x16xf32>) -> tensor<1x1x16x16xf32> {
++  %true = arith.constant true
++  %c16 = arith.constant 16 : index
++  %zero = arith.constant 0.0 : f32
++  %empty_a = tensor.empty() {hivm.address_space = #hivm.address_space<cbuf>} : tensor<2x1x16x8xf32>
++  %az = hivm.hir.vbrc {hivm.tcore_type = #hivm.tcore_type<CUBE>} ins(%zero : f32) outs(%empty_a : tensor<2x1x16x8xf32>) -> tensor<2x1x16x8xf32>
++  %empty_b = tensor.empty() : tensor<16x16xf32>
++  %bz = hivm.hir.vbrc {hivm.tcore_type = #hivm.tcore_type<CUBE>} ins(%zero : f32) outs(%empty_b : tensor<16x16xf32>) -> tensor<16x16xf32>
++  %abuf = memref.alloc() : memref<16x16xf32, #hivm.address_space<cbuf>>
++  %av = bufferization.to_tensor %abuf restrict writable : memref<16x16xf32, #hivm.address_space<cbuf>>
++  hivm.hir.copy ins(%cols : tensor<16x16xf32>) outs(%abuf : memref<16x16xf32, #hivm.address_space<cbuf>>) {"hivm.inserted-copy"}
++  %col = tensor.extract_slice %av[0, 0] [16, 1] [1, 1] : tensor<16x16xf32> to tensor<16x1xf32>
++  %live = hivm.hir.convert_layout %col output_shape [1, 1, 16, 1] {srcLayout = #hivm.data_layout<ND>, dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 8]>} : (tensor<16x1xf32>) -> tensor<1x1x16x1xf32>
++  %a = tensor.insert_slice %live into %az[0, 0, 0, 0] [1, 1, 16, 1] [1, 1, 1, 1] : tensor<1x1x16x1xf32> into tensor<2x1x16x8xf32>
++  %bbuf = memref.alloc() : memref<16x16xf32, #hivm.address_space<cbuf>>
++  %bv = bufferization.to_tensor %bbuf restrict writable : memref<16x16xf32, #hivm.address_space<cbuf>>
++  hivm.hir.copy ins(%rows : tensor<16x16xf32>) outs(%bbuf : memref<16x16xf32, #hivm.address_space<cbuf>>) {"hivm.inserted-copy"}
++  %row = tensor.extract_slice %bv[0, 0] [1, 16] [1, 1] : tensor<16x16xf32> to tensor<1x16xf32>
++  %bm = tensor.insert_slice %row into %bz[0, 0] [1, 16] [1, 1] : tensor<1x16xf32> into tensor<16x16xf32>
++  %b = hivm.hir.convert_layout %bm output_shape [2, 1, 16, 8] {srcLayout = #hivm.data_layout<ND>, dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 8]>} : (tensor<16x16xf32>) -> tensor<2x1x16x8xf32>
++  %acc = tensor.empty() : tensor<1x1x16x16xf32>
++  %dot = hivm.hir.mmadL1 ins(%a, %b, %true, %c16, %c16, %c16 : tensor<2x1x16x8xf32>, tensor<2x1x16x8xf32>, i1, index, index, index) outs(%acc : tensor<1x1x16x16xf32>) -> tensor<1x1x16x16xf32>
++  return %dot : tensor<1x1x16x16xf32>
++}
++
++// -----
++
++// Both matmuls share one packed A. The returned ND matrix still needs its copy.
++// CHECK-LABEL: func.func @shared_sliced_matmul_input(
++// CHECK-SAME:    %[[SRC:[^:]+]]: tensor<16x16xf32>
++// CHECK:       %[[ND:.*]] = memref.alloc() : memref<16x16xf32, #hivm.address_space<cbuf>>
++// CHECK:       %[[NV:.*]] = bufferization.to_tensor %[[ND]]
++// CHECK:       %[[BUF:.*]] = memref.alloc() : memref<2x1x16x8xf32, #hivm.address_space<cbuf>>
++// CHECK:       %[[PV:.*]] = bufferization.to_tensor %[[BUF]]
++// CHECK:       %[[S:.*]] = tensor.extract_slice %[[SRC]]
++// CHECK:       %[[M:.*]] = tensor.insert_slice %[[S]]
++// CHECK:       %[[P:.*]] = hivm.hir.convert_layout %[[M]]
++// CHECK:       hivm.hir.copy ins(%[[P]] : tensor<2x1x16x8xf32>) outs(%[[BUF]]
++// CHECK:       hivm.hir.copy ins(%[[SRC]] : tensor<16x16xf32>) outs(%[[ND]]
++// CHECK:       %[[COL:.*]] = tensor.extract_slice %[[NV]]
++// CHECK:       %[[MATRIX:.*]] = tensor.insert_slice %[[COL]]
++// CHECK:       scf.if
++// CHECK:       hivm.hir.mmadL1 ins(%[[PV]],
++// CHECK:       } else {
++// CHECK:       hivm.hir.mmadL1 ins(%[[PV]],
++// CHECK:       return %{{.*}}, %[[MATRIX]]
++func.func @shared_sliced_matmul_input(%cols: tensor<16x16xf32>, %rhs1: tensor<2x1x16x8xf32>, %rhs2: tensor<2x1x16x8xf32>, %cond: i1) -> (tensor<1x1x16x16xf32>, tensor<16x16xf32>) {
++  %true = arith.constant true
++  %c16 = arith.constant 16 : index
++  %zero = arith.constant 0.0 : f32
++  %empty = tensor.empty() : tensor<16x16xf32>
++  %zeros = hivm.hir.vbrc {hivm.tcore_type = #hivm.tcore_type<CUBE>} ins(%zero : f32) outs(%empty : tensor<16x16xf32>) -> tensor<16x16xf32>
++  %buf = memref.alloc() : memref<16x16xf32, #hivm.address_space<cbuf>>
++  %v = bufferization.to_tensor %buf restrict writable : memref<16x16xf32, #hivm.address_space<cbuf>>
++  hivm.hir.copy ins(%cols : tensor<16x16xf32>) outs(%buf : memref<16x16xf32, #hivm.address_space<cbuf>>)
++  %col = tensor.extract_slice %v[0, 0] [16, 1] [1, 1] : tensor<16x16xf32> to tensor<16x1xf32>
++  %m = tensor.insert_slice %col into %zeros[0, 0] [16, 1] [1, 1] : tensor<16x1xf32> into tensor<16x16xf32>
++  %acc = tensor.empty() : tensor<1x1x16x16xf32>
++  %r = scf.if %cond -> tensor<1x1x16x16xf32> {
++    %p = hivm.hir.convert_layout %m output_shape [2, 1, 16, 8] {srcLayout = #hivm.data_layout<ND>, dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 8]>} : (tensor<16x16xf32>) -> tensor<2x1x16x8xf32>
++    %d = hivm.hir.mmadL1 ins(%p, %rhs1, %true, %c16, %c16, %c16 : tensor<2x1x16x8xf32>, tensor<2x1x16x8xf32>, i1, index, index, index) outs(%acc : tensor<1x1x16x16xf32>) -> tensor<1x1x16x16xf32>
++    scf.yield %d : tensor<1x1x16x16xf32>
++  } else {
++    %p = hivm.hir.convert_layout %m output_shape [2, 1, 16, 8] {srcLayout = #hivm.data_layout<ND>, dstLayout = #hivm.data_layout<Fractal, fractalSizes = [16, 8]>} : (tensor<16x16xf32>) -> tensor<2x1x16x8xf32>
++    %d = hivm.hir.mmadL1 ins(%p, %rhs2, %true, %c16, %c16, %c16 : tensor<2x1x16x8xf32>, tensor<2x1x16x8xf32>, i1, index, index, index) outs(%acc : tensor<1x1x16x16xf32>) -> tensor<1x1x16x16xf32>
++    scf.yield %d : tensor<1x1x16x16xf32>
++  }
++  return %r, %m : tensor<1x1x16x16xf32>, tensor<16x16xf32>
++}

@@ -1,0 +1,12 @@
+{
+  "issue": null,
+  "mr": "3545",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/3545",
+  "commit": "587c24da43da6ec7350b40294f99a457b09c14bd",
+  "parent": "cfedbdfca70e4878572c1454d744b58795e8ac62",
+  "title": "[AscendNPU IR][CV][InsertFixpipe] fix: enhance tracing",
+  "tests": [
+    "bishengir/test/Dialect/HIVM/Regbase/inline-fixpipe.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

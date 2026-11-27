@@ -1,0 +1,8 @@
+{
+  "title": "[HFusion][AutoVectorizeV2] RA 形态 addf-reduce 的物化树路线与 single-trip 兄弟融合修复",
+  "iid": 1004,
+  "updated_at": "2026-11-19T19:36:18.338+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1004",
+  "linked_mrs": []
+}

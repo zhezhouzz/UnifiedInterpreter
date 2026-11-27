@@ -1,0 +1,8 @@
+[
+  {
+    "function": "multi_buffer_alloc_manual",
+    "location": "loc(\"<stdin>\":14:7)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  }
+]

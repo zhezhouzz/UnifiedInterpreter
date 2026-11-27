@@ -1,0 +1,23 @@
+diff --git a/bishengir/test/Conversion/HIVMToLLVM/regbase-convert-llvm.mlir b/bishengir/test/Conversion/HIVMToLLVM/regbase-convert-llvm.mlir
+index ad809ab2fb..c4501a0c07 100644
+--- a/bishengir/test/Conversion/HIVMToLLVM/regbase-convert-llvm.mlir
++++ b/bishengir/test/Conversion/HIVMToLLVM/regbase-convert-llvm.mlir
+@@ -716,6 +716,18 @@ func.func @test_gather_v256_f8e5m2(%arg0 : memref<256x1xf8E5M2, strided<[16, 1],
+   return
+ }
+ 
++// CHECK-LABEL: test_vsstb_rank_three
++func.func @test_vsstb_rank_three(%dst: memref<4x1x16xf16, strided<[1024, 16, 1]>, #hivm.address_space<ub>>,
++    %mask: vector<128xi1>, %value: vector<128xf16>) {
++  %c0 = arith.constant 0 : index
++  %pitch = arith.constant 1024 : index
++  // CHECK: %[[PITCH:.*]] = llvm.mlir.constant(4194304 : i32) : i32
++  // CHECK: "hivm_regbaseintrins.intr.hivm.vsstb.v128f16"({{.*}}, {{.*}}, %[[PITCH]],
++  ave.hir.store_with_stride %dst[%c0, %c0, %c0], %pitch, %mask, %value
++      : memref<4x1x16xf16, strided<[1024, 16, 1]>, #hivm.address_space<ub>>, vector<128xi1>, vector<128xf16>
++  return
++}
++
+ // CHECK-LABEL: test_vsstb_v128_f16
+ func.func @test_vsstb_v128_f16(%arg0 : memref<4x16xf16, affine_map<(d0, d1)[s0] -> (d0 * 1024 + d1 + s0)>, #hivm.address_space<ub>>, %arg1 : vector<64xi1>, %arg2 : vector<64xf16>) -> () {
+   %c1024 = arith.constant 1024 : index

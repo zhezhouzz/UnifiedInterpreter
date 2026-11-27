@@ -1,0 +1,9 @@
+{
+  "issue": 1047,
+  "mr": "5282",
+  "commit": "2ace4cedf910c81c16ee781408f671cc3855473a",
+  "parent": "60de77cecc259f484822b1abf303ffd20c8181e9",
+  "title": "[Template][Arange] fix: synchronize 3D scalar stores",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/5282",
+  "tests": []
+}

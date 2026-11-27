@@ -1,0 +1,102 @@
+[
+  {
+    "path": "tutorials/ascend/01-ascend-allgather-gemm-udma.py",
+    "commit": "8cae51bf17c5ce6b01b8f9094b8a656980700cec",
+    "url": "https://gitcode.com/Ascend/Triton-distributed-ascend/blob/8cae51bf17c5ce6b01b8f9094b8a656980700cec/tutorials/ascend/01-ascend-allgather-gemm-udma.py"
+  },
+  {
+    "path": "tutorials/ascend/allgather-gemm-udma.py",
+    "commit": "8cae51bf17c5ce6b01b8f9094b8a656980700cec",
+    "url": "https://gitcode.com/Ascend/Triton-distributed-ascend/blob/8cae51bf17c5ce6b01b8f9094b8a656980700cec/tutorials/ascend/allgather-gemm-udma.py"
+  },
+  {
+    "path": "tutorials/ascend/allgather-gemm.py",
+    "commit": "8cae51bf17c5ce6b01b8f9094b8a656980700cec",
+    "url": "https://gitcode.com/Ascend/Triton-distributed-ascend/blob/8cae51bf17c5ce6b01b8f9094b8a656980700cec/tutorials/ascend/allgather-gemm.py"
+  },
+  {
+    "path": "tutorials/ascend/alltoallv-gmm-udma.py",
+    "commit": "8cae51bf17c5ce6b01b8f9094b8a656980700cec",
+    "url": "https://gitcode.com/Ascend/Triton-distributed-ascend/blob/8cae51bf17c5ce6b01b8f9094b8a656980700cec/tutorials/ascend/alltoallv-gmm-udma.py"
+  },
+  {
+    "path": "tutorials/ascend/alltoallv-gmm.py",
+    "commit": "8cae51bf17c5ce6b01b8f9094b8a656980700cec",
+    "url": "https://gitcode.com/Ascend/Triton-distributed-ascend/blob/8cae51bf17c5ce6b01b8f9094b8a656980700cec/tutorials/ascend/alltoallv-gmm.py"
+  },
+  {
+    "path": "tutorials/ascend/gemm-allreduce-oneshot-notify.py",
+    "commit": "8cae51bf17c5ce6b01b8f9094b8a656980700cec",
+    "url": "https://gitcode.com/Ascend/Triton-distributed-ascend/blob/8cae51bf17c5ce6b01b8f9094b8a656980700cec/tutorials/ascend/gemm-allreduce-oneshot-notify.py"
+  },
+  {
+    "path": "tutorials/ascend/gemm-allreduce-oneshot.py",
+    "commit": "8cae51bf17c5ce6b01b8f9094b8a656980700cec",
+    "url": "https://gitcode.com/Ascend/Triton-distributed-ascend/blob/8cae51bf17c5ce6b01b8f9094b8a656980700cec/tutorials/ascend/gemm-allreduce-oneshot.py"
+  },
+  {
+    "path": "tutorials/ascend/gemm-reduce-scatter-udma.py",
+    "commit": "8cae51bf17c5ce6b01b8f9094b8a656980700cec",
+    "url": "https://gitcode.com/Ascend/Triton-distributed-ascend/blob/8cae51bf17c5ce6b01b8f9094b8a656980700cec/tutorials/ascend/gemm-reduce-scatter-udma.py"
+  },
+  {
+    "path": "tutorials/ascend/gemm-reduce-scatter.py",
+    "commit": "8cae51bf17c5ce6b01b8f9094b8a656980700cec",
+    "url": "https://gitcode.com/Ascend/Triton-distributed-ascend/blob/8cae51bf17c5ce6b01b8f9094b8a656980700cec/tutorials/ascend/gemm-reduce-scatter.py"
+  },
+  {
+    "path": "tutorials/ascend/moe-combine-udma.py",
+    "commit": "8cae51bf17c5ce6b01b8f9094b8a656980700cec",
+    "url": "https://gitcode.com/Ascend/Triton-distributed-ascend/blob/8cae51bf17c5ce6b01b8f9094b8a656980700cec/tutorials/ascend/moe-combine-udma.py"
+  },
+  {
+    "path": "tutorials/ascend/moe-dispatch-udma.py",
+    "commit": "8cae51bf17c5ce6b01b8f9094b8a656980700cec",
+    "url": "https://gitcode.com/Ascend/Triton-distributed-ascend/blob/8cae51bf17c5ce6b01b8f9094b8a656980700cec/tutorials/ascend/moe-dispatch-udma.py"
+  },
+  {
+    "path": "tutorials/ascend/qkv-all2all-udma.py",
+    "commit": "8cae51bf17c5ce6b01b8f9094b8a656980700cec",
+    "url": "https://gitcode.com/Ascend/Triton-distributed-ascend/blob/8cae51bf17c5ce6b01b8f9094b8a656980700cec/tutorials/ascend/qkv-all2all-udma.py"
+  },
+  {
+    "path": "tutorials/ascend/qkv-all2all.py",
+    "commit": "8cae51bf17c5ce6b01b8f9094b8a656980700cec",
+    "url": "https://gitcode.com/Ascend/Triton-distributed-ascend/blob/8cae51bf17c5ce6b01b8f9094b8a656980700cec/tutorials/ascend/qkv-all2all.py"
+  },
+  {
+    "path": "tutorials/ascend/reverse-a2a-norm-matmul-2.py",
+    "commit": "8cae51bf17c5ce6b01b8f9094b8a656980700cec",
+    "url": "https://gitcode.com/Ascend/Triton-distributed-ascend/blob/8cae51bf17c5ce6b01b8f9094b8a656980700cec/tutorials/ascend/reverse-a2a-norm-matmul-2.py"
+  },
+  {
+    "path": "tutorials/ascend/reverse-a2a-norm-matmul.py",
+    "commit": "8cae51bf17c5ce6b01b8f9094b8a656980700cec",
+    "url": "https://gitcode.com/Ascend/Triton-distributed-ascend/blob/8cae51bf17c5ce6b01b8f9094b8a656980700cec/tutorials/ascend/reverse-a2a-norm-matmul.py"
+  },
+  {
+    "path": "tutorials/ascend/reverse-all2all-udma-autotune.py",
+    "commit": "8cae51bf17c5ce6b01b8f9094b8a656980700cec",
+    "url": "https://gitcode.com/Ascend/Triton-distributed-ascend/blob/8cae51bf17c5ce6b01b8f9094b8a656980700cec/tutorials/ascend/reverse-all2all-udma-autotune.py"
+  },
+  {
+    "path": "tutorials/ascend/reverse-all2all-udma.py",
+    "commit": "8cae51bf17c5ce6b01b8f9094b8a656980700cec",
+    "url": "https://gitcode.com/Ascend/Triton-distributed-ascend/blob/8cae51bf17c5ce6b01b8f9094b8a656980700cec/tutorials/ascend/reverse-all2all-udma.py"
+  },
+  {
+    "path": "tutorials/ascend/reverse-all2all.py",
+    "commit": "8cae51bf17c5ce6b01b8f9094b8a656980700cec",
+    "url": "https://gitcode.com/Ascend/Triton-distributed-ascend/blob/8cae51bf17c5ce6b01b8f9094b8a656980700cec/tutorials/ascend/reverse-all2all.py"
+  },
+  {
+    "path": "tutorials/ascend/transpose-all2all-udma.py",
+    "commit": "8cae51bf17c5ce6b01b8f9094b8a656980700cec",
+    "url": "https://gitcode.com/Ascend/Triton-distributed-ascend/blob/8cae51bf17c5ce6b01b8f9094b8a656980700cec/tutorials/ascend/transpose-all2all-udma.py"
+  },
+  {
+    "path": "tutorials/ascend/transpose-all2all.py",
+    "commit": "8cae51bf17c5ce6b01b8f9094b8a656980700cec",
+    "url": "https://gitcode.com/Ascend/Triton-distributed-ascend/blob/8cae51bf17c5ce6b01b8f9094b8a656980700cec/tutorials/ascend/transpose-all2all.py"
+  }
+]

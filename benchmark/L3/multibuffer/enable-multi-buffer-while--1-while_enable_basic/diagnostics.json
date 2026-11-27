@@ -1,0 +1,8 @@
+[
+  {
+    "function": "while_enable_basic",
+    "location": "loc(\"<stdin>\":10:10)",
+    "op": "scf.while",
+    "reason": "missing Core interpretation"
+  }
+]

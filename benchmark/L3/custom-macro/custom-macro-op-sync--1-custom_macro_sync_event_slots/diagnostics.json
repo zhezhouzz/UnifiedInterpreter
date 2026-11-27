@@ -1,0 +1,14 @@
+[
+  {
+    "function": "custom_macro_sync_event_slots",
+    "location": "loc(\"<stdin>\":4:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "custom_macro_sync_event_slots",
+    "location": "loc(\"<stdin>\":7:10)",
+    "op": "hivm.hir.custom_macro",
+    "reason": "missing Core interpretation"
+  }
+]

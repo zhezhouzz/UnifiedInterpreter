@@ -1,0 +1,905 @@
+// RUN: bishengir-opt -allow-unregistered-dialect %s -split-input-file -verify-diagnostics
+
+
+// invalid data layout attribute
+func.func @invalid_data_layout() {
+  "test.invalid_data_layout"() {
+      // expected-error@+1 {{'transpose' is only valid if data layout is DOTA_ND or DOTB_ND}}
+      nZ_transpose = #hivm.data_layout<nZ, transpose = true>
+    } : () -> ()
+  return
+}
+
+// -----
+
+// invalid data layout attribute
+func.func @invalid_data_layout() {
+  "test.invalid_data_layout"() {
+      // expected-error@+1 {{'transpose' must be set if data layout is DOTA_ND or DOTB_ND}}
+      nZ_transpose = #hivm.data_layout<dotA_ND>
+    } : () -> ()
+  return
+}
+
+// -----
+
+// CHECK-LABEL: test_invalid_convert_layout
+#dot_a_layout = #hivm.data_layout<dotA_ND, transpose = false>
+#nZ_layout = #hivm.data_layout<nZ>
+func.func @test_invalid_convert_layout(%arg : memref<128x128xf16, strided<[?, ?], offset: ?>>) {
+  %alloc = memref.alloc() : memref<128x128xf16>
+  memref.copy %arg, %alloc : memref<128x128xf16, strided<[?, ?], offset: ?>> to memref<128x128xf16>
+  // expected-error@+1 {{'hivm.hir.convert_layout' op requires the same element type for all operands and results}}
+  %alloc_new_layout = hivm.hir.convert_layout %alloc output_shape [8, 8, 16, 16] {srcLayout = #dot_a_layout, dstLayout = #nZ_layout} : (memref<128x128xf16>) -> memref<8x8x16x16xf32>
+  "some_use"(%alloc_new_layout) : (memref<8x8x16x16xf32>) -> ()
+  return
+}
+
+// -----
+// CHECK-LABEL: incorrect_copy_op_gm_gm
+func.func @incorrect_copy_op_gm_gm() {
+  %src = memref.alloc() : memref<16x16xf16, #hivm.address_space<gm>>
+  %dst = memref.alloc() : memref<16x16xf16, #hivm.address_space<gm>>
+  // expected-error@+1 {{'hivm.hir.copy' op Unsupported copy from gm to gm!}}
+  hivm.hir.copy ins(%src : memref<16x16xf16, #hivm.address_space<gm>>)
+                outs(%dst : memref<16x16xf16, #hivm.address_space<gm>>)
+  return
+}
+
+// -----
+// CHECK-LABEL: incorrect_copy_op_element_type
+func.func @incorrect_copy_op_element_type() {
+  %src = memref.alloc() : memref<16x16xf32, #hivm.address_space<gm>>
+  %dst = memref.alloc() : memref<16x16xf16, #hivm.address_space<ub>>
+  // expected-error@+1 {{'hivm.hir.load' op element types of dst and src should be the same!}}
+  hivm.hir.load ins(%src : memref<16x16xf32, #hivm.address_space<gm>>)
+                outs(%dst : memref<16x16xf16, #hivm.address_space<ub>>)
+  return
+}
+
+
+// -----
+// CHECK-LABEL: incorrect_copy_op_padval_type
+func.func @incorrect_copy_op_padval_type() {
+  %val = arith.constant 10.0 : f32
+  %src = memref.alloc() : memref<16x16xf16, #hivm.address_space<gm>>
+  %dst = memref.alloc() : memref<16x16xf16, #hivm.address_space<ub>>
+  // expected-error@+1 {{'hivm.hir.load' op dtype of pad_value and element type of dst/src should be the same!}}
+  hivm.hir.load ins(%src : memref<16x16xf16, #hivm.address_space<gm>>)
+                outs(%dst : memref<16x16xf16, #hivm.address_space<ub>>)
+                pad_mode = #hivm.padmode<PadValue>
+                pad_value = %val : f32
+  return
+}
+
+// -----
+// CHECK-LABEL: correct_copy_op_tensor_memref_mixed
+func.func @correct_copy_op_tensor_memref_mixed() {
+	%src = tensor.empty() : tensor<16x16xf16>
+	%dst = memref.alloc() : memref<16x16xf16, #hivm.address_space<ub>>
+  // enable copy op tensor memref mixed
+  hivm.hir.copy ins(%src : tensor<16x16xf16>)
+                outs(%dst : memref<16x16xf16, #hivm.address_space<ub>>)
+	return
+}
+
+// -----
+// CHECK-LABEL: incorrect_copy_op_pad_value
+func.func @incorrect_copy_op_pad_value() {
+	%src = memref.alloc() : memref<16x16xf16, #hivm.address_space<gm>>
+	%dst = memref.alloc() : memref<16x16xf16, #hivm.address_space<ub>>
+  // expected-error@+1 {{'hivm.hir.load' op if padmode is PadValue, pad_value is required!}}
+  hivm.hir.load ins(%src : memref<16x16xf16, #hivm.address_space<gm>>)
+                outs(%dst : memref<16x16xf16, #hivm.address_space<ub>>)
+                pad_mode = #hivm.padmode<PadValue>
+	return
+}
+
+// -----
+// CHECK-LABEL: incorrect_copy_op_shape
+func.func @incorrect_copy_op_shape() {
+	%src = memref.alloc() : memref<16x16xf16, #hivm.address_space<gm>>
+	%dst = memref.alloc() : memref<256xf16, #hivm.address_space<ub>>
+  // expected-error@+1 {{'hivm.hir.load' op src and dst should have the same dimensions!}}
+  hivm.hir.load ins(%src : memref<16x16xf16, #hivm.address_space<gm>>)
+                outs(%dst : memref<256xf16, #hivm.address_space<ub>>)
+	return
+}
+
+// -----
+// CHECK-LABEL: incorrect_matmul_descale_shape
+func.func @incorrect_matmul_descale_shape(%A_gm : memref<16x16xf16, #hivm.address_space<gm>>,
+                               %B_gm :  memref<16x16xf16, #hivm.address_space<gm>>,
+                               %descale_pertensor_gm :  memref<16xf16, #hivm.address_space<gm>>,
+                               %res_gm :memref<16x16xf16, #hivm.address_space<gm>> ) {
+    // expected-error@+1 {{'hivm.hir.matmul' op The descaleMode is DescalePerTensor, the size of descale is equal to 1}}
+    hivm.hir.matmul
+         ins(%A_gm, %B_gm:
+             memref<16x16xf16, #hivm.address_space<gm>>, memref<16x16xf16, #hivm.address_space<gm>>)
+         outs(%res_gm : memref<16x16xf16, #hivm.address_space<gm>>)
+         descale = %descale_pertensor_gm :  memref<16xf16, #hivm.address_space<gm>>
+         descale_mode = #hivm.descale_mode<DescalePerTensor>
+  return
+}
+
+
+// -----
+// CHECK-LABEL: incorrect_matmul_bias_shape
+func.func @incorrect_matmul_bias_shape(%A_gm : memref<16x16xf16, #hivm.address_space<gm>>,
+                               %B_gm :  memref<16x16xf16, #hivm.address_space<gm>>,
+                               %bias_gm :  memref<32xf16, #hivm.address_space<gm>>,
+                               %res_gm :memref<16x16xf16, #hivm.address_space<gm>> ) {
+    // expected-error@+1 {{'hivm.hir.matmul' op The size of bias is equal to the col size of B}}
+    hivm.hir.matmul
+         ins(%A_gm, %B_gm:
+             memref<16x16xf16, #hivm.address_space<gm>>, memref<16x16xf16, #hivm.address_space<gm>>)
+         outs(%res_gm : memref<16x16xf16, #hivm.address_space<gm>>)
+         bias = %bias_gm :  memref<32xf16, #hivm.address_space<gm>>
+  return
+}
+
+
+// -----
+module {
+// CHECK-LABEL: test_ptr0
+  func.func @test_ptr0() {
+    // expected-error@+1 {{'hivm.hir.pointer_cast' op addrs of PointerCastOp should not be empty!}}
+    %1 = hivm.hir.pointer_cast() [] : memref<16x16x16xf16, #hivm.address_space<ub>>
+    return
+  }
+}
+
+// -----
+module {
+// CHECK-LABEL: incorrect_tranpose_permutation
+  func.func @incorrect_tranpose_permutation() {
+    %src = memref.alloc() : memref<16x8x32x8xf32>
+    %dst = memref.alloc() : memref<8x16x8x32xf32>
+    // expected-error@+1 {{'hivm.hir.vtranspose' op Vtranspose supports only swapping two axes; for rank-4, also allows permutations equivalent to two swaps}}
+    hivm.hir.vtranspose ins(%src : memref<16x8x32x8xf32>) outs(%dst : memref<8x16x8x32xf32>) permutation = [1, 2, 3, 0]
+    return
+  }
+}
+
+// -----
+module {
+// CHECK-LABEL: incorrect_tranpose_permutation
+  func.func @incorrect_load_op_left_pad_value_type() {
+    %c0_i64 = arith.constant 0 : i64
+    %src = memref.alloc() : memref<16x16xf16, #hivm.address_space<gm>>
+    %dst = memref.alloc() : memref<16x16xf16, #hivm.address_space<ub>>
+    // expected-error@+1 {{'hivm.hir.load' op operand #2 must be index, but got 'i64'}}
+    hivm.hir.load ins(%src : memref<16x16xf16, #hivm.address_space<gm>>)
+                  outs(%dst :  memref<16x16xf16, #hivm.address_space<ub>>)
+                  left_padding_num = %c0_i64 : i64
+    return
+  }
+}
+
+// -----
+module {
+// CHECK-LABEL: alloc_workspace
+  func.func @alloc_workspace(%dyn_size : index){
+    // expected-error@+1 {{'memref_ext.alloc_workspace' op dimension operand count does not equal memref dynamic dimension count}}
+    memref_ext.alloc_workspace(%dyn_size) : memref<100xi8>
+
+    return
+  }
+}
+
+// -----
+
+func.func @transpose_broadcast_otf(%src0 : memref<4x8x16xf16>, %src1 : memref<4x1x16xf16>, %dst : memref<8x4x16xf16>) {
+  // expected-error@+1 {{Broadcast OTF and Transpose OTF cannot be enabled at the same time}}
+  hivm.hir.vadd ins(%src0, %src1 : memref<4x8x16xf16>, memref<4x1x16xf16>) outs(%dst : memref<8x4x16xf16>)
+    broadcast = [1]
+    transpose = [1, 0, 2]
+  return
+}
+
+// -----
+// CHECK-LABEL: invalid_create_sync_block_lock
+func.func @invalid_create_sync_block_lock() {
+  // expected-error@+1 {{'create_sync_block_lock' op should only support static shape}}
+  hivm.hir.create_sync_block_lock : memref<?xi64>
+  return
+}
+
+// -----
+// CHECK-LABEL: hivm_load_type
+func.func @hivm_load_type(%src: tensor<16x16xf16>, %dst: tensor<16x16xf32>) {
+  // expected-error@+1 {{'hivm.hir.load' op element types of dst and src should be the same!}}
+  %res = hivm.hir.load ins(%src : tensor<16x16xf16>)
+                outs(%dst : tensor<16x16xf32>) -> tensor<16x16xf32>
+  return
+}
+
+// -----
+// CHECK-LABEL: hivm_load_dim
+func.func @hivm_load_dim(%src: tensor<16x16xf16>, %dst: tensor<16x32xf16>) {
+  // expected-error@+1 {{'hivm.hir.load' op pad_mode unset or PadNull: src and dst shapes must match!}}
+  %res = hivm.hir.load ins(%src : tensor<16x16xf16>)
+                outs(%dst : tensor<16x32xf16>) -> tensor<16x32xf16>
+  return
+}
+
+// -----
+// CHECK-LABEL: hivm_load_dims
+func.func @hivm_load_dims(%src: tensor<16x16x2xf16>, %dst: tensor<16x16xf16>) {
+  // expected-error@+1 {{'hivm.hir.load' op src and dst should have the same dimensions!}}
+  %res = hivm.hir.load ins(%src : tensor<16x16x2xf16>)
+                outs(%dst : tensor<16x16xf16>) -> tensor<16x16xf16>
+  return
+}
+
+// -----
+// CHECK-LABEL: hivm_load_rank
+func.func @hivm_load_dim(%src: tensor<16x16xf16>, %dst: memref<16x16xf16, #hivm.address_space<gm>>) {
+  // expected-error@+1 {{'hivm.hir.load' op dst/src should be memref/memref or tensor/tensor, res should be tensor!}}
+  hivm.hir.load ins(%src : tensor<16x16xf16>)
+                outs(%dst : memref<16x16xf16, #hivm.address_space<gm>>)
+  return
+}
+
+// -----
+// CHECK-LABEL: hivm_memref_load_gm_to_gm_fail
+func.func @hivm_memref_load_gm_to_gm_fail() {
+  %src = memref.alloc() : memref<16x16xf16, #hivm.address_space<gm>>
+  %dst = memref.alloc() : memref<16x16xf16, #hivm.address_space<gm>>
+  // expected-error@+1 {{'hivm.hir.load' op only support src == gm and dst != gm currently!}}
+  hivm.hir.load ins(%src : memref<16x16xf16, #hivm.address_space<gm>>)
+                outs(%dst : memref<16x16xf16, #hivm.address_space<gm>>)
+  return
+}
+
+// -----
+// CHECK-LABEL: hivm_store_type
+func.func @hivm_store_type(%src: tensor<16x16xf16>, %dst: tensor<16x16xf32>) {
+  // expected-error@+1 {{'hivm.hir.store' op element types of dst and src should be the same!}}
+  %res = hivm.hir.store ins(%src : tensor<16x16xf16>)
+                outs(%dst : tensor<16x16xf32>) -> tensor<16x16xf32>
+  return
+}
+
+// -----
+// CHECK-LABEL: hivm_store_dims
+func.func @hivm_store_dims(%src: tensor<16x16x2xf16>, %dst: tensor<16x16xf16>) {
+  // expected-error@+1 {{'hivm.hir.store' op src and dst should have the same dimensions!}}
+  %res = hivm.hir.store ins(%src : tensor<16x16x2xf16>)
+                outs(%dst : tensor<16x16xf16>) -> tensor<16x16xf16>
+  return
+}
+
+// -----
+// CHECK-LABEL: hivm_memref_store_gm_to_gm_fail
+func.func @hivm_memref_store_gm_to_gm_fail() {
+  %src = memref.alloc() : memref<16x16xf16, #hivm.address_space<gm>>
+  %dst = memref.alloc() : memref<16x16xf16, #hivm.address_space<gm>>
+  // expected-error@+1 {{'hivm.hir.store' op only support store ub to gm currently!}}
+  hivm.hir.store ins(%src : memref<16x16xf16, #hivm.address_space<gm>>)
+                outs(%dst : memref<16x16xf16, #hivm.address_space<gm>>)
+  return
+}
+
+// -----
+// CHECK-LABEL: hivm_copy_type
+func.func @hivm_copy_type(%src: tensor<16x16xf16>, %dst: tensor<16x16xf32>) {
+  // expected-error@+1 {{'hivm.hir.copy' op element types of dst and src should be the same!}}
+  %res = hivm.hir.copy ins(%src : tensor<16x16xf16>)
+                outs(%dst : tensor<16x16xf32>) -> tensor<16x16xf32>
+  return
+}
+
+// -----
+// CHECK-LABEL: hivm_copy_dims
+func.func @hivm_copy_dims(%src: tensor<16x16x2xf16>, %dst: tensor<16x16xf16>) {
+  // expected-error@+1 {{'hivm.hir.copy' op src and dst should have the same dimensions!}}
+  %res = hivm.hir.copy ins(%src : tensor<16x16x2xf16>)
+                outs(%dst : tensor<16x16xf16>) -> tensor<16x16xf16>
+  return
+}
+
+// -----
+// CHECK-LABEL: test_mix_group_matmul_invalid_a
+func.func @test_mix_group_matmul_invalid_a(%weight_gm : memref<16x16xf16, #hivm.address_space<gm>>,
+                                 %tokens_gm :  memref<16x16xf16, #hivm.address_space<gm>>,
+                                 %tokens_per_expert_gm :  memref<16xi64, #hivm.address_space<gm>>,
+                                 %tiling_params_gm : memref<16xi64, #hivm.address_space<gm>>,
+                                 %comm_params_gm : memref<16xi64, #hivm.address_space<gm>>,
+                                 %res_gm :memref<16x16xf16, #hivm.address_space<gm>>,
+                                 %post_vector_func_ins0_gm: memref<16xi64, #hivm.address_space<gm>>,
+                                 %post_vector_func_ins1_gm: memref<16xi64, #hivm.address_space<gm>>,
+                                 %post_vector_func_ins2_gm: memref<16xi64, #hivm.address_space<gm>>,
+                                 %post_vector_func_outs_gm: memref<16xi64, #hivm.address_space<gm>>,
+                                 %workspace_ins_gm: memref<1024xi64, #hivm.address_space<gm>>) {
+    // expected-error@+1 {{'hivm.hir.mix_group_matmul' op matrix A must be 3D}}
+    hivm.hir.mix_group_matmul
+       ins(%weight_gm, %tokens_gm, %tokens_per_expert_gm:
+           memref<16x16xf16, #hivm.address_space<gm>>, memref<16x16xf16, #hivm.address_space<gm>>,
+           memref<16xi64, #hivm.address_space<gm>>)
+       post_vector_func_ins(%post_vector_func_ins0_gm,
+                            %post_vector_func_ins1_gm,
+                            %post_vector_func_ins2_gm :
+                            memref<16xi64, #hivm.address_space<gm>>,
+                            memref<16xi64, #hivm.address_space<gm>>,
+                            memref<16xi64, #hivm.address_space<gm>>)
+       post_vector_func_outs(%post_vector_func_outs_gm : memref<16xi64, #hivm.address_space<gm>>)
+       workspace_ins(%workspace_ins_gm : memref<1024xi64, #hivm.address_space<gm>>)
+       outs(%res_gm : memref<16x16xf16, #hivm.address_space<gm>>)
+       tiling_params = %tiling_params_gm : memref<16xi64, #hivm.address_space<gm>>
+       comm_params = %comm_params_gm : memref<16xi64, #hivm.address_space<gm>>
+    return
+}
+
+// -----
+// CHECK-LABEL: test_mix_group_matmul_invalid_b
+func.func @test_mix_group_matmul_invalid_b(%weight_gm : memref<16x16x16xf16, #hivm.address_space<gm>>,
+                                 %tokens_gm :  memref<16xf16, #hivm.address_space<gm>>,
+                                 %tokens_per_expert_gm :  memref<16xi64, #hivm.address_space<gm>>,
+                                 %tiling_params_gm : memref<16xi64, #hivm.address_space<gm>>,
+                                 %comm_params_gm : memref<16xi64, #hivm.address_space<gm>>,
+                                 %res_gm :memref<16x16xf16, #hivm.address_space<gm>>,
+                                 %post_vector_func_ins0_gm: memref<16xi64, #hivm.address_space<gm>>,
+                                 %post_vector_func_ins1_gm: memref<16xi64, #hivm.address_space<gm>>,
+                                 %post_vector_func_ins2_gm: memref<16xi64, #hivm.address_space<gm>>,
+                                 %post_vector_func_outs_gm: memref<16xi64, #hivm.address_space<gm>>,
+                                 %workspace_ins_gm: memref<1024xi64, #hivm.address_space<gm>>) {
+    // expected-error@+1 {{'hivm.hir.mix_group_matmul' op matrix B must be 2D}}
+    hivm.hir.mix_group_matmul
+       ins(%weight_gm, %tokens_gm, %tokens_per_expert_gm:
+           memref<16x16x16xf16, #hivm.address_space<gm>>, memref<16xf16, #hivm.address_space<gm>>,
+           memref<16xi64, #hivm.address_space<gm>>)
+       post_vector_func_ins(%post_vector_func_ins0_gm,
+                            %post_vector_func_ins1_gm,
+                            %post_vector_func_ins2_gm :
+                            memref<16xi64, #hivm.address_space<gm>>,
+                            memref<16xi64, #hivm.address_space<gm>>,
+                            memref<16xi64, #hivm.address_space<gm>>)
+       post_vector_func_outs(%post_vector_func_outs_gm : memref<16xi64, #hivm.address_space<gm>>)
+       workspace_ins(%workspace_ins_gm : memref<1024xi64, #hivm.address_space<gm>>)
+       outs(%res_gm : memref<16x16xf16, #hivm.address_space<gm>>)
+       tiling_params = %tiling_params_gm : memref<16xi64, #hivm.address_space<gm>>
+       comm_params = %comm_params_gm : memref<16xi64, #hivm.address_space<gm>>
+    return
+}
+
+// -----
+// CHECK-LABEL: test_mix_group_matmul_invalid_token
+func.func @test_mix_group_matmul_invalid_token(%weight_gm : memref<16x16x16xf16, #hivm.address_space<gm>>,
+                                 %tokens_gm :  memref<16x16xf16, #hivm.address_space<gm>>,
+                                 %tokens_per_expert_gm :  memref<16x16xi64, #hivm.address_space<gm>>,
+                                 %tiling_params_gm : memref<16xi64, #hivm.address_space<gm>>,
+                                 %comm_params_gm : memref<16xi64, #hivm.address_space<gm>>,
+                                 %res_gm :memref<16x16xf16, #hivm.address_space<gm>>,
+                                 %post_vector_func_ins0_gm: memref<16xi64, #hivm.address_space<gm>>,
+                                 %post_vector_func_ins1_gm: memref<16xi64, #hivm.address_space<gm>>,
+                                 %post_vector_func_ins2_gm: memref<16xi64, #hivm.address_space<gm>>,
+                                 %post_vector_func_outs_gm: memref<16xi64, #hivm.address_space<gm>>,
+                                 %workspace_ins_gm: memref<1024xi64, #hivm.address_space<gm>>) {
+    // expected-error@+1 {{'hivm.hir.mix_group_matmul' op matrix TokensPerExpert must be 1D}}
+    hivm.hir.mix_group_matmul
+       ins(%weight_gm, %tokens_gm, %tokens_per_expert_gm:
+           memref<16x16x16xf16, #hivm.address_space<gm>>, memref<16x16xf16, #hivm.address_space<gm>>,
+           memref<16x16xi64, #hivm.address_space<gm>>)
+       post_vector_func_ins(%post_vector_func_ins0_gm,
+                            %post_vector_func_ins1_gm,
+                            %post_vector_func_ins2_gm :
+                            memref<16xi64, #hivm.address_space<gm>>,
+                            memref<16xi64, #hivm.address_space<gm>>,
+                            memref<16xi64, #hivm.address_space<gm>>)
+       post_vector_func_outs(%post_vector_func_outs_gm : memref<16xi64, #hivm.address_space<gm>>)
+       workspace_ins(%workspace_ins_gm : memref<1024xi64, #hivm.address_space<gm>>)
+       outs(%res_gm : memref<16x16xf16, #hivm.address_space<gm>>)
+            tiling_params = %tiling_params_gm : memref<16xi64, #hivm.address_space<gm>>
+            comm_params = %comm_params_gm : memref<16xi64, #hivm.address_space<gm>>
+    return
+}
+
+// -----
+// CHECK-LABEL: mix_matmul_invalid_input
+func.func @mix_matmul_invalid_input(
+                              %arg1: memref<?xf16, #hivm.address_space<gm>>,
+                              %arg2: memref<?x?xf16, #hivm.address_space<gm>>,
+                              %arg3: memref<?x?xf16, #hivm.address_space<gm>>,
+                              %arg4: memref<?x?xf16, #hivm.address_space<gm>>,
+                              %arg5: memref<?x?xf16, #hivm.address_space<gm>>) {
+  // expected-error@+1 {{'hivm.hir.mix_matmul' op matrix A and matrix B must be 2D}}
+  hivm.hir.mix_matmul
+    ins(%arg1, %arg2 : memref<?xf16, #hivm.address_space<gm>>, memref<?x?xf16, #hivm.address_space<gm>>)
+        post_vector_func_ins(%arg3 : memref<?x?xf16, #hivm.address_space<gm>>)
+        workspace_ins(%arg5 : memref<?x?xf16, #hivm.address_space<gm>>)
+    outs(%arg4 : memref<?x?xf16, #hivm.address_space<gm>>)
+  return
+}
+
+// -----
+// CHECK-LABEL: test_matmul_invalid_input
+func.func @test_matmul_invalid_input(
+                              %arg0: memref<4x16x16xf16>,
+                              %arg1: memref<16x16xf16>,
+                              %arg2: memref<16x16xf32>) {
+  // expected-error@+1 {{'hivm.hir.matmul' op matrix A and matrix B must be 2D}}
+  hivm.hir.matmul ins(%arg0, %arg1 : memref<4x16x16xf16>, memref<16x16xf16>) outs(%arg2 : memref<16x16xf32>)
+  return
+}
+
+// -----
+// CHECK-LABEL test_matmul_valid
+func.func @test_matmul_valid(%A_gm : memref<16x16xf16, #hivm.address_space<gm>>,
+                       %B_gm :  memref<16x16xf16, #hivm.address_space<gm>>,
+                       %descale_pertensor_gm :  memref<1xf16, #hivm.address_space<gm>>,
+                       %descale_perchannel_gm :  memref<16x16xf16, #hivm.address_space<gm>>,
+                       %res_gm :memref<16x16xf16, #hivm.address_space<gm>>) {
+  // expected-error@+1 {{'hivm.hir.matmul' op The descaleMode is defined, descale params must be defined!}}
+  hivm.hir.matmul
+    ins(%A_gm, %B_gm:
+        memref<16x16xf16, #hivm.address_space<gm>>, memref<16x16xf16, #hivm.address_space<gm>>)
+    outs(%res_gm : memref<16x16xf16, #hivm.address_space<gm>>)
+         descale_mode = #hivm.descale_mode<DescalePerTensor>
+
+  hivm.hir.matmul
+    ins(%A_gm, %B_gm:
+        memref<16x16xf16, #hivm.address_space<gm>>, memref<16x16xf16, #hivm.address_space<gm>>)
+    outs(%res_gm : memref<16x16xf16, #hivm.address_space<gm>>)
+         descale = %descale_perchannel_gm :  memref<16x16xf16, #hivm.address_space<gm>>
+
+  return
+}
+
+// -----
+// CHECK-LABEL test_matmul_valid_descale
+func.func @test_matmul_valid_descale(%A_gm : memref<16x16xf16, #hivm.address_space<gm>>,
+                       %B_gm :  memref<16x16xf16, #hivm.address_space<gm>>,
+                       %descale_perchannel_gm :  memref<16x16xf16, #hivm.address_space<gm>>,
+                       %res_gm :memref<16x16xf16, #hivm.address_space<gm>>) {
+  // expected-error@+1 {{'hivm.hir.matmul' op descale must must be 1D}}
+  hivm.hir.matmul
+  ins(%A_gm, %B_gm:
+      memref<16x16xf16, #hivm.address_space<gm>>, memref<16x16xf16, #hivm.address_space<gm>>)
+  outs(%res_gm : memref<16x16xf16, #hivm.address_space<gm>>)
+       descale = %descale_perchannel_gm :  memref<16x16xf16, #hivm.address_space<gm>>
+       descale_mode = #hivm.descale_mode<DescalePerChannel>
+
+  return
+}
+
+// -----
+// CHECK-LABEL test_matmul_valid_bias
+func.func @test_matmul_valid_bias(%A_gm : memref<16x16xf16, #hivm.address_space<gm>>,
+                       %B_gm :  memref<16x16xf16, #hivm.address_space<gm>>,
+                       %bias_gm :  memref<16x16xf16, #hivm.address_space<gm>>,
+                       %res_gm :memref<16x16xf16, #hivm.address_space<gm>>) {
+  // expected-error@+1 {{'hivm.hir.matmul' op bias must must be 1D}}
+  hivm.hir.matmul
+  ins(%A_gm, %B_gm:
+      memref<16x16xf16, #hivm.address_space<gm>>, memref<16x16xf16, #hivm.address_space<gm>>)
+  outs(%res_gm : memref<16x16xf16, #hivm.address_space<gm>>)
+       bias = %bias_gm : memref<16x16xf16, #hivm.address_space<gm>>
+
+  return
+}
+
+// -----
+// CHECK-LABEL test_matmul_valid_descale_dim
+func.func @test_matmul_valid_descale_dim(%A_gm : memref<16x16xf16, #hivm.address_space<gm>>,
+                       %B_gm :  memref<16x16xf16, #hivm.address_space<gm>>,
+                       %descale_perchannel_gm :  memref<3xf16, #hivm.address_space<gm>>,
+                       %res_gm :memref<16x16xf16, #hivm.address_space<gm>>) {
+  // expected-error@+1 {{'hivm.hir.matmul' op The descaleMode is DescalePerChannel, the size of descale is equal to the col size of B}}
+  hivm.hir.matmul
+  ins(%A_gm, %B_gm:
+      memref<16x16xf16, #hivm.address_space<gm>>, memref<16x16xf16, #hivm.address_space<gm>>)
+  outs(%res_gm : memref<16x16xf16, #hivm.address_space<gm>>)
+       descale = %descale_perchannel_gm :  memref<3xf16, #hivm.address_space<gm>>
+       descale_mode = #hivm.descale_mode<DescalePerChannel>
+
+  return
+}
+
+// -----
+// CHECK-LABEL test_fixpipe_dual_dst_mode_with_sub_block_idx
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+  func.func @test_fixpipe_dual_dst_mode_with_sub_block_idx() {
+    %l0c = memref.alloc() : memref<16x16xf32, #hivm.address_space<cc>>
+    %ub = memref.alloc() : memref<16x16xf32, #hivm.address_space<ub>>
+    // expected-error@+1 {{'hivm.hir.fixpipe' op sub_block_idx must not be set when dual_dst_mode is enabled!}}
+    hivm.hir.fixpipe {sub_block_idx = #hivm.fixpipe_sub_block<sub_block_1>}
+                    ins(%l0c : memref<16x16xf32, #hivm.address_space<cc>>)
+                    outs(%ub : memref<16x16xf32, #hivm.address_space<ub>>)
+                    dual_dst_mode = #hivm.fixpipe_dual_dst_mode<ROW_SPLIT>
+    return
+  }
+}
+
+// -----
+// CHECK-LABEL: test_mmadL0_invalid_init_condition_type
+func.func @test_mmadL0_invalid_init_condition_type() {
+  %ma = memref.alloc() : memref<256x128xf16>
+  %mb = memref.alloc() : memref<128x256xf16>
+  %mc = memref.alloc() : memref<256x256xf32>
+  %c0 = arith.constant 0 : i1
+  %c128 = arith.constant 128 : index
+  %c256 = arith.constant 256 : index
+  %c0_i64 = arith.constant 0 : i64
+  // expected-error@+1 {{'hivm.hir.mmadL0' op operand #8 must be 1-bit signless integer, but got 'i64'}}
+  hivm.hir.mmadL0 ins(%ma, %mb, %c256, %c128, %c256, %c0, %c0, %c0_i64 :
+                        memref<256x128xf16>, memref<128x256xf16>, index, index, index, i1, i1, i64)
+                  outs(%mc : memref<256x256xf32>)
+  return
+}
+
+// -----
+// CHECK-LABEL: test_mmadL0_unit_flag_cond_without_mode
+func.func @test_mmadL0_unit_flag_cond_without_mode() {
+  %ma = memref.alloc() : memref<256x128xf16>
+  %mb = memref.alloc() : memref<128x256xf16>
+  %mc = memref.alloc() : memref<256x256xf32>
+  %c0 = arith.constant 0 : i1
+  %c128 = arith.constant 128 : index
+  %c256 = arith.constant 256 : index
+  // expected-error@+1 {{Cannot have unit-flag conditions without unit-flag modes}}
+  hivm.hir.mmadL0 ins(%ma, %mb, %c256, %c128, %c256, %c0, %c0, %c0 :
+                        memref<256x128xf16>, memref<128x256xf16>, index, index, index, i1, i1, i1)
+                  outs(%mc : memref<256x256xf32>)
+                  unit_flag_cond(%c0)
+  return
+}
+
+// -----
+// CHECK-LABEL: test_l12l0_invalid_k_attr_type
+func.func @test_l12l0_invalid_k_attr_type(
+    %src : memref<256x128xf16, #hivm.address_space<cbuf>>,
+    %dst : memref<256x128xf16, #hivm.address_space<ca>>) {
+  // expected-error@+3 {{floating point value not valid for specified type}}
+  hivm.hir.l12l0 ins(%src : memref<256x128xf16, #hivm.address_space<cbuf>>)
+                 outs(%dst : memref<256x128xf16, #hivm.address_space<ca>>)
+                 {k_part_idx = 0.0, k_part = 1, k_part_ceil = 1,
+                  k_part_loop = 1, k_part_actual = 128, m = 256}
+  return
+}
+
+// -----
+// CHECK-LABEL: test_l12l0_invalid_dst_space
+func.func @test_l12l0_invalid_dst_space(
+    %src : memref<256x128xf16, #hivm.address_space<cbuf>>,
+    %dst : memref<256x128xf16, #hivm.address_space<ub>>) {
+  // expected-error@+1 {{dst must have L0A (ca) or L0B (cb) address space}}
+  hivm.hir.l12l0 ins(%src : memref<256x128xf16, #hivm.address_space<cbuf>>)
+                 outs(%dst : memref<256x128xf16, #hivm.address_space<ub>>)
+                 {k_part_idx = 0, k_part = 1, k_part_ceil = 1,
+                  k_part_loop = 1, k_part_actual = 128, m = 256}
+  return
+}
+
+// -----
+// CHECK-LABEL: test_l12l0_invalid_src_space
+func.func @test_l12l0_invalid_src_space(
+    %src : memref<256x128xf16, #hivm.address_space<ub>>,
+    %dst : memref<256x128xf16, #hivm.address_space<ca>>) {
+  // expected-error@+1 {{src must have L1 address space (cbuf)}}
+  hivm.hir.l12l0 ins(%src : memref<256x128xf16, #hivm.address_space<ub>>)
+                 outs(%dst : memref<256x128xf16, #hivm.address_space<ca>>)
+                 {k_part_idx = 0, k_part = 1, k_part_ceil = 1,
+                  k_part_loop = 1, k_part_actual = 128, m = 256}
+  return
+}
+
+// -----
+// CHECK-LABEL: test_mmadL0_invalid_a_space
+func.func @test_mmadL0_invalid_a_space() {
+  %ma = memref.alloc() : memref<256x128xf16, #hivm.address_space<cbuf>>
+  %mb = memref.alloc() : memref<128x256xf16, #hivm.address_space<cb>>
+  %mc = memref.alloc() : memref<256x256xf32, #hivm.address_space<cc>>
+  %c0 = arith.constant 0 : i1
+  %c1 = arith.constant 1 : i1
+  %c128 = arith.constant 128 : index
+  %c256 = arith.constant 256 : index
+  // expected-error@+1 {{a must have L0A (ca) address space}}
+  hivm.hir.mmadL0 ins(%ma, %mb, %c256, %c128, %c256, %c0, %c0, %c1 :
+                        memref<256x128xf16, #hivm.address_space<cbuf>>,
+                        memref<128x256xf16, #hivm.address_space<cb>>,
+                        index, index, index, i1, i1, i1)
+                  outs(%mc : memref<256x256xf32, #hivm.address_space<cc>>)
+  return
+}
+
+// -----
+// CHECK-LABEL: test_mmadL0_invalid_b_space
+func.func @test_mmadL0_invalid_b_space() {
+  %ma = memref.alloc() : memref<256x128xf16, #hivm.address_space<ca>>
+  %mb = memref.alloc() : memref<128x256xf16, #hivm.address_space<cbuf>>
+  %mc = memref.alloc() : memref<256x256xf32, #hivm.address_space<cc>>
+  %c0 = arith.constant 0 : i1
+  %c1 = arith.constant 1 : i1
+  %c128 = arith.constant 128 : index
+  %c256 = arith.constant 256 : index
+  // expected-error@+1 {{b must have L0B (cb) address space}}
+  hivm.hir.mmadL0 ins(%ma, %mb, %c256, %c128, %c256, %c0, %c0, %c1 :
+                        memref<256x128xf16, #hivm.address_space<ca>>,
+                        memref<128x256xf16, #hivm.address_space<cbuf>>,
+                        index, index, index, i1, i1, i1)
+                  outs(%mc : memref<256x256xf32, #hivm.address_space<cc>>)
+  return
+}
+
+// -----
+// CHECK-LABEL: test_mmadL0_invalid_c_space
+func.func @test_mmadL0_invalid_c_space() {
+  %ma = memref.alloc() : memref<256x128xf16, #hivm.address_space<ca>>
+  %mb = memref.alloc() : memref<128x256xf16, #hivm.address_space<cb>>
+  %mc = memref.alloc() : memref<256x256xf32, #hivm.address_space<ub>>
+  %c0 = arith.constant 0 : i1
+  %c1 = arith.constant 1 : i1
+  %c128 = arith.constant 128 : index
+  %c256 = arith.constant 256 : index
+  // expected-error@+1 {{c must have L0C (cc) address space}}
+  hivm.hir.mmadL0 ins(%ma, %mb, %c256, %c128, %c256, %c0, %c0, %c1 :
+                        memref<256x128xf16, #hivm.address_space<ca>>,
+                        memref<128x256xf16, #hivm.address_space<cb>>,
+                        index, index, index, i1, i1, i1)
+                  outs(%mc : memref<256x256xf32, #hivm.address_space<ub>>)
+  return
+}
+
+// -----
+// CHECK-LABEL: test_l12bt_invalid_src_space
+func.func @test_l12bt_invalid_src_space(
+    %src : memref<256xf32, #hivm.address_space<ub>>,
+    %dst : memref<256xf32, #hivm.address_space<biasbuf>>,
+    %n : index) {
+  // expected-error@+1 {{src must have L1 address space (cbuf)}}
+  hivm.hir.l12bt ins(%src : memref<256xf32, #hivm.address_space<ub>>)
+                 outs(%dst : memref<256xf32, #hivm.address_space<biasbuf>>)
+                 n = %n
+  return
+}
+
+// -----
+// CHECK-LABEL: test_l12bt_invalid_dst_space
+func.func @test_l12bt_invalid_dst_space(
+    %src : memref<256xf32, #hivm.address_space<cbuf>>,
+    %dst : memref<256xf32, #hivm.address_space<ub>>,
+    %n : index) {
+  // expected-error@+1 {{dst must have BiasBUF (biasbuf) address space}}
+  hivm.hir.l12bt ins(%src : memref<256xf32, #hivm.address_space<cbuf>>)
+                 outs(%dst : memref<256xf32, #hivm.address_space<ub>>)
+                 n = %n
+  return
+}
+
+// -----
+// CHECK-LABEL: test_l12bt_invalid_n_type
+func.func @test_l12bt_invalid_n_type(
+    %src : memref<256xf32, #hivm.address_space<cbuf>>,
+    %dst : memref<256xf32, #hivm.address_space<biasbuf>>) {
+  // expected-note@+1 {{prior use here}}
+  %n_i64 = arith.constant 256 : i64
+  // expected-error@+3 {{expects different type than prior uses: 'index' vs 'i64'}}
+  hivm.hir.l12bt ins(%src : memref<256xf32, #hivm.address_space<cbuf>>)
+                 outs(%dst : memref<256xf32, #hivm.address_space<biasbuf>>)
+                 n = %n_i64
+  return
+}
+
+// -----
+
+func.func @test_vxor_rejects_fp(%lhs: tensor<32xf32>,
+                                %rhs: tensor<32xf32>,
+                                %dst: tensor<32xf32>) {
+  // expected-error@+1 {{failed to verify that operand at idx 0 and 1 should have element type}}
+  %0 = hivm.hir.vxor ins(%lhs, %rhs : tensor<32xf32>, tensor<32xf32>)
+      outs(%dst : tensor<32xf32>) -> tensor<32xf32>
+  return
+}
+
+// -----
+
+func.func @core_ratio_invalid_0_2() {
+  // expected-error@+1 {{Invalid core ratio: 0:2, expected one of 0:1, 1:0, 1:1, 1:2}}
+  "test.core_ratio"() { ratio = #hivm.core_ratio<0, 2> } : () -> ()
+  return
+}
+
+// -----
+
+func.func @core_ratio_invalid_2_1() {
+  // expected-error@+1 {{Invalid core ratio: 2:1, expected one of 0:1, 1:0, 1:1, 1:2}}
+  "test.core_ratio"() { ratio = #hivm.core_ratio<2, 1> } : () -> ()
+  return
+}
+
+// -----
+
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  func.func @test_vcast_integer_mode_i8_i32_si2ui(%src: tensor<16xi8>, %dst: tensor<16xi32>) {
+    // expected-error@+1 {{'hivm.hir.vcast' op currently don't support cast int8_t_to_uint32_t_rintmode}}
+    %0 = hivm.hir.vcast {hivm.unsigned_mode = #hivm.unsigned_mode<si2ui>} ins(%src : tensor<16xi8>) outs(%dst : tensor<16xi32>) round_mode = <rint> cast = <cast_unsigned> -> tensor<16xi32>
+    return
+  }
+}
+
+// -----
+
+// F16 sources must be rejected by plain Op verification, independent of the
+// target architecture.
+// CHECK-LABEL: test_fixpipe_f16_src_rejected
+func.func @test_fixpipe_f16_src_rejected() {
+  %src = memref.alloc() : memref<16x16xf16, #hivm.address_space<cc>>
+  %dst = memref.alloc() : memref<16x16xf16, #hivm.address_space<ub>>
+  // expected-error@+1 {{'hivm.hir.fixpipe' op operand #0 must be Shaped Type of 32-bit float or 32-bit signless integer values, but got 'memref<16x16xf16, #hivm.address_space<cc>>'}}
+  hivm.hir.fixpipe ins(%src : memref<16x16xf16, #hivm.address_space<cc>>) outs(%dst : memref<16x16xf16, #hivm.address_space<ub>>)
+  return
+}
+
+// -----
+
+// The same rejection must not depend on the C220 target.
+// CHECK-LABEL: test_fixpipe_f16_src_rejected_c220
+module attributes {hacc.target = #hacc.target<"Ascend910B1">} {
+  func.func @test_fixpipe_f16_src_rejected_c220() {
+    %src = memref.alloc() : memref<16x16xf16, #hivm.address_space<cc>>
+    %dst = memref.alloc() : memref<16x16xf16, #hivm.address_space<ub>>
+    // expected-error@+1 {{'hivm.hir.fixpipe' op operand #0 must be Shaped Type of 32-bit float or 32-bit signless integer values, but got 'memref<16x16xf16, #hivm.address_space<cc>>'}}
+    hivm.hir.fixpipe ins(%src : memref<16x16xf16, #hivm.address_space<cc>>) outs(%dst : memref<16x16xf16, #hivm.address_space<ub>>)
+    return
+  }
+}
+
+// -----
+
+// The same rejection must not depend on the C310 target.
+// CHECK-LABEL: test_fixpipe_f16_src_rejected_c310
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  func.func @test_fixpipe_f16_src_rejected_c310() {
+    %src = memref.alloc() : memref<16x16xf16, #hivm.address_space<cc>>
+    %dst = memref.alloc() : memref<16x16xf16, #hivm.address_space<ub>>
+    // expected-error@+1 {{'hivm.hir.fixpipe' op operand #0 must be Shaped Type of 32-bit float or 32-bit signless integer values, but got 'memref<16x16xf16, #hivm.address_space<cc>>'}}
+    hivm.hir.fixpipe ins(%src : memref<16x16xf16, #hivm.address_space<cc>>) outs(%dst : memref<16x16xf16, #hivm.address_space<ub>>)
+    return
+  }
+}
+
+// -----
+
+// Tensor f16 sources are rejected as well.
+// CHECK-LABEL: test_fixpipe_f16_tensor_src_rejected
+func.func @test_fixpipe_f16_tensor_src_rejected() {
+  %src = tensor.empty() : tensor<16x16xf16>
+  %dst = tensor.empty() : tensor<16x16xf16>
+  // expected-error@+1 {{'hivm.hir.fixpipe' op operand #0 must be Shaped Type of 32-bit float or 32-bit signless integer values, but got 'tensor<16x16xf16>'}}
+  %r = hivm.hir.fixpipe ins(%src : tensor<16x16xf16>) outs(%dst : tensor<16x16xf16>) -> tensor<16x16xf16>
+  return
+}
+
+// -----
+
+// Matrix A and B must use the same element type unless the target provides a
+// matching mixed-precision `mad` overload.
+func.func @test_mmad_l1_mismatched_input_types() {
+  %a = memref.alloc() : memref<16x16xf32>
+  %b = memref.alloc() : memref<16x16xf16>
+  %c = memref.alloc() : memref<16x16xf32>
+  %true = arith.constant true
+  %c16 = arith.constant 16 : index
+  // expected-error@+1 {{'hivm.hir.mmadL1' op MMAD with heterogeneous A/B element types 'f32' x 'f16' is only supported on Ascend960 series.}}
+  hivm.hir.mmadL1 ins(%a, %b, %true, %c16, %c16, %c16 : memref<16x16xf32>, memref<16x16xf16>, i1, index, index, index) outs(%c : memref<16x16xf32>)
+  return
+}
+
+// -----
+
+// Even on Ascend960 only the A/B element-type pairs that have a matching `mad`
+// overload in cce_aicore_intrinsics.h are accepted; f32 x f16 is not one.
+module attributes {hacc.target = #hacc.target<"Ascend960">} {
+  func.func @test_mmad_l1_unsupported_hetero_types() {
+    %a = memref.alloc() : memref<16x16xf32>
+    %b = memref.alloc() : memref<16x16xf16>
+    %c = memref.alloc() : memref<16x16xf32>
+    %true = arith.constant true
+    %c16 = arith.constant 16 : index
+    // expected-error@+1 {{'hivm.hir.mmadL1' op unsupported heterogeneous A/B element types 'f32' x 'f16' for MMAD on Ascend960 series.}}
+    hivm.hir.mmadL1 ins(%a, %b, %true, %c16, %c16, %c16 : memref<16x16xf32>, memref<16x16xf16>, i1, index, index, index) outs(%c : memref<16x16xf32>)
+    return
+  }
+}
+
+// -----
+
+// Matrix C is an accumulator and must use f32 or i32 elements.
+func.func @test_mmad_l1_f16_accumulator() {
+  %a = memref.alloc() : memref<16x16xf16>
+  %b = memref.alloc() : memref<16x16xf16>
+  %c = memref.alloc() : memref<16x16xf16>
+  %true = arith.constant true
+  %c16 = arith.constant 16 : index
+  // expected-error@+1 {{'hivm.hir.mmadL1' op operand #6 must be Shaped Type of 32-bit float or 32-bit signless integer values}}
+  hivm.hir.mmadL1 ins(%a, %b, %true, %c16, %c16, %c16 : memref<16x16xf16>, memref<16x16xf16>, i1, index, index, index) outs(%c : memref<16x16xf16>)
+  return
+}
+
+// -----
+
+// Tensor results must use the same accumulator element-type domain.
+func.func @test_mmad_l1_f16_result() {
+  %a = tensor.empty() : tensor<16x16xf16>
+  %b = tensor.empty() : tensor<16x16xf16>
+  %c = tensor.empty() : tensor<16x16xf32>
+  %true = arith.constant true
+  %c16 = arith.constant 16 : index
+  // expected-error@+1 {{'hivm.hir.mmadL1' op result #0 must be variadic of ranked tensor of 32-bit float or 32-bit signless integer values}}
+  %result = hivm.hir.mmadL1 ins(%a, %b, %true, %c16, %c16, %c16 : tensor<16x16xf16>, tensor<16x16xf16>, i1, index, index, index) outs(%c : tensor<16x16xf32>) -> tensor<16x16xf16>
+  return
+}
+
+// -----
+
+// BatchMmadL1 shares the same accumulator contract.
+func.func @test_batch_mmad_l1_f16_accumulator() {
+  %a = memref.alloc() : memref<2x16x16xf16>
+  %b = memref.alloc() : memref<2x16x16xf16>
+  %c = memref.alloc() : memref<2x16x16xf16>
+  %true = arith.constant true
+  %c16 = arith.constant 16 : index
+  // expected-error@+1 {{'hivm.hir.batchMmadL1' op operand #6 must be Shaped Type of 32-bit float or 32-bit signless integer values}}
+  hivm.hir.batchMmadL1 ins(%a, %b, %true, %c16, %c16, %c16 : memref<2x16x16xf16>, memref<2x16x16xf16>, i1, index, index, index) outs(%c : memref<2x16x16xf16>)
+  return
+}
+
+// -----
+
+// Fixpipe pre-quant mode type contracts must be rejected by plain Op
+// verification: the mode names one src/dst signature, and the mismatch is
+// reported with the mode, the allowed signatures and the actual signature.
+// CHECK-LABEL: test_fixpipe_pre_quant_wrong_dst
+func.func @test_fixpipe_pre_quant_wrong_dst() {
+  %src = tensor.empty() : tensor<16x16xf32>
+  %dst = tensor.empty() : tensor<16x16xbf16>
+  // expected-error@+1 {{pre_quant mode 'F322F16' requires src/dst element type signature 32-bit float -> 16-bit float, but got 'f32' -> 'bf16'}}
+  %r = hivm.hir.fixpipe {pre_quant = #hivm.fixpipe_pre_quant_mode<F322F16>} ins(%src : tensor<16x16xf32>) outs(%dst : tensor<16x16xbf16>) -> tensor<16x16xbf16>
+  return
+}
+
+// -----
+
+// CHECK-LABEL: test_fixpipe_pre_quant_s322i8_wrong_dst
+func.func @test_fixpipe_pre_quant_s322i8_wrong_dst() {
+  %src = tensor.empty() : tensor<16x16xi32>
+  %dst = tensor.empty() : tensor<16x16xi16>
+  // expected-error@+1 {{pre_quant mode 'S322I8' requires src/dst element type signature 32-bit signless integer -> 8-bit signless integer, but got 'i32' -> 'i16'}}
+  %r = hivm.hir.fixpipe {pre_quant = #hivm.fixpipe_pre_quant_mode<S322I8>} ins(%src : tensor<16x16xi32>) outs(%dst : tensor<16x16xi16>) -> tensor<16x16xi16>
+  return
+}
+
+// -----
+
+// NO_QUANT allows the registered signatures. f32 -> i32 is not one of them.
+// CHECK-LABEL: test_fixpipe_pre_quant_no_quant_mismatch
+func.func @test_fixpipe_pre_quant_no_quant_mismatch() {
+  %src = tensor.empty() : tensor<16x16xf32>
+  %dst = tensor.empty() : tensor<16x16xi32>
+  // expected-error@+1 {{pre_quant mode 'NO_QUANT' requires one of [32-bit float -> 32-bit float, 32-bit signless integer -> 32-bit signless integer, 32-bit signless integer -> 16-bit signless integer, 32-bit signless integer -> 16-bit float, 32-bit signless integer -> 8-bit unsigned integer, 32-bit float -> 8-bit signless integer, 32-bit float -> 8-bit unsigned integer], but got 'f32' -> 'i32'}}
+  %r = hivm.hir.fixpipe {pre_quant = #hivm.fixpipe_pre_quant_mode<NO_QUANT>} ins(%src : tensor<16x16xf32>) outs(%dst : tensor<16x16xi32>) -> tensor<16x16xi32>
+  return
+}
+
+// -----
+
+// CHECK-LABEL: test_fixpipe_pre_quant_qf_wrong_dst
+func.func @test_fixpipe_pre_quant_qf_wrong_dst() {
+  %src = tensor.empty() : tensor<16x16xf32>
+  %dst = tensor.empty() : tensor<16x16xf16>
+  // expected-error@+1 {{pre_quant mode 'QF322F32_PRE' requires src/dst element type signature 32-bit float -> 32-bit float, but got 'f32' -> 'f16'}}
+  %r = hivm.hir.fixpipe {pre_quant = #hivm.fixpipe_pre_quant_mode<QF322F32_PRE>} ins(%src : tensor<16x16xf32>) outs(%dst : tensor<16x16xf16>) -> tensor<16x16xf16>
+  return
+}
+
+// -----
+
+// CHECK-LABEL: test_fixpipe_pre_quant_f322bf16_wrong_dst
+func.func @test_fixpipe_pre_quant_f322bf16_wrong_dst() {
+  %src = tensor.empty() : tensor<16x16xf32>
+  %dst = tensor.empty() : tensor<16x16xf16>
+  // expected-error@+1 {{pre_quant mode 'F322BF16' requires src/dst element type signature 32-bit float -> bfloat16 type, but got 'f32' -> 'f16'}}
+  %r = hivm.hir.fixpipe {pre_quant = #hivm.fixpipe_pre_quant_mode<F322BF16>} ins(%src : tensor<16x16xf32>) outs(%dst : tensor<16x16xf16>) -> tensor<16x16xf16>
+  return
+}

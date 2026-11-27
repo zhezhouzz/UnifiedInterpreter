@@ -1,0 +1,8 @@
+{
+  "title": "[Feature]: Automatic GET_BUF/RLS_BUF intra-core synchronization",
+  "iid": 1015,
+  "updated_at": "2026-11-20T14:58:49.770+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1015",
+  "linked_mrs": []
+}

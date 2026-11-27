@@ -1,0 +1,18 @@
+{
+  "id": "kern3",
+  "tier": "L1",
+  "category": "compiler regression",
+  "source_ref": "official HIVM SyncSolver kern3",
+  "chip_profile": null,
+  "core_ratio": "1:1",
+  "compile_argv": [
+    "bishengir-opt",
+    "--pass-pipeline=builtin.module(hivm-delayed-cross-core-gss{solver-version=v2},func.func(hivm-graph-sync-solver{solver-version=v2}))"
+  ],
+  "entry_functions": [
+    "kern3_mix_aic",
+    "kern3_mix_aiv"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "kern3 launch configured as 1:1 for analysis; original test omits ratio."
+}

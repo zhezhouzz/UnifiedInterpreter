@@ -1,0 +1,85 @@
+{
+  "test_vadd_vv_vs_with_broadcast": {
+    "params": [
+      {
+        "id": 0,
+        "type": "memref<1x?xf16>"
+      },
+      {
+        "id": 1,
+        "type": "memref<1x?xf16>"
+      },
+      {
+        "id": 2,
+        "type": "memref<?x?xf16>"
+      },
+      {
+        "id": 3,
+        "type": "f16"
+      }
+    ],
+    "body": [
+      {
+        "cmd": "issue",
+        "p": "V",
+        "fn": "vadd",
+        "write_operand": 2,
+        "read_operands": [
+          0,
+          1
+        ],
+        "args": [
+          0,
+          1,
+          2
+        ],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "broadcast": "array<i64: 0>",
+          "operandSegmentSizes": "array<i32: 2, 1, 0>",
+          "transpose": "array<i64>"
+        }
+      },
+      {
+        "cmd": "pipebarrier",
+        "p": "V",
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "pipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "issue",
+        "p": "V",
+        "fn": "vadd",
+        "write_operand": 2,
+        "read_operands": [
+          0
+        ],
+        "args": [
+          0,
+          3,
+          2
+        ],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "broadcast": "array<i64: 0>",
+          "operandSegmentSizes": "array<i32: 2, 1, 0>",
+          "transpose": "array<i64>"
+        }
+      },
+      {
+        "cmd": "return",
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {}
+      }
+    ],
+    "core_kind": null
+  }
+}

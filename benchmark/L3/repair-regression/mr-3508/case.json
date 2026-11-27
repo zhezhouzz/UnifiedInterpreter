@@ -1,0 +1,20 @@
+{
+  "id": "repair-regression/mr-3508",
+  "tier": "L3",
+  "category": "repair-regression",
+  "source_ref": "https://gitcode.com/Ascend/AscendNPU-IR/blob/4b1549188ef7b0750d35b894df25f8f8cd0a589a/bishengir/test/Dialect/HIVM/SyncSolver/hivm-ccgss-cv-pipelining-reg.mlir",
+  "chip_profile": null,
+  "core_ratio": null,
+  "compile_argv": [
+    "bishengir-opt",
+    "-pass-pipeline=builtin.module(func.func(hivm-cross-core-gss{solver-version=v1 force-is-reg-based=true}))"
+  ],
+  "entry_functions": [
+    "test_block_sync_loop"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "split_index": 0,
+  "upstream_path": "bishengir/test/Dialect/HIVM/SyncSolver/hivm-ccgss-cv-pipelining-reg.mlir"
+}

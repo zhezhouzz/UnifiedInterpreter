@@ -1,0 +1,92 @@
+[
+  {
+    "function": "cv11",
+    "location": "loc(\"<stdin>\":3:14)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "cv11",
+    "location": "loc(\"<stdin>\":5:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "cv11",
+    "location": "loc(\"<stdin>\":6:10)",
+    "op": "hivm.hir.fixpipe",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "cv11",
+    "location": "loc(\"<stdin>\":7:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "cv11",
+    "location": "loc(\"<stdin>\":8:10)",
+    "op": "hivm.hir.load",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "cv11",
+    "location": "loc(\"<stdin>\":9:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "cv11",
+    "location": "loc(\"<stdin>\":10:10)",
+    "op": "hivm.hir.vrelu",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "cv11",
+    "location": "loc(\"<stdin>\":11:5)",
+    "op": "bufferization.materialize_in_destination",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "cv12",
+    "location": "loc(\"<stdin>\":15:14)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "cv12",
+    "location": "loc(\"<stdin>\":18:21)",
+    "op": "memref.memory_space_cast",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "cv12",
+    "location": "loc(\"<stdin>\":19:10)",
+    "op": "bufferization.to_tensor",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "cv12",
+    "location": "loc(\"<stdin>\":20:5)",
+    "op": "hivm.hir.fixpipe",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "cv12",
+    "location": "loc(\"<stdin>\":21:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "cv12",
+    "location": "loc(\"<stdin>\":22:10)",
+    "op": "hivm.hir.vrelu",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "cv12",
+    "location": "loc(\"<stdin>\":23:5)",
+    "op": "bufferization.materialize_in_destination",
+    "reason": "missing Core interpretation"
+  }
+]

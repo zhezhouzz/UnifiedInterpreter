@@ -1,0 +1,17 @@
+{
+  "verdict": "deadlock",
+  "states_discovered": 34,
+  "witness": [
+    "0:0 syncblockset",
+    "1:0 arith.constant",
+    "1:1 arith.constant",
+    "1:2 for-step",
+    "1:3 syncblockwait",
+    "1:4 for-step",
+    "1:5 syncblockwait",
+    "1:6 for-done",
+    "0:0 syncblockset.done[FIX]",
+    "1:3 syncblockwait.done[MTE2]"
+  ],
+  "observation": "blocked PCs (1, 7), queues ((1, 5, 'MTE2'),), live tokens []"
+}

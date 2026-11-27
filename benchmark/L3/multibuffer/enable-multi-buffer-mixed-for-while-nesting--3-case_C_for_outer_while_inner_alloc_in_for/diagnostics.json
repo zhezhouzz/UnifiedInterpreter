@@ -1,0 +1,14 @@
+[
+  {
+    "function": "case_C_for_outer_while_inner_alloc_in_for",
+    "location": "loc(\"<stdin>\":15:7)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "case_C_for_outer_while_inner_alloc_in_for",
+    "location": "loc(\"<stdin>\":29:12)",
+    "op": "scf.while",
+    "reason": "missing Core interpretation"
+  }
+]

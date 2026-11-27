@@ -1,0 +1,8 @@
+[
+  {
+    "function": "test_plan_memory_expand_shape",
+    "location": "loc(\"<stdin>\":12:21)",
+    "op": "memref.expand_shape",
+    "reason": "missing Core interpretation"
+  }
+]

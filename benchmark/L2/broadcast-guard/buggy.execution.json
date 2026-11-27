@@ -1,0 +1,18 @@
+{
+  "verdict": "protocol_violation",
+  "states_discovered": 80,
+  "witness": [
+    "0:0 syncblockset",
+    "1:0 arith.constant",
+    "1:1 hivm.hir.get_sub_block_idx",
+    "1:2 arith.cmpi",
+    "1:3 branch True",
+    "2:0 arith.constant",
+    "2:1 hivm.hir.get_sub_block_idx",
+    "2:2 arith.cmpi",
+    "2:3 branch False",
+    "0:0 syncblockset.done[FIX]",
+    "1:4 syncblockwait"
+  ],
+  "observation": "residual tokens [(True, 2, 'FIX', 'S', 0, 1)]"
+}

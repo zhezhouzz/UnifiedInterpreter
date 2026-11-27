@@ -1,0 +1,32 @@
+[
+  {
+    "function": "test_binary_vector_op_vv_vs",
+    "location": "loc(\"<stdin>\":9:5)",
+    "op": "hivm.hir.vdiv",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_binary_vector_op_vv_vs",
+    "location": "loc(\"<stdin>\":11:5)",
+    "op": "hivm.hir.vmax",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_binary_vector_op_vv_vs",
+    "location": "loc(\"<stdin>\":13:5)",
+    "op": "hivm.hir.vmin",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_binary_vector_op_vv_vs",
+    "location": "loc(\"<stdin>\":21:5)",
+    "op": "hivm.hir.vmax",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_binary_vector_op_vv_vs",
+    "location": "loc(\"<stdin>\":23:5)",
+    "op": "hivm.hir.vmin",
+    "reason": "missing Core interpretation"
+  }
+]

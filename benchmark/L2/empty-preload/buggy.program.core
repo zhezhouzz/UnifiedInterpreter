@@ -1,0 +1,43 @@
+{
+  "producer": {
+    "params": [],
+    "body": [
+      {
+        "cmd": "return",
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {}
+      }
+    ],
+    "core_kind": "#hivm.func_core_type<AIC>"
+  },
+  "consumer": {
+    "params": [],
+    "body": [
+      {
+        "cmd": "syncblockwait",
+        "p": "FIX",
+        "q": "S",
+        "event": 0,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "pipe": "#hivm.pipe<PIPE_S>",
+          "static_flag_id": "0 : i64",
+          "tcore_type": "#hivm.tcore_type<VECTOR>",
+          "tpipe": "#hivm.pipe<PIPE_FIX>"
+        }
+      },
+      {
+        "cmd": "return",
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {}
+      }
+    ],
+    "core_kind": "#hivm.func_core_type<AIV>"
+  }
+}

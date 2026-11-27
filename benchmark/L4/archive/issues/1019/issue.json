@@ -1,0 +1,11 @@
+{
+  "title": "[Bug][A6] A6 rejection sampling fails to compile i64 select and integer interleave",
+  "iid": 1019,
+  "updated_at": "2026-11-20T15:13:09.056+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1019",
+  "linked_mrs": [
+    "5333"
+  ],
+  "attachment_commit": "072e232418e1dafcd7c5eedf04b2457c3ebcf800"
+}

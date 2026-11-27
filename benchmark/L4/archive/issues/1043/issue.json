@@ -1,0 +1,8 @@
+{
+  "title": "[Bug]: pairing 失败时仍执行 mask 下沉和 vbrc 前移，存在未知性能回退风险",
+  "iid": 1043,
+  "updated_at": "2026-11-21T19:51:42.842+08:00",
+  "state": "closed",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1043",
+  "linked_mrs": []
+}

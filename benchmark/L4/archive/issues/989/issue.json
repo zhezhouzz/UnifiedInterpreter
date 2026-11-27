@@ -1,0 +1,8 @@
+{
+  "title": "Infer predicate width for `pge <H>` before dual B8 gather lowering",
+  "iid": 989,
+  "updated_at": "2026-11-18T21:15:57.262+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/989",
+  "linked_mrs": []
+}

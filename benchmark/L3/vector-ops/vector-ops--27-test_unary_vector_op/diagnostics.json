@@ -1,0 +1,62 @@
+[
+  {
+    "function": "test_unary_vector_op",
+    "location": "loc(\"<stdin>\":3:5)",
+    "op": "hivm.hir.vexp",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_unary_vector_op",
+    "location": "loc(\"<stdin>\":7:5)",
+    "op": "hivm.hir.vln",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_unary_vector_op",
+    "location": "loc(\"<stdin>\":9:5)",
+    "op": "hivm.hir.vrelu",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_unary_vector_op",
+    "location": "loc(\"<stdin>\":11:5)",
+    "op": "hivm.hir.vrsqrt",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_unary_vector_op",
+    "location": "loc(\"<stdin>\":13:5)",
+    "op": "hivm.hir.vsqrt",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_unary_vector_op",
+    "location": "loc(\"<stdin>\":15:5)",
+    "op": "hivm.hir.vrec",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_unary_vector_op",
+    "location": "loc(\"<stdin>\":17:5)",
+    "op": "hivm.hir.vtanh",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_unary_vector_op",
+    "location": "loc(\"<stdin>\":19:5)",
+    "op": "hivm.hir.vsin",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_unary_vector_op",
+    "location": "loc(\"<stdin>\":21:5)",
+    "op": "hivm.hir.vcos",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_unary_vector_op",
+    "location": "loc(\"<stdin>\":23:5)",
+    "op": "hivm.hir.verf",
+    "reason": "missing Core interpretation"
+  }
+]

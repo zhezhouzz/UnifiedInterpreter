@@ -1,0 +1,14 @@
+[
+  {
+    "function": "test_mmad_accumulation_while_no_outer_fixpipe",
+    "location": "loc(\"<stdin>\":8:12)",
+    "op": "scf.while",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_mmad_accumulation_while_no_outer_fixpipe",
+    "location": "loc(\"<stdin>\":20:12)",
+    "op": "scf.while",
+    "reason": "missing Core interpretation"
+  }
+]

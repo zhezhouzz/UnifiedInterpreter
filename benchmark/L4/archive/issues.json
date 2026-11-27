@@ -1,0 +1,631 @@
+[
+  {
+    "title": "[Feature]: 【Multibuffer】CV场景Vector侧开启multibuffer",
+    "iid": 316,
+    "updated_at": "2026-07-22T10:23:31.450+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/316",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Feature]: 【Q4】为 LIB_EVENT_ID 与 GraphSyncSolver/InjectSync 的 id 分配增加一致性防护",
+    "iid": 579,
+    "updated_at": "2026-09-24T17:41:27.583+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/579",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Bug]: SIMD-SIMT混编SIMT VF的同步问题",
+    "iid": 708,
+    "updated_at": "2026-10-15T21:04:19.090+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/708",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Bug]: MultiBuffer 流水场景下 CrossCoreGSS 跨核事件复用可能导致计数溢出及 AICore 间歇性超时",
+    "iid": 852,
+    "updated_at": "2026-11-02T15:35:53.135+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/852",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Bug]: hivm-cv-pipelining skew 流水错误处理 CV 反馈边 loop，结果整体滞后一个迭代",
+    "iid": 920,
+    "updated_at": "2026-11-12T15:18:51.340+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/920",
+    "linked_mrs": [
+      "5025"
+    ]
+  },
+  {
+    "title": "[MemRef] FoldRedundantCopy 在 copy 目标为共享 allocation 的 subview 时丢弃中间更新",
+    "iid": 981,
+    "updated_at": "2026-11-18T11:47:28.288+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/981",
+    "linked_mrs": []
+  },
+  {
+    "title": "[A5] GM→UB DMA 左右 padding 能力缺失",
+    "iid": 982,
+    "updated_at": "2026-11-18T11:49:23.028+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/982",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Bug]: [HIVMAVE][AnalyzeVectorLayout] Parallel causes occasional card death/crash",
+    "iid": 983,
+    "updated_at": "2026-11-18T13:10:38.921+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/983",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Feature]: A6 NDDMA transpose 扩展",
+    "iid": 985,
+    "updated_at": "2026-11-18T16:32:20.080+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/985",
+    "linked_mrs": []
+  },
+  {
+    "title": "[NDDMA] NddmaDesc硬编码上限需代际隔离",
+    "iid": 986,
+    "updated_at": "2026-11-18T16:57:47.220+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/986",
+    "linked_mrs": []
+  },
+  {
+    "title": "[RFC]: ",
+    "iid": 987,
+    "updated_at": "2026-11-18T18:00:46.082+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/987",
+    "linked_mrs": [
+      "4912"
+    ]
+  },
+  {
+    "title": "[RFC]: Ascend960 MMAD（mmadL1）异构 A/B 数据类型与 packed s4 支持",
+    "iid": 988,
+    "updated_at": "2026-11-18T18:14:26.513+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/988",
+    "linked_mrs": [
+      "4962"
+    ]
+  },
+  {
+    "title": "Infer predicate width for `pge <H>` before dual B8 gather lowering",
+    "iid": 989,
+    "updated_at": "2026-11-18T21:15:57.262+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/989",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Feature]: A6 NDDMA broadcast 扩展",
+    "iid": 990,
+    "updated_at": "2026-11-23T16:18:23.891+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/990",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Bug]: Incorrect merging behavior in MergeCVScopes phase",
+    "iid": 991,
+    "updated_at": "2026-11-19T06:04:37.660+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/991",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Performance]: 当vector阻塞scalar时，会导致scalar无法发射后续指令，导致所有流水被vector阻塞",
+    "iid": 992,
+    "updated_at": "2026-11-19T09:20:52.922+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/992",
+    "linked_mrs": []
+  },
+  {
+    "title": "[HIVM] chained scf.while MMAD accumulation is prematurely materialized by fixpipe",
+    "iid": 994,
+    "updated_at": "2026-11-19T09:38:14.226+08:00",
+    "state": "closed",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/994",
+    "linked_mrs": [
+      "5161"
+    ]
+  },
+  {
+    "title": "[canonicalize-ext] FoldRedundantCopy 误删写入真实数据的 memref.copy，SIMD kernel 首个 64 lane 结果变成 0",
+    "iid": 995,
+    "updated_at": "2026-11-19T20:09:14.506+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/995",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Bug]: [HIVM] Rank-4 device printing aborts when sharing a load with batch matmul",
+    "iid": 996,
+    "updated_at": "2026-11-19T10:04:28.629+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/996",
+    "linked_mrs": [
+      "4950"
+    ]
+  },
+  {
+    "title": "[Bug]: Scalar FP8 (f8E4M3FN / f8E5M2) conversions fail to compile",
+    "iid": 997,
+    "updated_at": "2026-11-19T13:52:37.614+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/997",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Bug]: CustomOps for __builtin_indirect_atomic do not follow Destination-Passing Style",
+    "iid": 1000,
+    "updated_at": "2026-11-19T15:15:50.897+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1000",
+    "linked_mrs": []
+  },
+  {
+    "title": "SIMT function call from SIMD code (sin)",
+    "iid": 1001,
+    "updated_at": "2026-11-20T13:04:38.675+08:00",
+    "state": "closed",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1001",
+    "linked_mrs": []
+  },
+  {
+    "title": "ub mte2 merge",
+    "iid": 1003,
+    "updated_at": "2026-11-20T14:50:50.323+08:00",
+    "state": "closed",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1003",
+    "linked_mrs": []
+  },
+  {
+    "title": "[HFusion][AutoVectorizeV2] RA 形态 addf-reduce 的物化树路线与 single-trip 兄弟融合修复",
+    "iid": 1004,
+    "updated_at": "2026-11-19T19:36:18.338+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1004",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Performance] AutoVectorizeV2 开启多消费者融合后，在 attention 算子上重复清理和验证 IR",
+    "iid": 1005,
+    "updated_at": "2026-11-21T16:59:12.067+08:00",
+    "state": "closed",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1005",
+    "linked_mrs": []
+  },
+  {
+    "title": "div 用例对照结论：标杆按 f32 真除法、Triton 按 dtype 语义，tl.store 隐式截断放大差异",
+    "iid": 1006,
+    "updated_at": "2026-11-19T20:19:57.350+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1006",
+    "linked_mrs": []
+  },
+  {
+    "title": "[HIVMAVE] Aligned load marked unaligned after memref.expand_shape",
+    "iid": 1007,
+    "updated_at": "2026-11-19T22:27:51.641+08:00",
+    "state": "closed",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1007",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Feature]: 在 A2 和 A3 上默认启用 Cube 布局优化 / Enable Cube layout optimization by default on A2 and A3",
+    "iid": 1008,
+    "updated_at": "2026-11-20T00:23:04.939+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1008",
+    "linked_mrs": [
+      "5285"
+    ]
+  },
+  {
+    "title": "[Bug]: A5 SIMT debug metadata loses source files and variable locations",
+    "iid": 1009,
+    "updated_at": "2026-11-20T03:23:56.493+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1009",
+    "linked_mrs": []
+  },
+  {
+    "title": "[HIVM][SplitMixKernel]: 'memref.alloc' op error: read before first write",
+    "iid": 1010,
+    "updated_at": "2026-11-23T11:43:49.839+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1010",
+    "linked_mrs": []
+  },
+  {
+    "title": "A5 3D tl.dot（batched matmul）：A 由向量核产生时结果错误，缺 UB→L1 的 NZ 布局转换",
+    "iid": 1011,
+    "updated_at": "2026-11-20T10:14:45.855+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1011",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Bug] HIVM v2 pipeline ignores compiler auto-sync options",
+    "iid": 1012,
+    "updated_at": "2026-11-20T10:15:27.728+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1012",
+    "linked_mrs": [
+      "5074"
+    ]
+  },
+  {
+    "title": "[Bug] HIVM v2 cross-core GSS asserts on scalar GM loads with ambiguous core types",
+    "iid": 1013,
+    "updated_at": "2026-11-20T10:59:40.059+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1013",
+    "linked_mrs": []
+  },
+  {
+    "title": "[A5][性能] 非对齐 pointwise cat 的第二路 load 退化为逐元素搬运",
+    "iid": 1014,
+    "updated_at": "2026-11-20T14:18:47.556+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1014",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Feature]: Automatic GET_BUF/RLS_BUF intra-core synchronization",
+    "iid": 1015,
+    "updated_at": "2026-11-20T14:58:49.770+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1015",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Bug][A6] Oversubscribed Triton grids skip logical programs after the first wave",
+    "iid": 1016,
+    "updated_at": "2026-11-20T15:12:27.340+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1016",
+    "linked_mrs": [
+      "5330"
+    ],
+    "attachment_commit": "e92e0083d7d026ef4a0104a8dd4025932560af0f"
+  },
+  {
+    "title": "[Bug][A6] Unscaled FP8 grouped GEMM selects the microscaled matrix instruction",
+    "iid": 1017,
+    "updated_at": "2026-11-20T15:12:51.182+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1017",
+    "linked_mrs": [
+      "5331"
+    ],
+    "attachment_commit": "5ba46fddf9a09a45a361360aeaf5d2d4cf7d1e0f"
+  },
+  {
+    "title": "[Bug][A6] Reverse vector cumsum exhausts memory during CANN device compilation",
+    "iid": 1018,
+    "updated_at": "2026-11-20T15:13:00.134+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1018",
+    "linked_mrs": [
+      "5332"
+    ],
+    "attachment_commit": "a153a0fea2b4cf5e3cbb6caa83f4548d4c18e335"
+  },
+  {
+    "title": "[Bug][A6] A6 rejection sampling fails to compile i64 select and integer interleave",
+    "iid": 1019,
+    "updated_at": "2026-11-20T15:13:09.056+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1019",
+    "linked_mrs": [
+      "5333"
+    ],
+    "attachment_commit": "072e232418e1dafcd7c5eedf04b2457c3ebcf800"
+  },
+  {
+    "title": "[Bug][A6] CreatePreload aborts on affine tile sizes and can reuse a live buffer slot",
+    "iid": 1020,
+    "updated_at": "2026-11-20T15:13:17.387+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1020",
+    "linked_mrs": [
+      "5334"
+    ],
+    "attachment_commit": "28f715b74a3664a305cf62509ec7834b106ae908"
+  },
+  {
+    "title": "[Bug][A6] A6 vector stores can overrun short predicate rows or corrupt transposed output",
+    "iid": 1021,
+    "updated_at": "2026-11-20T15:13:26.059+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1021",
+    "linked_mrs": [
+      "5335"
+    ],
+    "attachment_commit": "5a4c18f32979e54b55aad976e1ce1a4e0b064c68"
+  },
+  {
+    "title": "[Bug][A6] Local PlanMemory overwrites a live loop-carried UB value",
+    "iid": 1022,
+    "updated_at": "2026-11-20T15:13:35.199+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1022",
+    "linked_mrs": [
+      "5336"
+    ],
+    "attachment_commit": "7240264d51f61dac0627f421d186c257761a8b04"
+  },
+  {
+    "title": "[Bug][A6] MIX kernels initialize a private vector input on both cores",
+    "iid": 1023,
+    "updated_at": "2026-11-20T15:13:44.161+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1023",
+    "linked_mrs": [
+      "5337"
+    ],
+    "attachment_commit": "b48ced476faddb38f8328550ae3c713c02520703"
+  },
+  {
+    "title": "[Bug]: rank-1 静态带步长 `vector.transfer_write` 被 `ConvertVectorToHIVMAVE` 静默降为连续写，丢失 lane 间步长",
+    "iid": 1024,
+    "updated_at": "2026-11-20T15:34:17.679+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1024",
+    "linked_mrs": [
+      "5314"
+    ]
+  },
+  {
+    "title": "[Bug]: HFusion folds away FP8 quantization in FP32 → FP8 → FP32 cast chains",
+    "iid": 1025,
+    "updated_at": "2026-11-20T16:24:26.005+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1025",
+    "linked_mrs": [
+      "4137",
+      "5175"
+    ]
+  },
+  {
+    "title": "[Bug][HIVM] Invalid Fractal reshape for sliced matmul inputs (GEN-1749)",
+    "iid": 1026,
+    "updated_at": "2026-11-20T16:51:57.001+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1026",
+    "linked_mrs": [
+      "5303"
+    ]
+  },
+  {
+    "title": "[HIVM] A5 fixpipe insertion breaks L0C-bound conditional matmul results (DTS2026111745590)",
+    "iid": 1027,
+    "updated_at": "2026-11-20T15:58:08.160+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1027",
+    "linked_mrs": [
+      "5305"
+    ]
+  },
+  {
+    "title": "[Feature]: End-to-End HiFloat8 Support in Triton Ascend",
+    "iid": 1028,
+    "updated_at": "2026-11-20T16:09:06.138+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1028",
+    "linked_mrs": []
+  },
+  {
+    "title": "flatten while signatures",
+    "iid": 1029,
+    "updated_at": "2026-11-20T16:44:45.982+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1029",
+    "linked_mrs": []
+  },
+  {
+    "title": "[HIVM][Atomic] A3 仍用有序锁，带结果的 atomic_cas 在 insert-load-store 崩溃",
+    "iid": 1030,
+    "updated_at": "2026-11-20T16:47:27.747+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1030",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Bug]: HFusion flattener generates invalid IR for rank-reducing slices",
+    "iid": 1031,
+    "updated_at": "2026-11-20T21:02:10.256+08:00",
+    "state": "closed",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1031",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Performance]: Optimize two-stage SIMT sampling on Ascend 950",
+    "iid": 1032,
+    "updated_at": "2026-11-21T03:08:21.888+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1032",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Performance]: [A5]parallel_path_fwd使用PipelineV2场景软流水优化",
+    "iid": 1033,
+    "updated_at": "2026-11-21T06:53:46.397+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1033",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Bug]: A5 memory planning fails when Fixpipe and scf.if share a matmul accumulator",
+    "iid": 1034,
+    "updated_at": "2026-11-21T10:58:40.882+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1034",
+    "linked_mrs": [
+      "5289"
+    ]
+  },
+  {
+    "title": "[Bufferization] normalize-to-tensor 支持 arith.select 别名追踪并增强写识别",
+    "iid": 1036,
+    "updated_at": "2026-11-23T11:45:53.181+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1036",
+    "linked_mrs": []
+  },
+  {
+    "title": "[HIVM][DecomposeAllocTensorCopy] AIC 上 alloc_tensor(copy %vbrc) 应重算广播而非全量拷贝",
+    "iid": 1037,
+    "updated_at": "2026-11-21T15:43:23.267+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1037",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Feature]: enable A5 BF16 vmula vmadd vsqz",
+    "iid": 1038,
+    "updated_at": "2026-11-21T16:12:54.590+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1038",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Bug]: pairing 失败时仍执行 mask 下沉和 vbrc 前移，存在未知性能回退风险",
+    "iid": 1043,
+    "updated_at": "2026-11-21T19:51:42.842+08:00",
+    "state": "closed",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1043",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Bug]: stride_align 1d failed in triton-ascend suite in test_index_select.py test",
+    "iid": 1044,
+    "updated_at": "2026-11-22T23:50:46.123+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1044",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Feature]: Simplify the L1-to-L0 copy API by inferring copy parameters from buffer views",
+    "iid": 1046,
+    "updated_at": "2026-11-23T10:54:50.004+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1046",
+    "linked_mrs": [
+      "5251"
+    ]
+  },
+  {
+    "title": "[Arange] 3D 标量回退路径缺少 PIPE_V/PIPE_S 同步",
+    "iid": 1047,
+    "updated_at": "2026-11-23T11:25:19.260+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1047",
+    "linked_mrs": [
+      "5282"
+    ]
+  },
+  {
+    "title": "[Bug]: hfusion-flatten-ops crashes on slices of scf.while region arguments",
+    "iid": 1048,
+    "updated_at": "2026-11-23T13:14:46.892+08:00",
+    "state": "closed",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1048",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Bug]: Missing single-subblock guard for distributed custom ops",
+    "iid": 1049,
+    "updated_at": "2026-11-23T15:20:47.579+08:00",
+    "state": "closed",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1049",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Performance]: use NDDMA for short slice rows",
+    "iid": 1050,
+    "updated_at": "2026-11-23T15:05:49.351+08:00",
+    "state": "closed",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1050",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Bug]: HFusion flattener unnecessarily preserves dimensions around rank-reducing slices",
+    "iid": 1051,
+    "updated_at": "2026-11-23T15:29:35.007+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1051",
+    "linked_mrs": []
+  },
+  {
+    "title": "Can FP32 reduce_sum on Ascend 910B4 match PyTorch eager more closely for row-weight gradients?",
+    "iid": 1052,
+    "updated_at": "2026-11-23T16:21:12.220+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1052",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Feature] Teach hfusion-flatten-ops to collapse arith.select on tensors",
+    "iid": 1053,
+    "updated_at": "2026-11-23T17:12:39.521+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1053",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Performance]: Rotate multibuffer slot with actual execution, not the loop itself",
+    "iid": 1055,
+    "updated_at": "2026-11-23T19:05:21.400+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1055",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Bug]: PropgateReshape stride 计算错误",
+    "iid": 1056,
+    "updated_at": "2026-11-23T19:55:25.463+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1056",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Bug]: Gen-0501 hangs",
+    "iid": 1058,
+    "updated_at": "2026-11-23T23:52:52.782+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1058",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Feature]: Avoid redundant computations after broadcast",
+    "iid": 1059,
+    "updated_at": "2026-11-23T21:43:56.768+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1059",
+    "linked_mrs": []
+  },
+  {
+    "title": "[Feature]: Use grouped reduction instructions for independent reductions",
+    "iid": 1060,
+    "updated_at": "2026-11-23T22:01:04.722+08:00",
+    "state": "opened",
+    "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1060",
+    "linked_mrs": []
+  }
+]

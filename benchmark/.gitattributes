@@ -1,0 +1,3 @@
+# Preserve compiler output, reporter evidence, and original patch bytes.
+L4/archive/** -text
+*.mlir -text whitespace=-blank-at-eof

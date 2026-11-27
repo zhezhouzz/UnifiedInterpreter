@@ -1,0 +1,8 @@
+{
+  "title": "[Performance]: 当vector阻塞scalar时，会导致scalar无法发射后续指令，导致所有流水被vector阻塞",
+  "iid": 992,
+  "updated_at": "2026-11-19T09:20:52.922+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/992",
+  "linked_mrs": []
+}

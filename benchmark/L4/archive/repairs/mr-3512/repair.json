@@ -1,0 +1,12 @@
+{
+  "issue": null,
+  "mr": "3512",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/3512",
+  "commit": "a88fd22cb9c95686054be0d210ab09a18e884080",
+  "parent": "8d0730d3984d8b2db76149980f00a648296b90ef",
+  "title": "[Huawei][AscendNPU-IR][GraphSyncSolver] fix: treat builtin indirect atomic GM address arg as read-write parameter",
+  "tests": [
+    "bishengir/test/Dialect/HIVM/SyncSolver/hivm-gss-indirect-atomic-add.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

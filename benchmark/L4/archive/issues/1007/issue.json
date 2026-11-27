@@ -1,0 +1,8 @@
+{
+  "title": "[HIVMAVE] Aligned load marked unaligned after memref.expand_shape",
+  "iid": 1007,
+  "updated_at": "2026-11-19T22:27:51.641+08:00",
+  "state": "closed",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1007",
+  "linked_mrs": []
+}

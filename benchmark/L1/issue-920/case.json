@@ -1,0 +1,19 @@
+{
+  "id": "issue-920",
+  "tier": "L1",
+  "category": "compiler regression",
+  "source_ref": "#920",
+  "chip_profile": null,
+  "core_ratio": null,
+  "compile_argv": [
+    "bishengir-opt",
+    "-cv-pipelining=pipeline-mode=skew enable-preload=true set-depth-in-unroll-mode=2 bypass-shape-registry=true"
+  ],
+  "entry_functions": [
+    "feedback_cycle",
+    "feedback_cycle_hoisted",
+    "forwarding_only"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Two FileCheck exclusions fail on pinned compiler."
+}

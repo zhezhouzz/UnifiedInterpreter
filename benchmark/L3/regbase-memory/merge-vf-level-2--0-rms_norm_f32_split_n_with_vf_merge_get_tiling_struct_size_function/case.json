@@ -1,0 +1,26 @@
+{
+  "id": "regbase-memory/merge-vf-level-2--0-rms_norm_f32_split_n_with_vf_merge_get_tiling_struct_size_function",
+  "tier": "L3",
+  "category": "regbase-memory",
+  "source_ref": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/RegBase/merge-vf-level-2.mlir",
+  "chip_profile": "Ascend310B4",
+  "core_ratio": null,
+  "compile_argv": [
+    "bishengir-opt",
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2"
+  ],
+  "entry_functions": [
+    "rms_norm_f32_split_n_with_vf_merge_get_tiling_struct_size_function",
+    "rms_norm_f32_split_n_with_vf_merge_outlined_vf_0",
+    "rms_norm_f32_split_n_with_vf_merge_outlined_vf_1",
+    "rms_norm_f32_split_n_with_vf_merge_outlined_vf_2",
+    "rms_norm_f32_split_n_with_vf_merge_outlined_vf_3",
+    "rms_norm_f32_split_n_with_vf_merge"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "split_index": 0,
+  "upstream_path": "bishengir/test/Dialect/HIVM/RegBase/merge-vf-level-2.mlir"
+}

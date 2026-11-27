@@ -1,0 +1,8 @@
+[
+  {
+    "function": "test_sync_solver_dyn_view_and_reinterpret_cast",
+    "location": "loc(\"<stdin>\":8:13)",
+    "op": "memref.view",
+    "reason": "missing Core interpretation"
+  }
+]

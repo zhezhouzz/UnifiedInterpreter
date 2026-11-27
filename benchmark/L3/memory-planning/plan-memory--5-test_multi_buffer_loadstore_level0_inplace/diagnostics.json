@@ -1,0 +1,14 @@
+[
+  {
+    "function": "test_multi_buffer_loadstore_level0_inplace",
+    "location": "loc(\"<stdin>\":10:7)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_multi_buffer_loadstore_level0_inplace",
+    "location": "loc(\"<stdin>\":12:7)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  }
+]

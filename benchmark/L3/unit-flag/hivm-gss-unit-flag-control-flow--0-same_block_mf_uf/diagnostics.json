@@ -1,0 +1,8 @@
+[
+  {
+    "function": "same_block_mf_uf",
+    "location": "loc(\"<stdin>\":22:5)",
+    "op": "hivm.hir.mmadL1",
+    "reason": "mmadL1 sync_related_args require internal MTE1/M protocol"
+  }
+]

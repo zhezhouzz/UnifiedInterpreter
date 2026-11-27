@@ -1,0 +1,315 @@
+diff --git a/bishengir/include/bishengir/Dialect/HIVM/Pipelines/v2/Passes.h b/bishengir/include/bishengir/Dialect/HIVM/Pipelines/v2/Passes.h
+index bf938b891..3fce17df4 100644
+--- a/bishengir/include/bishengir/Dialect/HIVM/Pipelines/v2/Passes.h
++++ b/bishengir/include/bishengir/Dialect/HIVM/Pipelines/v2/Passes.h
+@@ -38,6 +38,35 @@ struct V2PipelineOptions : public mlir::PassPipelineOptions<V2PipelineOptions> {
+       *this, "enable-multi-buffer",
+       llvm::cl::desc("Mark/enable multi-buffering on the unsplit MIX"),
+       llvm::cl::init(false)};
++
++  // V2 uses graph solvers except for intra-core barrier-all mode.
++  PassOptions::Option<bool> disableHIVMAutoInjectSync{
++      *this, "disable-hivm-auto-inject-sync",
++      llvm::cl::desc("Disable intra-core auto-sync"), llvm::cl::init(false)};
++
++  PassOptions::Option<bool> disableAutoInjectBlockSync{
++      *this, "disable-auto-inject-block-sync",
++      llvm::cl::desc("Disable cross-core auto-sync"), llvm::cl::init(false)};
++
++  PassOptions::Option<bool> enableHIVMInjectBarrierAllSync{
++      *this, "enable-hivm-inject-barrier-all-sync",
++      llvm::cl::desc("Use inject-sync in barrier-all mode"),
++      llvm::cl::init(false)};
++
++  PassOptions::Option<bool> enableHIVMInjectBlockAllSync{
++      *this, "enable-hivm-inject-block-all-sync",
++      llvm::cl::desc("Use cross-core-gss in block-all mode"),
++      llvm::cl::init(false)};
++
++  PassOptions::Option<bool> enableHIVMUnitFlagSync{
++      *this, "enable-hivm-unit-flag-sync",
++      llvm::cl::desc("Enable unit-flag modes for intra-core synchronization"),
++      llvm::cl::init(false)};
++
++  PassOptions::Option<std::string> hivmSyncSolverVersion{
++      *this, "hivm-sync-solver-version",
++      llvm::cl::desc("Select the auto-sync solver implementation"),
++      llvm::cl::init("v2")};
+ };
+ 
+ /// Phase builders shared by the opt pipeline and the compile driver.
+@@ -46,7 +75,7 @@ void buildV2BufferizationPhase(OpPassManager &pm,
+                                const V2PipelineOptions &options);
+ void buildV2PostBufferizationPhase(OpPassManager &pm,
+                                    const V2PipelineOptions &options);
+-void buildV2PerCoreTail(OpPassManager &pm);
++void buildV2PerCoreTail(OpPassManager &pm, const V2PipelineOptions &options);
+ 
+ /// Add the "hivm-v2-pipeline" pipeline to `pm`.
+ void buildV2HIVMPipeline(OpPassManager &pm, const V2PipelineOptions &options);
+diff --git a/bishengir/lib/Dialect/HIVM/Pipelines/v2/HIVMV2Pipelines.cpp b/bishengir/lib/Dialect/HIVM/Pipelines/v2/HIVMV2Pipelines.cpp
+index e270a9d22..18f1279b2 100644
+--- a/bishengir/lib/Dialect/HIVM/Pipelines/v2/HIVMV2Pipelines.cpp
++++ b/bishengir/lib/Dialect/HIVM/Pipelines/v2/HIVMV2Pipelines.cpp
+@@ -125,6 +125,37 @@ static void buildAlignStorage(OpPassManager &pm) {
+   pm.addPass(createEnableStrideAlignPass());
+ }
+ 
++static void hivmIntraCoreSyncPipeline(OpPassManager &pm,
++                                      const V2PipelineOptions &options) {
++  if (options.disableHIVMAutoInjectSync)
++    return;
++
++  if (options.enableHIVMInjectBarrierAllSync) {
++    InjectSyncOptions syncOptions;
++    syncOptions.enableUnitFlag = options.enableHIVMUnitFlagSync;
++    syncOptions.syncMode = SyncMode::BARRIERALL;
++    addFuncPass(pm, createInjectSyncPass(syncOptions));
++    return;
++  }
++
++  GraphSyncSolverOptions gssOptions;
++  gssOptions.enableUnitFlag = options.enableHIVMUnitFlagSync;
++  gssOptions.solverVersion = options.hivmSyncSolverVersion;
++  addFuncPass(pm, createGraphSyncSolverPass(gssOptions));
++}
++
++static void hivmCrossCoreAutoSyncPipeline(OpPassManager &pm,
++                                          const V2PipelineOptions &options) {
++  if (options.disableAutoInjectBlockSync)
++    return;
++
++  CrossCoreGSSOptions crossCoreOptions;
++  crossCoreOptions.forceIsRegBased = true;
++  crossCoreOptions.blockAllSync = options.enableHIVMInjectBlockAllSync;
++  crossCoreOptions.solverVersion = options.hivmSyncSolverVersion;
++  addFuncPass(pm, createCrossCoreGSSPass(crossCoreOptions));
++}
++
+ /// Post-bufferization: both memory plans and the solve see the unsplit MIX.
+ void buildV2PostBufferizationPhase(OpPassManager &pm,
+                                    const V2PipelineOptions &options) {
+@@ -194,9 +225,7 @@ void buildV2PostBufferizationPhase(OpPassManager &pm,
+ 
+   // Single-shot cross-core solve on the MIX.
+   canonicalizationHIVMPipeline(pm);
+-  CrossCoreGSSOptions crossCoreOptions;
+-  crossCoreOptions.forceIsRegBased = true;
+-  addFuncPass(pm, createCrossCoreGSSPass(crossCoreOptions));
++  hivmCrossCoreAutoSyncPipeline(pm, options);
+ 
+   if (options.enablePreload) {
+     CreatePreloadOptions preloadOptions;
+@@ -209,13 +238,12 @@ void buildV2PostBufferizationPhase(OpPassManager &pm,
+ }
+ 
+ /// Per-core tail.
+-void buildV2PerCoreTail(OpPassManager &pm) {
++void buildV2PerCoreTail(OpPassManager &pm, const V2PipelineOptions &options) {
+   addFuncPass(pm, createHIVMLowerToLoopsPass());
+   addFuncPass(pm, createHIVMDecomposeOpPass());
+   pm.addPass(createInferHIVMMemScopePass());
+ 
+-  GraphSyncSolverOptions gssOptions;
+-  addFuncPass(pm, createGraphSyncSolverPass(gssOptions));
++  hivmIntraCoreSyncPipeline(pm, options);
+ 
+   pm.addPass(mlir::createMemrefExtLoweringPass());
+   addFuncPass(pm, createLowerMultiBufferCounterPass());
+@@ -233,7 +261,7 @@ void buildV2HIVMPipeline(OpPassManager &pm, const V2PipelineOptions &options) {
+   buildV2TensorPhase(pm, options);
+   buildV2BufferizationPhase(pm, options);
+   buildV2PostBufferizationPhase(pm, options);
+-  buildV2PerCoreTail(pm);
++  buildV2PerCoreTail(pm, options);
+ }
+ 
+ void registerV2HIVMPipelines() {
+diff --git a/bishengir/lib/Tools/bishengir-compile/regbase/PassPipelineV2.cpp b/bishengir/lib/Tools/bishengir-compile/regbase/PassPipelineV2.cpp
+index 61a86c3da..2698fb156 100644
+--- a/bishengir/lib/Tools/bishengir-compile/regbase/PassPipelineV2.cpp
++++ b/bishengir/lib/Tools/bishengir-compile/regbase/PassPipelineV2.cpp
+@@ -50,6 +50,14 @@ void setupV2PipelineOptions(const BiShengIRCompileMainConfig &config,
+   v2Options.target = hacc::stringifyTargetDeviceEnum(config.getTarget()).str();
+   v2Options.enablePreload = hivmOptions.enablePreload;
+   v2Options.enableMultiBuffer = config.getEnableAutoMultiBuffer();
++  v2Options.disableHIVMAutoInjectSync = hivmOptions.disableHIVMAutoInjectSync;
++  v2Options.disableAutoInjectBlockSync = hivmOptions.disableAutoInjectBlockSync;
++  v2Options.enableHIVMInjectBarrierAllSync =
++      hivmOptions.enableHIVMInjectBarrierAllSync;
++  v2Options.enableHIVMInjectBlockAllSync =
++      hivmOptions.enableHIVMInjectBlockAllSync;
++  v2Options.enableHIVMUnitFlagSync = hivmOptions.enableHIVMUnitFlagSync;
++  v2Options.hivmSyncSolverVersion = hivmOptions.hivmSyncSolverVersion;
+ }
+ 
+ enum class V2Stage { Tensor, Final };
+@@ -77,7 +85,7 @@ void appendV2Pipeline(OpPassManager &pm,
+     hivm::v2::buildV2BufferizationPhase(pm, v2Options);
+   } else {
+     hivm::v2::buildV2PostBufferizationPhase(pm, v2Options);
+-    hivm::v2::buildV2PerCoreTail(pm);
++    hivm::v2::buildV2PerCoreTail(pm, v2Options);
+   }
+ }
+ 
+diff --git a/bishengir/test/Dialect/HIVM/hivm-v2-pipeline-a6-order.mlir b/bishengir/test/Dialect/HIVM/hivm-v2-pipeline-a6-order.mlir
+index 88a4f085c..5d6a85d5f 100644
+--- a/bishengir/test/Dialect/HIVM/hivm-v2-pipeline-a6-order.mlir
++++ b/bishengir/test/Dialect/HIVM/hivm-v2-pipeline-a6-order.mlir
+@@ -1,8 +1,21 @@
+-// RUN: bishengir-opt %s --pass-pipeline="builtin.module(hivm-v2-pipeline{target=Ascend960})" --dump-pass-pipeline -o /dev/null 2>&1 | tr ',' '\n' | FileCheck %s --check-prefixes=CHECK,FULL
++// RUN: bishengir-opt %s --pass-pipeline="builtin.module(hivm-v2-pipeline{target=Ascend960})" --dump-pass-pipeline -o /dev/null 2>&1 | tr ',' '\n' | FileCheck %s --check-prefixes=CHECK,FULL --implicit-check-not=hivm-inject-sync --implicit-check-not=hivm-inject-block-sync --implicit-check-not=hivm-delayed-cross-core-gss --implicit-check-not=hivm-insert-anchors-and-backup
+ // RUN: bishengir-opt %s --pass-pipeline="builtin.module(hivm-v2-pre-vectorize-pipeline{target=Ascend960})" --dump-pass-pipeline -o /dev/null 2>&1 | tr ',' '\n' | FileCheck %s --check-prefixes=CHECK,PRE --implicit-check-not=hivm-vectorize --implicit-check-not=bufferiz
+ // RUN: bishengir-opt %s --pass-pipeline="builtin.module(hivm-v2-pipeline{target=Ascend960})" | FileCheck %s --check-prefix=SPLIT
+ // RUN: bishengir-opt %s --hivm-v2-split-kernel | FileCheck %s --check-prefix=SPLIT
+ // RUN: echo 'module {}' | bishengir-opt --lower-hfusion-regbase-pipeline="target=Ascend960 enable-auto-vectorize-v2=true disable-hfusion-vectorize=false" --hivm-v2-pipeline="target=Ascend960" --mlir-print-ir-before=hivm-vectorize --mlir-print-ir-before=hfusion-auto-vectorize-v2 --mlir-print-ir-before=hfusion-select-hivm-vectorize -o /dev/null 2>&1 | FileCheck %s --check-prefix=ORDER
++// RUN: bishengir-opt %s --pass-pipeline="builtin.module(hivm-v2-pipeline{target=Ascend960 hivm-sync-solver-version=v1 enable-hivm-unit-flag-sync=true})" --dump-pass-pipeline -o /dev/null 2>&1 | tr ',' '\n' | FileCheck %s --check-prefix=SYNC-OPTIONS
++// RUN: bishengir-opt %s --pass-pipeline="builtin.module(hivm-v2-pipeline{target=Ascend960 disable-hivm-auto-inject-sync=true})" --dump-pass-pipeline -o /dev/null 2>&1 | tr ',' '\n' | FileCheck %s --check-prefix=NO-INTRA --implicit-check-not=hivm-graph-sync-solver
++// RUN: bishengir-opt %s --pass-pipeline="builtin.module(hivm-v2-pipeline{target=Ascend960 disable-auto-inject-block-sync=true})" --dump-pass-pipeline -o /dev/null 2>&1 | tr ',' '\n' | FileCheck %s --check-prefix=NO-CROSS --implicit-check-not=hivm-cross-core-gss
++// RUN: bishengir-opt %s --pass-pipeline="builtin.module(hivm-v2-pipeline{target=Ascend960 disable-hivm-auto-inject-sync=true disable-auto-inject-block-sync=true})" --dump-pass-pipeline -o /dev/null 2>&1 | tr ',' '\n' | FileCheck %s --check-prefix=NO-SYNC --implicit-check-not=hivm-graph-sync-solver --implicit-check-not=hivm-cross-core-gss
++// RUN: bishengir-opt %s --pass-pipeline="builtin.module(hivm-v2-pipeline{target=Ascend960 enable-hivm-inject-barrier-all-sync=true enable-hivm-unit-flag-sync=true})" --dump-pass-pipeline -o /dev/null 2>&1 | tr ',' '\n' | FileCheck %s --check-prefix=BARRIER-ALL --implicit-check-not=hivm-graph-sync-solver --implicit-check-not=hivm-inject-block-sync
++// RUN: bishengir-opt %s --pass-pipeline="builtin.module(hivm-v2-pipeline{target=Ascend960 enable-hivm-inject-block-all-sync=true})" --dump-pass-pipeline -o /dev/null 2>&1 | tr ',' '\n' | FileCheck %s --check-prefix=BLOCK-ALL --implicit-check-not=hivm-inject-block-sync --implicit-check-not=hivm-inject-sync
++// RUN: bishengir-opt %s --pass-pipeline="builtin.module(hivm-v2-pipeline{target=Ascend960 disable-hivm-auto-inject-sync=true disable-auto-inject-block-sync=true enable-hivm-inject-barrier-all-sync=true enable-hivm-inject-block-all-sync=true})" --dump-pass-pipeline -o /dev/null 2>&1 | tr ',' '\n' | FileCheck %s --check-prefix=NO-SYNC --implicit-check-not=hivm-graph-sync-solver --implicit-check-not=hivm-cross-core-gss --implicit-check-not=hivm-inject-sync --implicit-check-not=hivm-inject-block-sync
++// The driver may fail later if template bitcode is unavailable. Check the v2
++// sync stages before backend compilation, as in a5-code-motion-before-cross-core.
++// RUN: (bishengir-compile %s --target=Ascend960 --use-pipeline-version=2 --enable-lir-compile=false --mlir-disable-threading --enable-hivm-graph-sync-solver=false --enable-hivm-cross-core-gss=false --enable-hivm-delayed-cross-core-gss=true --mlir-print-ir-before=hivm-cross-core-gss,hivm-graph-sync-solver -o %t.ll 2>&1 || true) | FileCheck %s --check-prefix=DRIVER-GSS
++// RUN: (bishengir-compile %s --target=Ascend960 --use-pipeline-version=2 --enable-lir-compile=false --mlir-disable-threading --disable-hivm-auto-inject-sync=true --mlir-print-ir-before=hivm-cross-core-gss,hivm-graph-sync-solver,hivm-v2-split-kernel -o %t.ll 2>&1 || true) | FileCheck %s --check-prefix=DRIVER-NO-INTRA --implicit-check-not="IR Dump Before GraphSyncSolver"
++// RUN: (bishengir-compile %s --target=Ascend960 --use-pipeline-version=2 --enable-lir-compile=false --mlir-disable-threading --disable-auto-inject-block-sync=true --mlir-print-ir-before=hivm-cross-core-gss,hivm-graph-sync-solver,hivm-v2-split-kernel -o %t.ll 2>&1 || true) | FileCheck %s --check-prefix=DRIVER-NO-CROSS --implicit-check-not="IR Dump Before CrossCoreGSS"
++// RUN: (bishengir-compile %s --target=Ascend960 --use-pipeline-version=2 --enable-lir-compile=false --mlir-disable-threading --enable-hivm-inject-barrier-all-sync=true --enable-hivm-inject-block-all-sync=true --mlir-print-ir-before=hivm-inject-block-sync,hivm-inject-sync,hivm-cross-core-gss,hivm-graph-sync-solver -o %t.ll 2>&1 || true) | FileCheck %s --check-prefix=DRIVER-ALL --implicit-check-not="IR Dump Before InjectBlockSync" --implicit-check-not="IR Dump Before GraphSyncSolver"
+ 
+ // The v2 pipeline reuses InsertLoadStoreForMixCV after TCB insertion.
+ // CHECK: hivm-insert-cv-tight-coupled-buffer
+@@ -21,7 +34,48 @@
+ // FULL: tensor-copy-insertion
+ // FULL: bufferize-module-op
+ // FULL: hivm-cross-core-gss
++// FULL-SAME: solver-version=v2
+ // FULL: hivm-v2-split-kernel
++// FULL: hivm-graph-sync-solver
++// FULL-SAME: enable-unit-flag=false
++// FULL-SAME: solver-version=v2
++
++// The same solver version reaches both solves, with unit flags on the per-core
++// solver. Each disable flag affects only its own solve.
++// SYNC-OPTIONS: hivm-cross-core-gss
++// SYNC-OPTIONS-SAME: force-is-reg-based=true
++// SYNC-OPTIONS-SAME: solver-version=v1
++// SYNC-OPTIONS: hivm-v2-split-kernel
++// SYNC-OPTIONS: hivm-graph-sync-solver
++// SYNC-OPTIONS-SAME: enable-unit-flag=true
++// SYNC-OPTIONS-SAME: solver-version=v1
++// NO-INTRA: hivm-cross-core-gss
++// NO-INTRA: hivm-v2-split-kernel
++// NO-CROSS: hivm-v2-split-kernel
++// NO-CROSS: hivm-graph-sync-solver
++// NO-SYNC: hivm-v2-split-kernel
++
++// Barrier-all selects InjectSync; block-all configures CrossCoreGSS.
++// The disable flags take precedence over both all-sync modes.
++// BARRIER-ALL: hivm-cross-core-gss
++// BARRIER-ALL: hivm-v2-split-kernel
++// BARRIER-ALL: hivm-inject-sync
++// BARRIER-ALL-SAME: enable-unit-flag=true
++// BARRIER-ALL-SAME: sync-mode=barrier-all
++// BLOCK-ALL: hivm-cross-core-gss
++// BLOCK-ALL-SAME: block-all-sync=true
++// BLOCK-ALL: hivm-v2-split-kernel
++// BLOCK-ALL: hivm-graph-sync-solver
++
++// Driver algorithm-selection flags do not restore inject or delayed modes.
++// DRIVER-GSS: IR Dump Before CrossCoreGSS (hivm-cross-core-gss)
++// DRIVER-GSS: IR Dump Before GraphSyncSolver (hivm-graph-sync-solver)
++// DRIVER-NO-INTRA: IR Dump Before CrossCoreGSS (hivm-cross-core-gss)
++// DRIVER-NO-INTRA: IR Dump Before V2SplitKernel (hivm-v2-split-kernel)
++// DRIVER-NO-CROSS: IR Dump Before V2SplitKernel (hivm-v2-split-kernel)
++// DRIVER-NO-CROSS: IR Dump Before GraphSyncSolver (hivm-graph-sync-solver)
++// DRIVER-ALL: IR Dump Before CrossCoreGSS (hivm-cross-core-gss)
++// DRIVER-ALL: IR Dump Before InjectSync (hivm-inject-sync)
+ 
+ // Driver order: HFusion auto-vectorize, then hivm-vectorize.
+ // Use an empty module here: HFusion auto-scheduling requires tensor work.
+diff --git a/bishengir/test/Dialect/HIVM/hivm-v2-pipeline-sync.mlir b/bishengir/test/Dialect/HIVM/hivm-v2-pipeline-sync.mlir
+new file mode 100644
+index 000000000..1b728a73e
+--- /dev/null
++++ b/bishengir/test/Dialect/HIVM/hivm-v2-pipeline-sync.mlir
+@@ -0,0 +1,78 @@
++// RUN: bishengir-opt %s --pass-pipeline="builtin.module(hivm-v2-pipeline{target=Ascend960})" | FileCheck %s --check-prefix=GSS --implicit-check-not=hivm.hir.sync_block
++// RUN: bishengir-opt %s --pass-pipeline="builtin.module(hivm-v2-pipeline{target=Ascend960 enable-hivm-inject-barrier-all-sync=true})" | FileCheck %s --check-prefix=BARRIER --implicit-check-not=hivm.hir.set_flag --implicit-check-not=hivm.hir.wait_flag --implicit-check-not=hivm.hir.sync_block
++// RUN: bishengir-opt %s --pass-pipeline="builtin.module(hivm-v2-pipeline{target=Ascend960 enable-hivm-inject-block-all-sync=true disable-hivm-auto-inject-sync=true})" | FileCheck %s --check-prefix=BLOCK --implicit-check-not=hivm.hir.set_ffts_base_addr --implicit-check-not=hivm.hir.set_flag --implicit-check-not=hivm.hir.wait_flag
++// RUN: bishengir-opt %s --pass-pipeline="builtin.module(hivm-v2-pipeline{target=Ascend960 enable-hivm-inject-barrier-all-sync=true enable-hivm-inject-block-all-sync=true})" | FileCheck %s --check-prefix=COMBINED --implicit-check-not=hivm.hir.set_ffts_base_addr --implicit-check-not=hivm.hir.set_flag --implicit-check-not=hivm.hir.wait_flag
++// RUN: bishengir-opt %s --pass-pipeline="builtin.module(hivm-v2-pipeline{target=Ascend950PR_9579 enable-hivm-inject-barrier-all-sync=true enable-hivm-inject-block-all-sync=true})" | FileCheck %s --check-prefix=COMBINED --implicit-check-not=hivm.hir.set_ffts_base_addr --implicit-check-not=hivm.hir.set_flag --implicit-check-not=hivm.hir.wait_flag
++// RUN: bishengir-opt %s --pass-pipeline="builtin.module(hivm-v2-pipeline{target=Ascend960 enable-hivm-inject-barrier-all-sync=true enable-hivm-inject-block-all-sync=true disable-hivm-auto-inject-sync=true disable-auto-inject-block-sync=true})" | FileCheck %s --check-prefix=DISABLED --implicit-check-not=hivm.hir.pipe_barrier --implicit-check-not=hivm.hir.sync_block --implicit-check-not=hivm.hir.set_flag --implicit-check-not=hivm.hir.wait_flag
++
++// Exercise real memory operations through the full v2 pipeline. The MIX has no
++// FFTS argument: reg-based block-all synchronization must work without one.
++// GSS orders the load/store dependency with flags by default.
++// GSS-LABEL: func.func @copy_mix_aiv(
++// GSS:      hivm.hir.load
++// GSS-NEXT: hivm.hir.set_flag[<PIPE_MTE2>, <PIPE_MTE3>, <[[EVENT:EVENT_ID[0-9]+]]>]
++// GSS:      hivm.hir.wait_flag[<PIPE_MTE2>, <PIPE_MTE3>, <[[EVENT]]>]
++// GSS-NEXT: hivm.hir.store
++
++// Barrier-all replaces the dependency flags with PIPE_ALL barriers.
++// BARRIER-LABEL: func.func @copy_mix_aiv(
++// BARRIER:      hivm.hir.pointer_cast
++// BARRIER-NEXT: hivm.hir.pipe_barrier[<PIPE_ALL>]
++// BARRIER-NEXT: hivm.hir.load
++// BARRIER:      hivm.hir.pipe_barrier[<PIPE_ALL>]
++// BARRIER-NEXT: hivm.hir.store
++// BARRIER-NEXT: hivm.hir.pipe_barrier[<PIPE_ALL>]
++
++// GSS block-all inserts matching handshakes on both split kernels before
++// each memory operation, even when intra-core auto-sync is disabled.
++// BLOCK-LABEL: func.func @copy_mix_aic(
++// BLOCK:      hivm.hir.pipe_barrier[<PIPE_ALL>]
++// BLOCK-NEXT: hivm.hir.sync_block_wait[<CUBE>, <PIPE_S>, <PIPE_S>] flag = 15
++// BLOCK-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_S>, <PIPE_S>] flag = 14
++// BLOCK-LABEL: func.func @copy_mix_aiv(
++// BLOCK:      hivm.hir.pipe_barrier[<PIPE_ALL>]
++// BLOCK-NEXT: hivm.hir.sync_block_set[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 15
++// BLOCK-NEXT: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 14
++// BLOCK-NEXT: hivm.hir.load
++// BLOCK:      hivm.hir.pipe_barrier[<PIPE_ALL>]
++// BLOCK-NEXT: hivm.hir.sync_block_set[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 15
++// BLOCK-NEXT: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 14
++// BLOCK-NEXT: hivm.hir.store
++
++// Both all-sync options can be enabled together on A5 and A6.
++// COMBINED-LABEL: func.func @copy_mix_aic(
++// COMBINED:      hivm.hir.sync_block_wait[<CUBE>, <PIPE_S>, <PIPE_S>] flag = 15
++// COMBINED-NEXT: hivm.hir.pipe_barrier[<PIPE_ALL>]
++// COMBINED-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_S>, <PIPE_S>] flag = 14
++// COMBINED-LABEL: func.func @copy_mix_aiv(
++// COMBINED:      hivm.hir.sync_block_set[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 15
++// COMBINED-NEXT: hivm.hir.pipe_barrier[<PIPE_ALL>]
++// COMBINED-NEXT: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 14
++// COMBINED-NEXT: hivm.hir.pipe_barrier[<PIPE_ALL>]
++// COMBINED-NEXT: hivm.hir.load
++// COMBINED:      hivm.hir.sync_block_set[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 15
++// COMBINED-NEXT: hivm.hir.pipe_barrier[<PIPE_ALL>]
++// COMBINED-NEXT: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 14
++// COMBINED-NEXT: hivm.hir.pipe_barrier[<PIPE_ALL>]
++// COMBINED-NEXT: hivm.hir.store
++// COMBINED-NEXT: hivm.hir.pipe_barrier[<PIPE_ALL>]
++
++// The disable flags take precedence over the all-sync options while preserving
++// the actual load and store.
++// DISABLED-LABEL: func.func @copy_mix_aiv(
++// DISABLED: hivm.hir.load
++// DISABLED: hivm.hir.store
++// DISABLED: return
++module {
++  func.func @copy(%src: memref<16x16xf32, #hivm.address_space<gm>>,
++                  %dst: memref<16x16xf32, #hivm.address_space<gm>>)
++      attributes {hacc.entry, hacc.function_kind = #hacc.function_kind<DEVICE>,
++                  hivm.func_core_type = #hivm.func_core_type<MIX>, mix_mode = "mix"} {
++    %buf = memref.alloc() : memref<16x16xf32, #hivm.address_space<ub>>
++    hivm.hir.load ins(%src : memref<16x16xf32, #hivm.address_space<gm>>)
++                  outs(%buf : memref<16x16xf32, #hivm.address_space<ub>>)
++    hivm.hir.store ins(%buf : memref<16x16xf32, #hivm.address_space<ub>>)
++                   outs(%dst : memref<16x16xf32, #hivm.address_space<gm>>)
++    return
++  }
++}

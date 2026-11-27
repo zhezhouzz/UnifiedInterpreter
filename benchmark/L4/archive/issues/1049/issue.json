@@ -1,0 +1,8 @@
+{
+  "title": "[Bug]: Missing single-subblock guard for distributed custom ops",
+  "iid": 1049,
+  "updated_at": "2026-11-23T15:20:47.579+08:00",
+  "state": "closed",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1049",
+  "linked_mrs": []
+}

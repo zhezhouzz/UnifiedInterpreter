@@ -1,0 +1,44 @@
+[
+  {
+    "function": "shared_accumulator",
+    "location": "loc(\"<stdin>\":5:10)",
+    "op": "hivm.hir.convert_layout",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "shared_accumulator",
+    "location": "loc(\"<stdin>\":6:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "shared_accumulator",
+    "location": "loc(\"<stdin>\":7:10)",
+    "op": "hivm.hir.fixpipe",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "shared_accumulator",
+    "location": "loc(\"<stdin>\":12:10)",
+    "op": "scf.if",
+    "reason": "loop-carried values or yielded joins need bindings"
+  },
+  {
+    "function": "shared_accumulator",
+    "location": "loc(\"<stdin>\":21:5)",
+    "op": "hivm.hir.fixpipe",
+    "reason": "requires bufferization"
+  },
+  {
+    "function": "different_output_extents",
+    "location": "loc(\"<stdin>\":25:10)",
+    "op": "hivm.hir.convert_layout",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "different_output_extents",
+    "location": "loc(\"<stdin>\":26:10)",
+    "op": "scf.if",
+    "reason": "loop-carried values or yielded joins need bindings"
+  }
+]

@@ -1,0 +1,23 @@
+{
+  "id": "regbase-memory/merge-vf-level-1--4-kernel_outlined_vf_0",
+  "tier": "L3",
+  "category": "regbase-memory",
+  "source_ref": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/RegBase/merge-vf-level-1.mlir",
+  "chip_profile": null,
+  "core_ratio": null,
+  "compile_argv": [
+    "bishengir-opt",
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2"
+  ],
+  "entry_functions": [
+    "kernel_outlined_vf_0",
+    "kernel_outlined_vf_1",
+    "not_merge_when_load_write_to_same_buffer"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "split_index": 4,
+  "upstream_path": "bishengir/test/Dialect/HIVM/RegBase/merge-vf-level-1.mlir"
+}

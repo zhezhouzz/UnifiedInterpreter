@@ -1,0 +1,50 @@
+[
+  {
+    "function": "vf_a",
+    "location": "loc(\"<stdin>\":5:10)",
+    "op": "vector.transfer_read",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "vf_a",
+    "location": "loc(\"<stdin>\":6:10)",
+    "op": "vector.transfer_read",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "vf_a",
+    "location": "loc(\"<stdin>\":7:10)",
+    "op": "arith.mulf",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "vf_a",
+    "location": "loc(\"<stdin>\":8:5)",
+    "op": "vector.transfer_write",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "vf_b",
+    "location": "loc(\"<stdin>\":14:10)",
+    "op": "vector.transfer_read",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "vf_b",
+    "location": "loc(\"<stdin>\":15:5)",
+    "op": "vector.transfer_write",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kernel_two_kill",
+    "location": "loc(\"<stdin>\":32:7)",
+    "op": "func.call",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "kernel_two_kill",
+    "location": "loc(\"<stdin>\":35:7)",
+    "op": "func.call",
+    "reason": "missing Core interpretation"
+  }
+]

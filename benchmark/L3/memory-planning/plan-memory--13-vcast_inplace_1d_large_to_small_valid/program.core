@@ -1,0 +1,164 @@
+{
+  "vcast_inplace_1d_large_to_small_valid": {
+    "params": [
+      {
+        "id": 0,
+        "type": "memref<1024xf32, #hivm.address_space<gm>>"
+      },
+      {
+        "id": 1,
+        "type": "memref<1024xf16, #hivm.address_space<gm>>"
+      }
+    ],
+    "body": [
+      {
+        "cmd": "alloc",
+        "space": "ub",
+        "args": [],
+        "results": [
+          2
+        ],
+        "types": [
+          "memref<1024xf32, #hivm.address_space<ub>>"
+        ],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>"
+        }
+      },
+      {
+        "cmd": "issue",
+        "p": "MTE2",
+        "fn": "load",
+        "write_operand": 1,
+        "read_operands": [
+          0
+        ],
+        "args": [
+          0,
+          2
+        ],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 1, 1, 0, 0, 0, 0>"
+        }
+      },
+      {
+        "cmd": "setflag",
+        "p": "MTE2",
+        "q": "V",
+        "event": 0,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "set_pipe": "#hivm.pipe<PIPE_MTE2>",
+          "static_event_id": "#hivm.event<EVENT_ID0>",
+          "wait_pipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "alloc",
+        "space": "ub",
+        "args": [],
+        "results": [
+          3
+        ],
+        "types": [
+          "memref<1024xf16, #hivm.address_space<ub>>"
+        ],
+        "attrs": {
+          "operandSegmentSizes": "array<i32: 0, 0>"
+        }
+      },
+      {
+        "cmd": "waitflag",
+        "p": "MTE2",
+        "q": "V",
+        "event": 0,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "set_pipe": "#hivm.pipe<PIPE_MTE2>",
+          "static_event_id": "#hivm.event<EVENT_ID0>",
+          "wait_pipe": "#hivm.pipe<PIPE_V>"
+        }
+      },
+      {
+        "cmd": "issue",
+        "p": "V",
+        "fn": "vcast",
+        "write_operand": 1,
+        "read_operands": [
+          0
+        ],
+        "args": [
+          2,
+          3
+        ],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "broadcast": "array<i64>",
+          "cast": "#hivm.cast<cast_signed>",
+          "operandSegmentSizes": "array<i32: 1, 1, 0>",
+          "round_mode": "#hivm.round_mode<trunc>",
+          "transpose": "array<i64>"
+        }
+      },
+      {
+        "cmd": "setflag",
+        "p": "V",
+        "q": "MTE3",
+        "event": 0,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "set_pipe": "#hivm.pipe<PIPE_V>",
+          "static_event_id": "#hivm.event<EVENT_ID0>",
+          "wait_pipe": "#hivm.pipe<PIPE_MTE3>"
+        }
+      },
+      {
+        "cmd": "waitflag",
+        "p": "V",
+        "q": "MTE3",
+        "event": 0,
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {
+          "set_pipe": "#hivm.pipe<PIPE_V>",
+          "static_event_id": "#hivm.event<EVENT_ID0>",
+          "wait_pipe": "#hivm.pipe<PIPE_MTE3>"
+        }
+      },
+      {
+        "cmd": "issue",
+        "p": "MTE3",
+        "fn": "store",
+        "write_operand": 1,
+        "read_operands": [
+          0
+        ],
+        "args": [
+          3,
+          1
+        ],
+        "results": [],
+        "types": [],
+        "attrs": {}
+      },
+      {
+        "cmd": "return",
+        "args": [],
+        "results": [],
+        "types": [],
+        "attrs": {}
+      }
+    ],
+    "core_kind": null
+  }
+}

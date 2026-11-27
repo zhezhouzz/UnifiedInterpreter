@@ -1,0 +1,68 @@
+[
+  {
+    "function": "simple_reusable_vf",
+    "location": "loc(\"<stdin>\":6:10)",
+    "op": "vector.transfer_read",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "simple_reusable_vf",
+    "location": "loc(\"<stdin>\":7:10)",
+    "op": "math.log",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "simple_reusable_vf",
+    "location": "loc(\"<stdin>\":8:5)",
+    "op": "vector.transfer_write",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "not_inplace_reuse_when_reach_load_and_store_0",
+    "location": "loc(\"<stdin>\":21:5)",
+    "op": "func.call",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "not_inplace_reuse_when_reach_load_and_store_0",
+    "location": "loc(\"<stdin>\":25:5)",
+    "op": "func.call",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "simple_not_reusable_vf",
+    "location": "loc(\"<stdin>\":35:10)",
+    "op": "vector.transfer_read",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "simple_not_reusable_vf",
+    "location": "loc(\"<stdin>\":36:10)",
+    "op": "vector.transfer_read",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "simple_not_reusable_vf",
+    "location": "loc(\"<stdin>\":37:10)",
+    "op": "arith.mulf",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "simple_not_reusable_vf",
+    "location": "loc(\"<stdin>\":38:5)",
+    "op": "vector.transfer_write",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "can_inplace_reuse_when_not_reach_load_or_store_0",
+    "location": "loc(\"<stdin>\":51:5)",
+    "op": "func.call",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "can_inplace_reuse_when_not_reach_load_or_store_0",
+    "location": "loc(\"<stdin>\":55:5)",
+    "op": "func.call",
+    "reason": "missing Core interpretation"
+  }
+]

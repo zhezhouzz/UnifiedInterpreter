@@ -1,0 +1,21 @@
+{
+  "id": "repair-regression/mr-3168",
+  "tier": "L3",
+  "category": "repair-regression",
+  "source_ref": "https://gitcode.com/Ascend/AscendNPU-IR/blob/77a30b899397ccd16feae730f7fc748f33fab4b8/bishengir/test/Dialect/HIVM/Regbase/inline-fixpipe.mlir",
+  "chip_profile": "Ascend950PR_9579",
+  "core_ratio": null,
+  "compile_argv": [
+    "bishengir-opt",
+    "-hivm-insert-fixpipe",
+    "-hivm-inline-fixpipe"
+  ],
+  "entry_functions": [
+    "test_nd_c_nz2nd_fixpipe_fallback"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "split_index": 4,
+  "upstream_path": "bishengir/test/Dialect/HIVM/Regbase/inline-fixpipe.mlir"
+}

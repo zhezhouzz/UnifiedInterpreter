@@ -1,0 +1,1968 @@
+diff --git a/bishengir/include/bishengir/Dialect/HFusion/Transforms/DecomposeAtomicSync.h b/bishengir/include/bishengir/Dialect/HFusion/Transforms/DecomposeAtomicSync.h
+new file mode 100644
+index 000000000..5d496aee5
+--- /dev/null
++++ b/bishengir/include/bishengir/Dialect/HFusion/Transforms/DecomposeAtomicSync.h
+@@ -0,0 +1,28 @@
++//===- DecomposeAtomicSync.h -----------------------------------*- C++ -*-===//
++//
++// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//    http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++//===----------------------------------------------------------------------===//
++
++#pragma once
++
++#include "mlir/IR/PatternMatch.h"
++
++namespace mlir {
++class RewritePatternSet;
++
++namespace hfusion {
++void populateHFusionDecomposeAtomicSyncPatterns(RewritePatternSet &patterns);
++} // namespace hfusion
++} // namespace mlir
+diff --git a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMAttrs.td b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMAttrs.td
+index 4d27df202..0dc382a0c 100644
+--- a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMAttrs.td
++++ b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMAttrs.td
+@@ -1360,12 +1360,39 @@ def HIVM_SyncBlockLockWithSubblockAttr
+   }];
+ }
+ 
++// Legacy unordered marker used by older Triton / AscendNPU-IR producers.
++// Prefer `$ordering = #hivm.ordering<unordered>` on lock/unlock/free. Keep this
++// AttrDef so dumps with `{hivm.sync_block_lock_unordered}` remain parseable and
++// are treated as unordered until upstream users migrate.
+ def HIVM_SyncBlockLockUnorderedAttr
+     : HIVM_Attr<"SyncBlockLockUnordered", "sync_block_lock_unordered"> {
+   let description = [{
+-    Marks create_sync_block_lock / sync_block_lock / sync_block_unlock /
+-    free_lock_var ops that should use the unordered (Lamport bakery,
+-    arrival-order) lock instead of the ordered token ring.
++    Legacy unit attribute meaning unordered (Lamport bakery) sync block lock.
++    Equivalent to `$ordering = #hivm.ordering<unordered>`. Recognized on
++    create_sync_block_lock, sync_block_lock, sync_block_unlock, and
++    free_lock_var for compatibility; new code should set the native ordering
++    enum instead.
++  }];
++}
++
++def HIVM_SyncBlockLockOrdering_Ordered
++    : I32EnumAttrCase<"Ordered", 0, "ordered">;
++def HIVM_SyncBlockLockOrdering_Unordered
++    : I32EnumAttrCase<"Unordered", 1, "unordered">;
++
++def HIVM_SyncBlockLockOrderingEnum : HIVM_I32Enum<
++  "SyncBlockLockOrdering", "Ordering for sync block lock operations", [
++    HIVM_SyncBlockLockOrdering_Ordered,
++    HIVM_SyncBlockLockOrdering_Unordered,
++  ]>;
++
++def HIVM_SyncBlockLockOrderingAttr
++    : HIVM_I32EnumAttr<"ordering", HIVM_SyncBlockLockOrderingEnum> {
++  let description = [{
++    Selects ordered token-ring vs unordered (Lamport bakery) sync block lock.
++    Set on sync_block_lock, sync_block_unlock, and free_lock_var (default
++    ordered). Legacy IR may instead use unit attr
++    `hivm.sync_block_lock_unordered`; helpers treat that as unordered.
+   }];
+ }
+ 
+diff --git a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMSynchronizationOps.td b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMSynchronizationOps.td
+index 92fdc7c53..bf4b28785 100644
+--- a/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMSynchronizationOps.td
++++ b/bishengir/include/bishengir/Dialect/HIVM/IR/HIVMSynchronizationOps.td
+@@ -230,7 +230,9 @@ def SyncBlockLockOp
+       hivm.hir.sync_block_lock lock_var(%lock : memref<1xi64>)
+     ```
+   }];
+-  let arguments = (ins MemRefRankOf<[I64], [1]>:$lock_var);
++  let arguments = (ins MemRefRankOf<[I64], [1]>:$lock_var,
++                       DefaultValuedAttr<HIVM_SyncBlockLockOrderingAttr,
++                                         "SyncBlockLockOrdering::Ordered">:$ordering);
+ 
+   let assemblyFormat = [{
+     attr-dict `lock_var` `(` $lock_var `:` type($lock_var) `)`
+@@ -252,7 +254,9 @@ def SyncBlockUnlockOp
+       hivm.hir.sync_block_unlock lock_var(%lock : memref<1xi64>)
+     ```
+   }];
+-  let arguments = (ins MemRefRankOf<[I64], [1]>:$lock_var);
++  let arguments = (ins MemRefRankOf<[I64], [1]>:$lock_var,
++                       DefaultValuedAttr<HIVM_SyncBlockLockOrderingAttr,
++                                         "SyncBlockLockOrdering::Ordered">:$ordering);
+ 
+   let assemblyFormat = [{
+     attr-dict `lock_var` `(` $lock_var `:` type($lock_var) `)`
+@@ -278,7 +282,9 @@ def FreeLockVarOp
+       hivm.hir.free_lock_var lock_var(%lock : memref<1xi64>)
+     ```
+   }];
+-  let arguments = (ins MemRefRankOf<[I64], [1]>:$lock_var);
++  let arguments = (ins MemRefRankOf<[I64], [1]>:$lock_var,
++                       DefaultValuedAttr<HIVM_SyncBlockLockOrderingAttr,
++                                         "SyncBlockLockOrdering::Ordered">:$ordering);
+ 
+   let assemblyFormat = [{
+     attr-dict `lock_var` `(` $lock_var `:` type($lock_var) `)`
+diff --git a/bishengir/include/bishengir/Dialect/HIVM/Utils/Utils.h b/bishengir/include/bishengir/Dialect/HIVM/Utils/Utils.h
+index d4f5c9117..da1ccc8c5 100644
+--- a/bishengir/include/bishengir/Dialect/HIVM/Utils/Utils.h
++++ b/bishengir/include/bishengir/Dialect/HIVM/Utils/Utils.h
+@@ -429,6 +429,24 @@ Value getLocalWorkSpaceTensor(
+ hivm::CreateSyncBlockLockOp createSyncBlockLockVar(OpBuilder &builder,
+                                                    Location loc);
+ 
++hivm::SyncBlockLockOp
++createSyncBlockLock(OpBuilder &builder, Location loc, Value lockVar,
++                    hivm::SyncBlockLockOrdering ordering =
++                        hivm::SyncBlockLockOrdering::Ordered);
++
++hivm::SyncBlockUnlockOp
++createSyncBlockUnlock(OpBuilder &builder, Location loc, Value lockVar,
++                      hivm::SyncBlockLockOrdering ordering =
++                          hivm::SyncBlockLockOrdering::Ordered);
++
++/// Resolve ordering on a lock/unlock/free (or create) op.
++/// Recognizes native `$ordering` and legacy unit attr
++/// `hivm.sync_block_lock_unordered`.
++hivm::SyncBlockLockOrdering getSyncBlockLockOpOrdering(Operation *op);
++
++// Resolve sync block lock ordering from lock/unlock/free users of lock memref,
++// falling back to a legacy unordered marker on create_sync_block_lock.
++hivm::SyncBlockLockOrdering getSyncBlockLockOrdering(Value lockVar);
+ 
+ /// get Operation alias pair.
+ std::vector<std::pair<Value, Value>> getOperationAliasInfo(Operation *op);
+diff --git a/bishengir/include/bishengir/Dialect/Triton/Pipelines/Passes.h b/bishengir/include/bishengir/Dialect/Triton/Pipelines/Passes.h
+index 94f767ff9..f221ee17e 100644
+--- a/bishengir/include/bishengir/Dialect/Triton/Pipelines/Passes.h
++++ b/bishengir/include/bishengir/Dialect/Triton/Pipelines/Passes.h
+@@ -50,7 +50,7 @@ struct LowerTritonPipelineOptions
+       llvm::cl::desc("disable reorder instruction"), llvm::cl::init(false)};
+   PassOptions::Option<bool> disableSliceOptimizations{
+       *this, "disable-slice-optimizations",
+-      llvm::cl::desc("disable RewriteSliceOpToMemoryOps pass"), 
++      llvm::cl::desc("disable RewriteSliceOpToMemoryOps pass"),
+       llvm::cl::init(false)};
+   PassOptions::Option<bool> enableSinkDPXLoad{
+       *this, "enable-sink-dpx-load",
+diff --git a/bishengir/include/bishengir/Dialect/Triton/Transforms/Passes.td b/bishengir/include/bishengir/Dialect/Triton/Transforms/Passes.td
+index 4fdd51761..662823886 100644
+--- a/bishengir/include/bishengir/Dialect/Triton/Transforms/Passes.td
++++ b/bishengir/include/bishengir/Dialect/Triton/Transforms/Passes.td
+@@ -307,7 +307,7 @@ def FixFusedCat: Pass<"fix-fused-cat", "mlir::ModuleOp"> {
+                             "mlir::triton::TritonDialect"];
+ }
+ 
+-def RewriteSliceOpToMemoryOps 
++def RewriteSliceOpToMemoryOps
+     : Pass<"rewrite-slice-op-to-memory-ops", "mlir::ModuleOp"> {
+   let summary = "";
+   let constructor = "bishengir::triton::createRewriteSliceOpToMemoryOpsPass()";
+@@ -405,7 +405,7 @@ def LowerRemainingTensorDialect
+     : Pass<"lower-remaining-tensor-dialect", "mlir::ModuleOp"> {
+   let summary = "Lower leftover tensor dialect ops";
+   let description = [{
+-    Lowers remaining tensor dialect ops if possible. 
++    Lowers remaining tensor dialect ops if possible.
+     Otherwise signals a pass failure.
+   }];
+   let constructor = "bishengir::triton::createLowerRemainingTensorDialectPass()";
+diff --git a/bishengir/include/bishengir/Transforms/regbase/Normalize/NormalizeAtomicTemplate.h b/bishengir/include/bishengir/Transforms/regbase/Normalize/NormalizeAtomicTemplate.h
+index c6e647715..9bd984016 100644
+--- a/bishengir/include/bishengir/Transforms/regbase/Normalize/NormalizeAtomicTemplate.h
++++ b/bishengir/include/bishengir/Transforms/regbase/Normalize/NormalizeAtomicTemplate.h
+@@ -19,6 +19,7 @@
+ #define BISHENGIR_TRANSFORMS_REGBASE_NORMALIZE_NORMALIZEATOMICTEMPLATE_H
+ 
+ #include "bishengir/Dialect/HIVM/IR/HIVM.h"
++#include "bishengir/Dialect/HIVM/Utils/Utils.h"
+ #include "bishengir/Dialect/Scope/IR/Scope.h"
+ #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+ #include "mlir/Dialect/MemRef/IR/MemRef.h"
+@@ -32,8 +33,6 @@
+ 
+ namespace mlir {
+ 
+-/// Keeps the decomposed atomic read-modify-write serialized:
+-///   lock(); old = GM; new = f(old, UB); GM = new; unlock().
+ struct SyncBlockLockGuard {
+   hivm::CreateSyncBlockLockOp createdLock;
+   OpBuilder &builder;
+@@ -41,18 +40,20 @@ struct SyncBlockLockGuard {
+ 
+   SyncBlockLockGuard(OpBuilder &builder, Location loc)
+       : builder(builder), guard(builder) {
+-    Type memrefi64 = MemRefType::get({1}, builder.getI64Type());
+-    createdLock =
+-        builder.create<hivm::CreateSyncBlockLockOp>(loc, memrefi64, Value());
+-    builder.create<hivm::SyncBlockLockOp>(loc, createdLock.getResult());
++    createdLock = hivm::createSyncBlockLockVar(builder, loc);
++    hivm::createSyncBlockLock(builder, loc, createdLock.getResult(),
++                              hivm::SyncBlockLockOrdering::Unordered);
+   }
+ 
+   ~SyncBlockLockGuard() {
+-    builder.create<hivm::SyncBlockUnlockOp>(createdLock.getLoc(), createdLock);
++    hivm::createSyncBlockUnlock(builder, createdLock.getLoc(),
++                                createdLock.getResult(),
++                                hivm::SyncBlockLockOrdering::Unordered);
+   }
+ };
+ 
+-/// Static backing allocation for a GM destination that may be a dynamic subview.
++/// Static backing allocation for a GM destination that may be a dynamic
++/// subview.
+ ///
+ /// `sBuffer` is used for tensor conversion, while `dBuffer` has the same
+ /// logical shape as the original GM memref:
+@@ -115,16 +116,16 @@ struct StaticSizedBuffer {
+   /// Tensor view of the full static staging allocation.
+   TypedValue<TensorType> toStaticTensor() {
+     return builder
+-        .create<bufferization::ToTensorOp>(
+-            loc, sBuffer, /*restrict=*/true, /*writable=*/true)
++        .create<bufferization::ToTensorOp>(loc, sBuffer, /*restrict=*/true,
++                                           /*writable=*/true)
+         .getResult();
+   }
+ 
+   /// Tensor view matching the GM destination shape (`ins` == `outs`).
+   TypedValue<TensorType> toLogicalTensor() {
+     return builder
+-        .create<bufferization::ToTensorOp>(
+-            loc, dBuffer, /*restrict=*/true, /*writable=*/true)
++        .create<bufferization::ToTensorOp>(loc, dBuffer, /*restrict=*/true,
++                                           /*writable=*/true)
+         .getResult();
+   }
+ 
+@@ -268,27 +269,36 @@ struct NormalizeAtomicStoreElemwise : public OpRewritePattern<StoreOpTy> {
+       return rewriter.notifyMatchFailure(
+           op, "expected dynamic GM memref to be a static subview");
+ 
+-    // The staged UB value is immutable; only the GM read-modify-write needs the
+-    // critical section.
+-    SyncBlockLockGuard lock(rewriter, loc);
+-    rewriter.create<memref::CopyOp>(loc, gmMemref, lhsBuffer.dBuffer);
+-    Value lhsTensor =
+-        castAtomicOpToF32IfFp8<Traits>(rewriter, loc, lhsBuffer.toStaticTensor(),
+-                             gmMemref.getType(), /*isForward=*/true);
+-    Value binOpResultBuffer = rewriter.create<tensor::EmptyOp>(
+-        loc, lhsTensor.getType(), ValueRange({}));
+-    FailureOr<Value> maybeResult = Traits::createStoreBinary(
+-        rewriter, loc, op, lhsTensor, rhsTensor, binOpResultBuffer);
+-    if (failed(maybeResult))
+-      return failure();
+-
+-    Value result = castAtomicOpToF32IfFp8<Traits>(rewriter, loc, *maybeResult,
+-                                        gmMemref.getType(),
+-                                        /*isForward=*/false);
+-    auto resultTensor = dyn_cast<TypedValue<TensorType>>(result);
+-    if (!resultTensor)
+-      return rewriter.notifyMatchFailure(op, "expected tensor result");
+-    lhsBuffer.storeBack(resultTensor);
++    auto readModifyWrite = [&]() {
++      rewriter.create<memref::CopyOp>(loc, gmMemref, lhsBuffer.dBuffer);
++      Value lhsTensor = castAtomicOpToF32IfFp8<Traits>(
++          rewriter, loc, lhsBuffer.toStaticTensor(), gmMemref.getType(),
++          /*isForward=*/true);
++      Value binOpResultBuffer = rewriter.create<tensor::EmptyOp>(
++          loc, lhsTensor.getType(), ValueRange({}));
++      FailureOr<Value> maybeResult = Traits::createStoreBinary(
++          rewriter, loc, op, lhsTensor, rhsTensor, binOpResultBuffer);
++      if (failed(maybeResult))
++        return failure();
++      Value result = castAtomicOpToF32IfFp8<Traits>(rewriter, loc, *maybeResult,
++                                                    gmMemref.getType(),
++                                                    /*isForward=*/false);
++      auto resultTensor = dyn_cast<TypedValue<TensorType>>(result);
++      if (!resultTensor)
++        return rewriter.notifyMatchFailure(op, "expected tensor result");
++      lhsBuffer.storeBack(resultTensor);
++      return success();
++    };
++
++    static constexpr llvm::StringLiteral kAlreadySync = "already_sync";
++    if (op->hasAttr(kAlreadySync)) {
++      if (failed(readModifyWrite()))
++        return failure();
++    } else {
++      SyncBlockLockGuard lock(rewriter, loc);
++      if (failed(readModifyWrite()))
++        return failure();
++    }
+     rewriter.eraseOp(op);
+     eraseToMemrefIfUnused(ubInput, rewriter);
+     return success();
+@@ -330,28 +340,42 @@ struct NormalizeAtomicCASTemplate : public OpRewritePattern<AtomicCasOpTy> {
+     FailureOr<TypedValue<TensorType>> maybeStoringTensor =
+         storingBuffer.stageInput(resolveAtomicInput(srcOperands[1]));
+     if (failed(maybeComparingTensor) || failed(maybeStoringTensor))
+-      return rewriter.notifyMatchFailure(op,
+-                                         "expected memref or tensor CAS inputs");
+-
+-    SyncBlockLockGuard lock(rewriter, loc);
+-    rewriter.create<memref::CopyOp>(loc, gmMemref, gmValBuffer.dBuffer);
+-    const TypedValue<TensorType> gmValTensor = gmValBuffer.toStaticTensor();
+-
+-    Value cmpResult = Traits::createCmpOp(
+-        rewriter, loc,
+-        castAtomicOpToF32IfFp8<Traits>(rewriter, loc, gmValTensor, gmValTensor.getType(),
+-                             /*isForward=*/true),
+-        castAtomicOpToF32IfFp8<Traits>(rewriter, loc, *maybeComparingTensor,
+-                             gmValTensor.getType(), /*isForward=*/true),
+-        CompareKind::EQ);
+-    Value selectedResult =
+-        Traits::createSelectOp(rewriter, loc, cmpResult, *maybeStoringTensor,
+-                               gmValTensor, gmValTensor);
+-    auto selectedResultTensor =
+-        dyn_cast<TypedValue<TensorType>>(selectedResult);
+-    if (!selectedResultTensor)
+-      return rewriter.notifyMatchFailure(op, "expected tensor select result");
+-    gmValBuffer.storeBack(selectedResultTensor);
++      return rewriter.notifyMatchFailure(
++          op, "expected memref or tensor CAS inputs");
++
++    auto compareAndSwap = [&]() {
++      rewriter.create<memref::CopyOp>(loc, gmMemref, gmValBuffer.dBuffer);
++      const TypedValue<TensorType> gmValTensor = gmValBuffer.toStaticTensor();
++
++      Value cmpResult = Traits::createCmpOp(
++          rewriter, loc,
++          castAtomicOpToF32IfFp8<Traits>(rewriter, loc, gmValTensor,
++                                         gmValTensor.getType(),
++                                         /*isForward=*/true),
++          castAtomicOpToF32IfFp8<Traits>(rewriter, loc, *maybeComparingTensor,
++                                         gmValTensor.getType(),
++                                         /*isForward=*/true),
++          CompareKind::EQ);
++      Value selectedResult =
++          Traits::createSelectOp(rewriter, loc, cmpResult, *maybeStoringTensor,
++                                 gmValTensor, gmValTensor);
++      auto selectedResultTensor =
++          dyn_cast<TypedValue<TensorType>>(selectedResult);
++      if (!selectedResultTensor)
++        return rewriter.notifyMatchFailure(op, "expected tensor select result");
++      gmValBuffer.storeBack(selectedResultTensor);
++      return success();
++    };
++
++    static constexpr llvm::StringLiteral kAlreadySync = "already_sync";
++    if (op->hasAttr(kAlreadySync)) {
++      if (failed(compareAndSwap()))
++        return failure();
++    } else {
++      SyncBlockLockGuard lock(rewriter, loc);
++      if (failed(compareAndSwap()))
++        return failure();
++    }
+     rewriter.eraseOp(op);
+     eraseToMemrefIfUnused(srcOperands[0], rewriter);
+     eraseToMemrefIfUnused(srcOperands[1], rewriter);
+@@ -393,13 +417,12 @@ struct NormalizeAtomicXCHGTemplate : public OpRewritePattern<AtomicXchgOpTy> {
+       scopeOp = rewriter.create<scope::ScopeOp>(loc, op->getResultTypes());
+     else
+       scopeOp = rewriter.create<scope::ScopeOp>(loc, TypeRange{});
+-    scopeOp->setAttr(
+-        hivm::TCoreTypeAttr::name,
+-        hivm::TCoreTypeAttr::get(rewriter.getContext(), hivm::TCoreType::VECTOR));
++    scopeOp->setAttr(hivm::TCoreTypeAttr::name,
++                     hivm::TCoreTypeAttr::get(rewriter.getContext(),
++                                              hivm::TCoreType::VECTOR));
+     // Allow FlattenOps/PropagateReshape to run despite skip-scope: collapsing
+     // multi-rank shapes in this critical section reduces padded UB usage.
+-    scopeOp->setAttr(hivm::AllowFlattenAttr::name,
+-                     rewriter.getUnitAttr());
++    scopeOp->setAttr(hivm::AllowFlattenAttr::name, rewriter.getUnitAttr());
+     rewriter.createBlock(&scopeOp.getRegion());
+     OpBuilder::InsertionGuard scopeGuard(rewriter);
+     rewriter.setInsertionPointToStart(scopeOp.getBody());
+@@ -410,18 +433,16 @@ struct NormalizeAtomicXCHGTemplate : public OpRewritePattern<AtomicXchgOpTy> {
+       return rewriter.notifyMatchFailure(
+           op, "expected dynamic GM memref to be a static subview");
+ 
+-    Type memrefI64 = MemRefType::get({1}, rewriter.getI64Type());
+-    auto createdLock =
+-        rewriter.create<hivm::CreateSyncBlockLockOp>(loc, memrefI64, Value());
+-    rewriter.create<hivm::SyncBlockLockOp>(loc, createdLock.getResult());
+-    rewriter.create<memref::CopyOp>(loc, gmMemref, tmpBuffer.dBuffer);
+-    if (ubMemref) {
+-      rewriter.create<memref::CopyOp>(loc, ubMemref, gmMemref);
+-      rewriter.create<memref::CopyOp>(loc, tmpBuffer.dBuffer, ubMemref);
+-    } else {
+-      gmBuffer.storeBack(ubTensor);
++    {
++      SyncBlockLockGuard lock(rewriter, loc);
++      rewriter.create<memref::CopyOp>(loc, gmMemref, tmpBuffer.dBuffer);
++      if (ubMemref) {
++        rewriter.create<memref::CopyOp>(loc, ubMemref, gmMemref);
++        rewriter.create<memref::CopyOp>(loc, tmpBuffer.dBuffer, ubMemref);
++      } else {
++        gmBuffer.storeBack(ubTensor);
++      }
+     }
+-    rewriter.create<hivm::SyncBlockUnlockOp>(loc, createdLock);
+     if (hasReturn)
+       rewriter.create<scope::ReturnOp>(loc, tmpBuffer.toLogicalTensor());
+     else
+diff --git a/bishengir/lib/Conversion/HIVMToStandard/HIVMToStandard.cpp b/bishengir/lib/Conversion/HIVMToStandard/HIVMToStandard.cpp
+index 5892d0634..af8ccfb2c 100644
+--- a/bishengir/lib/Conversion/HIVMToStandard/HIVMToStandard.cpp
++++ b/bishengir/lib/Conversion/HIVMToStandard/HIVMToStandard.cpp
+@@ -1896,12 +1896,10 @@ public:
+                                 PatternRewriter &rewriter) const final {
+     ModuleOp mod = op->template getParentOfType<ModuleOp>();
+     std::string libCallName = op.getOpName().str();
+-    if (op->hasAttr(SyncBlockLockUnorderedAttr::name)) {
++    if (getSyncBlockLockOpOrdering(op) == SyncBlockLockOrdering::Unordered)
+       libCallName += "_unordered";
+-    }
+-    if (op->hasAttr(SyncBlockLockWithSubblockAttr::name)) {
++    if (op->hasAttr(SyncBlockLockWithSubblockAttr::name))
+       libCallName += "_with_subblock";
+-    }
+     createLibCall(rewriter, op, mod, libCallName, op->getOperands(), {});
+     rewriter.eraseOp(op);
+     return success();
+diff --git a/bishengir/lib/Conversion/HIVMToStandard/regbase/HIVMToStandard.cpp b/bishengir/lib/Conversion/HIVMToStandard/regbase/HIVMToStandard.cpp
+index 76918210b..48aaa1a53 100644
+--- a/bishengir/lib/Conversion/HIVMToStandard/regbase/HIVMToStandard.cpp
++++ b/bishengir/lib/Conversion/HIVMToStandard/regbase/HIVMToStandard.cpp
+@@ -2132,12 +2132,10 @@ public:
+                                 PatternRewriter &rewriter) const final {
+     ModuleOp mod = op->template getParentOfType<ModuleOp>();
+     std::string libCallName = op.getOpName().str();
+-    if (op->hasAttr(SyncBlockLockUnorderedAttr::name)) {
++    if (getSyncBlockLockOpOrdering(op) == SyncBlockLockOrdering::Unordered)
+       libCallName += "_unordered";
+-    }
+-    if (op->hasAttr(SyncBlockLockWithSubblockAttr::name)) {
++    if (op->hasAttr(SyncBlockLockWithSubblockAttr::name))
+       libCallName += "_with_subblock";
+-    }
+     createLibCall(rewriter, op, mod, libCallName, op->getOperands(), {});
+     rewriter.eraseOp(op);
+     return success();
+diff --git a/bishengir/lib/Dialect/HFusion/Transforms/CMakeLists.txt b/bishengir/lib/Dialect/HFusion/Transforms/CMakeLists.txt
+index df2f91779..52f79d579 100644
+--- a/bishengir/lib/Dialect/HFusion/Transforms/CMakeLists.txt
++++ b/bishengir/lib/Dialect/HFusion/Transforms/CMakeLists.txt
+@@ -27,6 +27,7 @@ add_bishengir_dialect_library(BiShengIRHFusionTransforms
+   ConstantizeTilingData.cpp
+   ConvertGenericToNamedOp.cpp
+   Decompose.cpp
++  DecomposeAtomicSync.cpp
+   DecomposeOpInterfaceImpl.cpp
+   DecomposeMulti.cpp
+   DropSymbols.cpp
+diff --git a/bishengir/lib/Dialect/HFusion/Transforms/Decompose.cpp b/bishengir/lib/Dialect/HFusion/Transforms/Decompose.cpp
+index 67c980845..c78f30f94 100644
+--- a/bishengir/lib/Dialect/HFusion/Transforms/Decompose.cpp
++++ b/bishengir/lib/Dialect/HFusion/Transforms/Decompose.cpp
+@@ -16,6 +16,7 @@
+ //===---------------------------------------------------------------------===//
+ 
+ #include "bishengir/Dialect/HFusion/IR/HFusion.h"
++#include "bishengir/Dialect/HFusion/Transforms/DecomposeAtomicSync.h"
+ #include "bishengir/Dialect/HFusion/Transforms/Passes.h"
+ #include "bishengir/Dialect/HFusion/Utils/Utils.h"
+ #include "bishengir/Interfaces/AggregatedOpInterface.h"
+@@ -89,6 +90,7 @@ void DecomposePass::runOnOperation() {
+   auto *ctx = &getContext();
+   RewritePatternSet patterns(ctx);
+   patterns.add<HFusionDecomposePattern>(ctx, hfusionDecomposePhase);
++  populateHFusionDecomposeAtomicSyncPatterns(patterns);
+   if (failed(applyPatternsGreedily(funcOp, std::move(patterns)))) {
+     signalPassFailure();
+   }
+diff --git a/bishengir/lib/Dialect/HFusion/Transforms/DecomposeAtomicSync.cpp b/bishengir/lib/Dialect/HFusion/Transforms/DecomposeAtomicSync.cpp
+new file mode 100644
+index 000000000..8fcd623d1
+--- /dev/null
++++ b/bishengir/lib/Dialect/HFusion/Transforms/DecomposeAtomicSync.cpp
+@@ -0,0 +1,168 @@
++//===- DecomposeAtomicSync.cpp ---------------------------------*- C++ -*-===//
++//
++// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//    http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++//===----------------------------------------------------------------------===//
++
++#include "bishengir/Dialect/HFusion/Transforms/DecomposeAtomicSync.h"
++
++#include "bishengir/Dialect/HACC/Utils/Utils.h"
++#include "bishengir/Dialect/HFusion/IR/HFusion.h"
++#include "bishengir/Dialect/HIVM/IR/HIVM.h"
++#include "bishengir/Dialect/HIVM/Utils/Utils.h"
++
++#include "mlir/Dialect/Linalg/IR/Linalg.h"
++#include "mlir/Dialect/MemRef/IR/MemRef.h"
++#include "mlir/IR/PatternMatch.h"
++
++using namespace mlir;
++using namespace mlir::hfusion;
++
++namespace {
++
++static constexpr llvm::StringLiteral kAlreadySync = "already_sync";
++
++static Value getSnapshotBuffer(Operation *snapshotOp) {
++  if (auto copyOp = dyn_cast<memref::CopyOp>(snapshotOp))
++    return copyOp.getTarget();
++  if (auto loadOp = dyn_cast<hivm::LoadOp>(snapshotOp))
++    return loadOp.getDst();
++  return nullptr;
++}
++
++static bool snapshotHasReturnedValueUsers(Operation *snapshotOp) {
++  Value buffer = getSnapshotBuffer(snapshotOp);
++  if (!buffer)
++    return false;
++  return llvm::range_size(buffer.getUsers()) > 1;
++}
++
++static Operation *findReturnedValueSnapshotOp(Operation *atomicOp,
++                                              Value gmTarget) {
++  Operation *op = atomicOp->getPrevNode();
++  while (op) {
++    if (auto copyOp = dyn_cast<memref::CopyOp>(op)) {
++      if (copyOp.getSource() == gmTarget)
++        return copyOp;
++    }
++    if (auto loadOp = dyn_cast<hivm::LoadOp>(op)) {
++      if (loadOp.getSrc() == gmTarget)
++        return loadOp;
++    }
++    op = op->getPrevNode();
++  }
++  return nullptr;
++}
++
++static LogicalResult addSyncForReturnedValue(Operation *atomicOp,
++                                             Operation *syncStartOp,
++                                             PatternRewriter &rewriter) {
++  if (atomicOp->hasAttr(kAlreadySync))
++    return failure();
++
++  Location loc = atomicOp->getLoc();
++
++  PatternRewriter::InsertionGuard guard(rewriter);
++  rewriter.setInsertionPoint(syncStartOp);
++  auto lockVar = hivm::createSyncBlockLockVar(rewriter, loc);
++  rewriter.create<hivm::SyncBlockLockOp>(loc, lockVar.getResult());
++  rewriter.setInsertionPointAfter(atomicOp);
++  rewriter.create<hivm::SyncBlockUnlockOp>(loc, lockVar.getResult());
++  atomicOp->setAttr(kAlreadySync, UnitAttr::get(atomicOp->getContext()));
++  return success();
++}
++
++struct HFusionAtomicStoreReturnedValueSyncPattern
++    : public OpRewritePattern<hfusion::StoreOp> {
++  using OpRewritePattern::OpRewritePattern;
++
++  LogicalResult matchAndRewrite(hfusion::StoreOp op,
++                                PatternRewriter &rewriter) const override {
++    ModuleOp module = op->getParentOfType<ModuleOp>();
++    if (!module || !hacc::utils::isRegBasedArch(module))
++      return failure();
++
++    AtomicKind kind = op.getAtomicKind();
++    if (kind != AtomicKind::ADD && kind != AtomicKind::MAX &&
++        kind != AtomicKind::MIN)
++      return failure();
++
++    if (op.getDpsInits().empty())
++      return failure();
++    Value gmDst = op.getDpsInits().front();
++    Operation *snapshotOp = findReturnedValueSnapshotOp(op, gmDst);
++    if (!snapshotOp || !snapshotHasReturnedValueUsers(snapshotOp))
++      return failure();
++
++    return addSyncForReturnedValue(op, snapshotOp, rewriter);
++  }
++};
++
++struct HFusionAtomicCasReturnedValueSyncPattern
++    : public OpRewritePattern<hfusion::AtomicCasOp> {
++  using OpRewritePattern::OpRewritePattern;
++
++  LogicalResult matchAndRewrite(hfusion::AtomicCasOp op,
++                                PatternRewriter &rewriter) const override {
++    ModuleOp module = op->getParentOfType<ModuleOp>();
++    if (!module || !hacc::utils::isRegBasedArch(module))
++      return failure();
++
++    Operation *syncStartOp = op;
++    if (op->getNumResults() == 0) {
++      Value gmDst = op.getDst();
++      Operation *snapshotOp = findReturnedValueSnapshotOp(op, gmDst);
++      if (!snapshotOp || !snapshotHasReturnedValueUsers(snapshotOp))
++        return failure();
++      syncStartOp = snapshotOp;
++    }
++
++    return addSyncForReturnedValue(op, syncStartOp, rewriter);
++  }
++};
++
++struct LinalgAtomicCasReturnedValueSyncPattern
++    : public OpRewritePattern<linalg::GenericOp> {
++  using OpRewritePattern::OpRewritePattern;
++
++  LogicalResult matchAndRewrite(linalg::GenericOp op,
++                                PatternRewriter &rewriter) const override {
++    ModuleOp module = op->getParentOfType<ModuleOp>();
++    if (!module || !hacc::utils::isRegBasedArch(module))
++      return failure();
++
++    auto atomicAttr = op->getAttrOfType<StringAttr>("GenericAtomicRMW");
++    if (!atomicAttr || atomicAttr.getValue() != "cas")
++      return failure();
++
++    if (op.getNumDpsInputs() < 1)
++      return failure();
++    Value gmDst = op.getDpsInputs()[0];
++    Operation *snapshotOp = findReturnedValueSnapshotOp(op, gmDst);
++    if (!snapshotOp || !snapshotHasReturnedValueUsers(snapshotOp))
++      return failure();
++
++    return addSyncForReturnedValue(op, snapshotOp, rewriter);
++  }
++};
++
++} // namespace
++
++void mlir::hfusion::populateHFusionDecomposeAtomicSyncPatterns(
++    RewritePatternSet &patterns) {
++  MLIRContext *ctx = patterns.getContext();
++  patterns.add<HFusionAtomicStoreReturnedValueSyncPattern,
++               HFusionAtomicCasReturnedValueSyncPattern,
++               LinalgAtomicCasReturnedValueSyncPattern>(ctx);
++}
+diff --git a/bishengir/lib/Dialect/HFusion/Transforms/regbase/Normalize/NormalizeAtomic.cpp b/bishengir/lib/Dialect/HFusion/Transforms/regbase/Normalize/NormalizeAtomic.cpp
+index 1e7106c85..52fb4d5b8 100644
+--- a/bishengir/lib/Dialect/HFusion/Transforms/regbase/Normalize/NormalizeAtomic.cpp
++++ b/bishengir/lib/Dialect/HFusion/Transforms/regbase/Normalize/NormalizeAtomic.cpp
+@@ -15,6 +15,7 @@
+ //
+ //===----------------------------------------------------------------------===//
+ 
++#include "bishengir/Dialect/HFusion/Transforms/DecomposeAtomicSync.h"
+ #include "bishengir/Dialect/HFusion/Transforms/regbase/NormalizePatterns.h"
+ #include "bishengir/Dialect/HFusion/Transforms/regbase/NormalizeTraitsBase.h"
+ #include "bishengir/Dialect/HFusion/Transforms/regbase/NormalizeUtils.h"
+@@ -40,12 +41,10 @@ struct HFusionAtomicTraits : public NormalizeTraitsBase {
+   getStoreDecompositionBinaryKind(hfusion::StoreOp op) {
+     Type elemType = getElementTypeOrSelf(op.getOutputs()[0].getType());
+     AtomicKind atomicKind = op.getAtomicKind();
+-    if (auto kind =
+-            mapAlwaysSoftwareAtomicKindToBinary(atomicKind))
++    if (auto kind = mapAlwaysSoftwareAtomicKindToBinary(atomicKind))
+       return kind;
+     if (!isHardwareSupported(elemType))
+-      return mapNativeUnsupportedAtomicKindToBinary(
+-          atomicKind);
++      return mapNativeUnsupportedAtomicKindToBinary(atomicKind);
+     return std::nullopt;
+   }
+ 
+@@ -67,14 +66,16 @@ struct HFusionAtomicTraits : public NormalizeTraitsBase {
+ 
+ using Elemwise =
+     NormalizeAtomicStoreElemwise<hfusion::StoreOp, HFusionAtomicTraits>;
+-using CAS = NormalizeAtomicCASTemplate<hfusion::AtomicCasOp, HFusionAtomicTraits>;
+-using XCHG = NormalizeAtomicXCHGTemplate<hfusion::AtomicXchgOp,
+-                                         HFusionAtomicTraits>;
++using CAS =
++    NormalizeAtomicCASTemplate<hfusion::AtomicCasOp, HFusionAtomicTraits>;
++using XCHG =
++    NormalizeAtomicXCHGTemplate<hfusion::AtomicXchgOp, HFusionAtomicTraits>;
+ } // namespace NormalizeAtomicOps
+ 
+ void populateNormalizeAtomicPatterns(RewritePatternSet &patterns) {
+   MLIRContext *ctx = patterns.getContext();
+   if (archisAscend950) {
++    populateHFusionDecomposeAtomicSyncPatterns(patterns);
+     patterns.add<NormalizeAtomicOps::Elemwise>(ctx);
+     patterns.add<NormalizeAtomicOps::CAS>(ctx);
+     patterns.add<NormalizeAtomicOps::XCHG>(ctx);
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/HIVMDecomposeOp.cpp b/bishengir/lib/Dialect/HIVM/Transforms/HIVMDecomposeOp.cpp
+index 83ac2f69b..2535d426d 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/HIVMDecomposeOp.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/HIVMDecomposeOp.cpp
+@@ -1349,6 +1349,31 @@ class DecomposeVDeinterleaveOp
+   }
+ };
+ 
++/// A3 keeps the ordered token-ring lock. A5/regbase still uses unordered bakery
++/// locks for leftover atomics that hivm-normalize-ops did not rewrite.
++static SyncBlockLockOrdering getAtomicSyncBlockLockOrdering(Value lockVar) {
++  Operation *defOp = lockVar.getDefiningOp();
++  ModuleOp module =
++      defOp ? defOp->getParentOfType<ModuleOp>()
++            : lockVar.getParentRegion()->getParentOfType<ModuleOp>();
++  if (module && hacc::utils::isRegBasedArch(module))
++    return SyncBlockLockOrdering::Unordered;
++  return SyncBlockLockOrdering::Ordered;
++}
++
++static SyncBlockLockOp createAtomicSyncBlockLock(PatternRewriter &rewriter,
++                                                 Location loc, Value lockVar) {
++  return createSyncBlockLock(rewriter, loc, lockVar,
++                             getAtomicSyncBlockLockOrdering(lockVar));
++}
++
++static SyncBlockUnlockOp createAtomicSyncBlockUnlock(PatternRewriter &rewriter,
++                                                     Location loc,
++                                                     Value lockVar) {
++  return createSyncBlockUnlock(rewriter, loc, lockVar,
++                               getAtomicSyncBlockLockOrdering(lockVar));
++}
++
+ class AtomicStoreOpLowering : public OpRewritePattern<hivm::StoreOp> {
+   using OpRewritePattern<hivm::StoreOp>::OpRewritePattern;
+   LogicalResult matchAndRewrite(hivm::StoreOp op,
+@@ -1417,7 +1442,8 @@ private:
+   }
+ 
+   LogicalResult addSyncForReturnedValue(hivm::StoreOp op,
+-                                        PatternRewriter &rewriter, Location loc) const {
++                                        PatternRewriter &rewriter,
++                                        Location loc) const {
+     static constexpr llvm::StringLiteral kAlreadySync =
+         "already_sync";
+     if (op->hasAttr(kAlreadySync)) {
+@@ -1427,9 +1453,9 @@ private:
+     PatternRewriter::InsertionGuard guard(rewriter);
+     rewriter.setInsertionPoint(returnedValueLoadOp);
+     auto lockVar = createSyncBlockLockVar(rewriter, op->getLoc());
+-    rewriter.create<hivm::SyncBlockLockOp>(loc, lockVar);
++    createAtomicSyncBlockLock(rewriter, loc, lockVar);
+     rewriter.setInsertionPointAfter(op);
+-    rewriter.create<hivm::SyncBlockUnlockOp>(loc, lockVar);
++    createAtomicSyncBlockUnlock(rewriter, loc, lockVar);
+     op->setAttr(kAlreadySync, UnitAttr::get(op->getContext()));
+     return success();
+   }
+@@ -1450,7 +1476,7 @@ private:
+     auto lockVar = createSyncBlockLockVar(rewriter, op->getLoc());
+ 
+     // 1. insert sync_block_lock
+-    rewriter.create<hivm::SyncBlockLockOp>(loc, lockVar);
++    createAtomicSyncBlockLock(rewriter, loc, lockVar);
+ 
+     // 2. create tmp memref alloc and load dst to tmp
+     auto src = op.getSrc();
+@@ -1497,7 +1523,7 @@ private:
+     rewriter.create<hivm::StoreOp>(loc, TypeRange{}, resUB, dst);
+ 
+     // 5. insert sync_block_unlock
+-    rewriter.create<hivm::SyncBlockUnlockOp>(loc, lockVar);
++    createAtomicSyncBlockUnlock(rewriter, loc, lockVar);
+ 
+     rewriter.eraseOp(op);
+     return success();
+@@ -1589,9 +1615,9 @@ private:
+   LogicalResult decomposeEltwiseAtomic(hivm::AtomicRMWOp op,
+                                        PatternRewriter &rewriter,
+                                        Location loc) const {
+-    auto lockVar = createSyncBlockLockVar(rewriter, op->getLoc());
+     // 1. insert sync_block_lock
+-    rewriter.create<hivm::SyncBlockLockOp>(loc, lockVar);
++    auto lockVar = createSyncBlockLockVar(rewriter, op->getLoc());
++    createAtomicSyncBlockLock(rewriter, loc, lockVar);
+ 
+     // 2. create tmp memref alloc and load dst to tmp
+     auto src = op.getSrc();
+@@ -1626,7 +1652,7 @@ private:
+     rewriter.create<hivm::StoreOp>(loc, TypeRange{}, resUB, dst);
+ 
+     // 5. insert sync_block_unlock
+-    rewriter.create<hivm::SyncBlockUnlockOp>(loc, lockVar);
++    createAtomicSyncBlockUnlock(rewriter, loc, lockVar);
+ 
+     rewriter.eraseOp(op);
+ 
+@@ -1652,7 +1678,7 @@ class AtomicCasOpLowering : public OpRewritePattern<hivm::AtomicCasOp> {
+     auto lockVar = createSyncBlockLockVar(rewriter, op->getLoc());
+ 
+     // insert sync_block_lock
+-    rewriter.create<hivm::SyncBlockLockOp>(loc, lockVar);
++    createAtomicSyncBlockLock(rewriter, loc, lockVar);
+ 
+     // step1: load old val in gm to ub
+     // create memref.alloc op
+@@ -1718,7 +1744,7 @@ class AtomicCasOpLowering : public OpRewritePattern<hivm::AtomicCasOp> {
+     // step3: store res_ub to dst
+     rewriter.create<hivm::StoreOp>(loc, TypeRange{}, resUB, dst);
+ 
+-    rewriter.create<hivm::SyncBlockUnlockOp>(loc, lockVar);
++    createAtomicSyncBlockUnlock(rewriter, loc, lockVar);
+     if (hasReturn) {
+       rewriter.replaceAllUsesWith(op.getResults()[0], tmpUB);
+     }
+@@ -1741,15 +1767,12 @@ class AtomicXchgOpLowering : public OpRewritePattern<hivm::AtomicXchgOp> {
+                                 PatternRewriter &rewriter) const override {
+     auto loc = op.getLoc();
+     auto lockVar = createSyncBlockLockVar(rewriter, op->getLoc());
++    createAtomicSyncBlockLock(rewriter, loc, lockVar);
+     auto src = op.getSrc();
+     auto dst = op.getDst();
+     auto mask = op.getMask();
+ 
+-    // insert sync_block_lock
+-    rewriter.create<hivm::SyncBlockLockOp>(loc, lockVar);
+-
+     // step1: load old val in dst gm to ub
+-
+     bool hasReturn = !op.getResults().empty();
+     auto tmpUB_dst = createTmpBufferOrTensorWithTargetType(
+         rewriter, loc, hasReturn ? op.getResults()[0] : src);
+@@ -1773,7 +1796,7 @@ class AtomicXchgOpLowering : public OpRewritePattern<hivm::AtomicXchgOp> {
+       rewriter.create<hivm::CopyOp>(loc, TypeRange{}, tmpUB_dst, src);
+     }
+ 
+-    rewriter.create<hivm::SyncBlockUnlockOp>(loc, lockVar);
++    createAtomicSyncBlockUnlock(rewriter, loc, lockVar);
+     if (hasReturn) {
+       rewriter.replaceAllUsesWith(op.getResults()[0], tmpUB_dst);
+     }
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/InsertFreeLockVarBeforeReturn.cpp b/bishengir/lib/Dialect/HIVM/Transforms/InsertFreeLockVarBeforeReturn.cpp
+index b6650d87f..a9d9e2a6f 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/InsertFreeLockVarBeforeReturn.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/InsertFreeLockVarBeforeReturn.cpp
+@@ -28,6 +28,7 @@
+ #include "bishengir/Dialect/HACC/Utils/Utils.h"
+ #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+ #include "bishengir/Dialect/HIVM/Transforms/Passes.h"
++#include "bishengir/Dialect/HIVM/Utils/Utils.h"
+ 
+ #include "mlir/Dialect/Func/IR/FuncOps.h"
+ #include "mlir/IR/Operation.h"
+@@ -53,7 +54,7 @@ namespace {
+ struct LockVarInfo {
+   Value lockVar;
+   bool withSubblock = false;
+-  bool unordered = false;
++  SyncBlockLockOrdering ordering = SyncBlockLockOrdering::Ordered;
+ };
+ 
+ void collectLockVarsAndReturnOps(func::FuncOp funcOp,
+@@ -66,12 +67,14 @@ void collectLockVarsAndReturnOps(func::FuncOp funcOp,
+ 
+   // assuming that each SyncBlockLock is paired with a SyncBlockUnlock on the
+   // same lock_var
+-  auto recordLockVar = [&](Value lockVar, bool withSubblock, bool unordered) {
++  auto recordLockVar = [&](Value lockVar, bool withSubblock,
++                           SyncBlockLockOrdering ordering) {
+     auto [it, inserted] =
+         lockVarToInfo.try_emplace(lockVar, LockVarInfo{lockVar});
+     (void)inserted;
+     it->second.withSubblock |= withSubblock;
+-    it->second.unordered |= unordered;
++    if (ordering == SyncBlockLockOrdering::Unordered)
++      it->second.ordering = SyncBlockLockOrdering::Unordered;
+   };
+ 
+   // Each SyncBlockLock is assumed paired with a SyncBlockUnlock on the same
+@@ -80,7 +83,7 @@ void collectLockVarsAndReturnOps(func::FuncOp funcOp,
+     if (auto lockOp = dyn_cast<SyncBlockLockOp>(op)) {
+       recordLockVar(lockOp.getLockVar(),
+                     lockOp->hasAttr(SyncBlockLockWithSubblockAttr::name),
+-                    lockOp->hasAttr(SyncBlockLockUnorderedAttr::name));
++                    getSyncBlockLockOpOrdering(lockOp));
+     } else if (auto returnOp = dyn_cast<func::ReturnOp>(op)) {
+       returnOps.push_back(returnOp);
+     }
+@@ -124,13 +127,12 @@ public:
+         builder.setInsertionPoint(returnOp);
+ 
+         for (const LockVarInfo &info : lockVars) {
+-          auto freeLockOp =
+-              builder.create<FreeLockVarOp>(returnOp.getLoc(), info.lockVar);
++          auto freeLockOp = builder.create<FreeLockVarOp>(
++              returnOp.getLoc(), info.lockVar,
++              SyncBlockLockOrderingAttr::get(funcOp.getContext(),
++                                             info.ordering));
+ 
+-          if (info.unordered)
+-            freeLockOp->setAttr(SyncBlockLockUnorderedAttr::name,
+-                                builder.getUnitAttr());
+-          else if (info.withSubblock)
++          if (info.withSubblock)
+             freeLockOp->setAttr(SyncBlockLockWithSubblockAttr::name,
+                                 builder.getUnitAttr());
+         }
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/InsertInferSyncBlockLockNumAndInitFunc.cpp b/bishengir/lib/Dialect/HIVM/Transforms/InsertInferSyncBlockLockNumAndInitFunc.cpp
+index a715065ff..703e21f11 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/InsertInferSyncBlockLockNumAndInitFunc.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/InsertInferSyncBlockLockNumAndInitFunc.cpp
+@@ -78,8 +78,8 @@ func::FuncOp insertInferSyncBlockLockNumFuncImpl(func::FuncOp funcOp,
+   // callback ABI. The launcher derives the exact size from blockNum.
+   auto syncBlockLockLayoutVal = builder.create<arith::ConstantIntOp>(
+       funcOp.getLoc(), syncBlockLockLayout, 64);
+-  builder.create<func::ReturnOp>(funcOp.getLoc(),
+-                                 ValueRange{syncBlockLockLayoutVal.getResult()});
++  builder.create<func::ReturnOp>(
++      funcOp.getLoc(), ValueRange{syncBlockLockLayoutVal.getResult()});
+   return func;
+ }
+ 
+@@ -166,7 +166,8 @@ void InsertInferSyncBlockLockNumAndInitFuncPass::runOnOperation() {
+   int64_t orderedLockCount = 0;
+   int64_t unorderedLockCount = 0;
+   for (Operation *op : createSyncBlockLockOps) {
+-    if (op->hasAttr(SyncBlockLockUnorderedAttr::name))
++    if (getSyncBlockLockOrdering(cast<CreateSyncBlockLockOp>(op).getMemref()) ==
++        SyncBlockLockOrdering::Unordered)
+       ++unorderedLockCount;
+     else
+       ++orderedLockCount;
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/LowerCreateSyncBlockLock.cpp b/bishengir/lib/Dialect/HIVM/Transforms/LowerCreateSyncBlockLock.cpp
+index a782b9a82..432f19049 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/LowerCreateSyncBlockLock.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/LowerCreateSyncBlockLock.cpp
+@@ -53,7 +53,8 @@ public:
+ 
+   // Use two static counters to record the number of ordered and unordered
+   // locks already processed. On each match, the offset of the current op
+-  // is computed based on these counters (which represent the locks preceding it).
++  // is computed based on these counters (which represent the locks preceding
++  // it).
+   inline static size_t orderedCount = 0;
+   inline static size_t unorderedCount = 0;
+   inline static size_t totalOrderedCount = 0;
+@@ -67,32 +68,32 @@ public:
+     auto loc = op.getLoc();
+ 
+     constexpr int64_t cacheLineBytes = 64;
+-    bool isUnordered = op->hasAttr(SyncBlockLockUnorderedAttr::name);
++    bool isUnordered = getSyncBlockLockOrdering(op.getMemref()) ==
++                       SyncBlockLockOrdering::Unordered;
+     Value totalByte;
+     if (isUnordered) {
+-      Value blockNum =
+-          rewriter.create<hivm::GetBlockNumOp>(loc)->getResult(0);
++      Value blockNum = rewriter.create<hivm::GetBlockNumOp>(loc)->getResult(0);
+       if (hivm::isMixModule(op->getParentOfType<ModuleOp>())) {
+-        Value subBlockNum = rewriter.create<hivm::GetSubBlockNumOp>(
+-            loc, rewriter.getI64Type());
++        Value subBlockNum =
++            rewriter.create<hivm::GetSubBlockNumOp>(loc, rewriter.getI64Type());
+         blockNum = rewriter.create<arith::MulIOp>(loc, blockNum, subBlockNum);
+       }
+       Value two = rewriter.create<arith::ConstantIntOp>(loc, 2, 64);
+       Value one = rewriter.create<arith::ConstantIntOp>(loc, 1, 64);
+-      Value cacheLineBytesVal = rewriter.create<arith::ConstantIntOp>(
+-          loc, cacheLineBytes, 64);
++      Value cacheLineBytesVal =
++          rewriter.create<arith::ConstantIntOp>(loc, cacheLineBytes, 64);
+       Value participantCacheLines = rewriter.create<arith::AddIOp>(
+           loc, rewriter.create<arith::MulIOp>(loc, blockNum, two), one);
+       Value unorderedStride = rewriter.create<arith::MulIOp>(
+           loc, participantCacheLines, cacheLineBytesVal);
+       Value unorderedIndex = rewriter.create<arith::ConstantIntOp>(
+           loc, static_cast<int64_t>(unorderedCount), 64);
+-      Value unorderedPart = rewriter.create<arith::MulIOp>(
+-          loc, unorderedStride, unorderedIndex);
++      Value unorderedPart =
++          rewriter.create<arith::MulIOp>(loc, unorderedStride, unorderedIndex);
+       Value orderedRegion = rewriter.create<arith::ConstantIntOp>(
+           loc, static_cast<int64_t>(totalOrderedCount) * cacheLineBytes, 64);
+-      totalByte = rewriter.create<arith::AddIOp>(
+-          loc, orderedRegion, unorderedPart);
++      totalByte =
++          rewriter.create<arith::AddIOp>(loc, orderedRegion, unorderedPart);
+       ++unorderedCount;
+     } else {
+       totalByte = rewriter.create<arith::ConstantIntOp>(
+@@ -131,7 +132,8 @@ void LowerCreateSyncBlockLockPass::runOnOperation() {
+   LowerCreateSyncBlockLock::unorderedCount = 0;
+   LowerCreateSyncBlockLock::totalOrderedCount = 0;
+   funcOp.walk([](hivm::CreateSyncBlockLockOp op) {
+-    if (!op->hasAttr(SyncBlockLockUnorderedAttr::name))
++    if (getSyncBlockLockOrdering(op.getMemref()) !=
++        SyncBlockLockOrdering::Unordered)
+       ++LowerCreateSyncBlockLock::totalOrderedCount;
+   });
+ 
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/SyncBlockHoisting.cpp b/bishengir/lib/Dialect/HIVM/Transforms/SyncBlockHoisting.cpp
+index 349d7fb90..d995c2ca8 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/SyncBlockHoisting.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/SyncBlockHoisting.cpp
+@@ -21,6 +21,7 @@
+ #include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
+ #include "bishengir/Dialect/HIVM/IR/HIVMInterfaces.h"
+ #include "bishengir/Dialect/HIVM/Transforms/Passes.h"
++#include "bishengir/Dialect/HIVM/Utils/Utils.h"
+ #include "bishengir/Dialect/Utils/Util.h"
+ #include "mlir/Dialect/Func/IR/FuncOps.h"
+ #include "mlir/Dialect/SCF/IR/SCF.h"
+@@ -119,8 +120,8 @@ struct HoistingSyncBlockPattern
+ 
+     bool hasUnorderedLock = false;
+     for (auto lockOp : lockVec)
+-      hasUnorderedLock |=
+-          lockOp->hasAttr(hivm::SyncBlockLockUnorderedAttr::name);
++      hasUnorderedLock |= getSyncBlockLockOpOrdering(lockOp) ==
++                          SyncBlockLockOrdering::Unordered;
+ 
+     // Do NOT hoist unordered lock/unlock out of loops. The unordered bakery
+     // lock supports skipped participants, so it does not need the old ordered
+@@ -189,6 +190,8 @@ struct HoistingSyncBlockPattern
+     }
+ 
+     Value lockMemref = lockVec.front().getLockVar();
++    SyncBlockLockOrdering ordering =
++        getSyncBlockLockOpOrdering(lockVec.front());
+ 
+     auto primaryCreate =
+         cast<CreateSyncBlockLockOp>(lockMemref.getDefiningOp());
+@@ -206,9 +209,9 @@ struct HoistingSyncBlockPattern
+ 
+     OpBuilder::InsertionGuard guard(rewriter);
+     rewriter.setInsertionPoint(loopOp);
+-    rewriter.create<hivm::SyncBlockLockOp>(op->getLoc(), lockMemref);
++    createSyncBlockLock(rewriter, op->getLoc(), lockMemref, ordering);
+     rewriter.setInsertionPointAfter(loopOp);
+-    rewriter.create<hivm::SyncBlockUnlockOp>(op->getLoc(), lockMemref);
++    createSyncBlockUnlock(rewriter, op->getLoc(), lockMemref, ordering);
+     return success();
+   }
+ };
+diff --git a/bishengir/lib/Dialect/HIVM/Utils/Utils.cpp b/bishengir/lib/Dialect/HIVM/Utils/Utils.cpp
+index 6d5cd9199..ae8ed44ed 100644
+--- a/bishengir/lib/Dialect/HIVM/Utils/Utils.cpp
++++ b/bishengir/lib/Dialect/HIVM/Utils/Utils.cpp
+@@ -32,8 +32,8 @@
+ #include "mlir/Dialect/Affine/IR/AffineOps.h"
+ #include "mlir/Dialect/Arith/IR/Arith.h"
+ #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+-#include "mlir/Dialect/Func/IR/FuncOps.h"
+ #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
++#include "mlir/Dialect/MemRef/IR/MemRef.h"
+ #include "mlir/Dialect/SCF/IR/SCF.h"
+ #include "mlir/Dialect/Tensor/IR/Tensor.h"
+ #include "mlir/Dialect/Tensor/Utils/Utils.h"
+@@ -1153,10 +1153,91 @@ hivm::CreateSyncBlockLockOp createSyncBlockLockVar(OpBuilder &builder,
+   auto elementType = builder.getI64Type();
+   Type memrefType = MemRefType::get(shape, elementType);
+ 
+-  auto createSyncBlockLockOp =
+-      builder.create<hivm::CreateSyncBlockLockOp>(loc, memrefType,
+-                                                  /*workspaceArg*/ Value());
+-  return createSyncBlockLockOp;
++  return builder.create<hivm::CreateSyncBlockLockOp>(loc, memrefType,
++                                                     /*workspaceArg*/ Value());
++}
++
++static hivm::SyncBlockLockOrderingAttr
++getSyncBlockLockOrderingAttr(MLIRContext *ctx,
++                             hivm::SyncBlockLockOrdering ordering) {
++  return hivm::SyncBlockLockOrderingAttr::get(ctx, ordering);
++}
++
++hivm::SyncBlockLockOp
++createSyncBlockLock(OpBuilder &builder, Location loc, Value lockVar,
++                    hivm::SyncBlockLockOrdering ordering) {
++  return builder.create<hivm::SyncBlockLockOp>(
++      loc, lockVar,
++      getSyncBlockLockOrderingAttr(builder.getContext(), ordering));
++}
++
++hivm::SyncBlockUnlockOp
++createSyncBlockUnlock(OpBuilder &builder, Location loc, Value lockVar,
++                      hivm::SyncBlockLockOrdering ordering) {
++  return builder.create<hivm::SyncBlockUnlockOp>(
++      loc, lockVar,
++      getSyncBlockLockOrderingAttr(builder.getContext(), ordering));
++}
++
++hivm::SyncBlockLockOrdering getSyncBlockLockOpOrdering(Operation *op) {
++  assert(op && "expected sync block lock-related op");
++  // Legacy unit attr from older producers (Triton / AscendNPU-IR). Prefer the
++  // native `$ordering` enum for new IR; keep recognizing this until upstream
++  // migrates. Check discardable attrs explicitly: properties-based ops store
++  // this marker outside inherent `$ordering`.
++  if (op->getDiscardableAttr(SyncBlockLockUnorderedAttr::name) ||
++      op->hasAttr(SyncBlockLockUnorderedAttr::name))
++    return hivm::SyncBlockLockOrdering::Unordered;
++
++  if (auto lockOp = dyn_cast<hivm::SyncBlockLockOp>(op))
++    return lockOp.getOrdering();
++  if (auto unlockOp = dyn_cast<hivm::SyncBlockUnlockOp>(op))
++    return unlockOp.getOrdering();
++  if (auto freeOp = dyn_cast<hivm::FreeLockVarOp>(op))
++    return freeOp.getOrdering();
++  return hivm::SyncBlockLockOrdering::Ordered;
++}
++
++static std::optional<hivm::SyncBlockLockOrdering>
++getOrderingFromLockUsers(Value lockVar) {
++  for (Operation *user : lockVar.getUsers()) {
++    if (isa<hivm::SyncBlockLockOp, hivm::SyncBlockUnlockOp,
++            hivm::FreeLockVarOp>(user))
++      return getSyncBlockLockOpOrdering(user);
++  }
++  return std::nullopt;
++}
++
++hivm::SyncBlockLockOrdering getSyncBlockLockOrdering(Value lockVar) {
++  Value current = lockVar;
++  while (current) {
++    if (auto orderingFromUsers = getOrderingFromLockUsers(current))
++      return *orderingFromUsers;
++
++    if (auto createOp =
++            current.getDefiningOp<hivm::CreateSyncBlockLockOp>()) {
++      // Legacy: unordered marker on create_sync_block_lock itself.
++      return getSyncBlockLockOpOrdering(createOp);
++    }
++
++    if (auto viewOp = current.getDefiningOp<memref::ViewOp>()) {
++      current = viewOp.getViewSource();
++      continue;
++    }
++
++    if (auto castOp = current.getDefiningOp<memref::CastOp>()) {
++      current = castOp.getSource();
++      continue;
++    }
++
++    if (auto subviewOp = current.getDefiningOp<memref::SubViewOp>()) {
++      current = subviewOp.getSource();
++      continue;
++    }
++
++    break;
++  }
++  return hivm::SyncBlockLockOrdering::Ordered;
+ }
+ 
+ std::vector<std::pair<Value, Value>> getOperationAliasInfo(Operation *op) {
+diff --git a/bishengir/lib/Dialect/Triton/Transforms/LowerDotBuffersAndSharedMem.cpp b/bishengir/lib/Dialect/Triton/Transforms/LowerDotBuffersAndSharedMem.cpp
+index 540f4dddd..dcc245572 100644
+--- a/bishengir/lib/Dialect/Triton/Transforms/LowerDotBuffersAndSharedMem.cpp
++++ b/bishengir/lib/Dialect/Triton/Transforms/LowerDotBuffersAndSharedMem.cpp
+@@ -241,7 +241,7 @@ struct ScratchAccess {
+ arith::IndexCastOp findTileIdx(Operation *op) {
+   if (!op)
+     return nullptr;
+-  
++
+   for (Value operand : op->getOperands()) {
+     if (auto defOp = operand.getDefiningOp()) {
+       if (auto indexCastOp = dyn_cast<arith::IndexCastOp>(defOp)) {
+diff --git a/bishengir/lib/Dialect/Triton/Transforms/TileDotLoads.cpp b/bishengir/lib/Dialect/Triton/Transforms/TileDotLoads.cpp
+index aa7a06283..6197b5081 100644
+--- a/bishengir/lib/Dialect/Triton/Transforms/TileDotLoads.cpp
++++ b/bishengir/lib/Dialect/Triton/Transforms/TileDotLoads.cpp
+@@ -2065,7 +2065,7 @@ static Value loadStagedScratchTile(PatternRewriter &rewriter, Location loc,
+       /*padding=*/std::optional<triton::PaddingOption>(),
+       triton::CacheModifier::NONE, triton::EvictionPolicy::NORMAL,
+       /*isVolatile=*/false);
+-  
++
+   loadOp->setAttr("startConst", rewriter.getI32IntegerAttr(0));
+   loadOp->setAttr("otherStart", rewriter.getI32IntegerAttr(0));
+   loadOp->setAttr("kAxis", rewriter.getI32IntegerAttr(kAxis));
+@@ -2584,7 +2584,7 @@ struct StageNonLoadOperandPattern : public OpRewritePattern<triton::DotOp> {
+       auto storeOp = rewriter.create<triton::StoreOp>(
+           loc, envPtrs, dot.getA(), /*mask=*/Value(),
+           triton::CacheModifier::NONE, triton::EvictionPolicy::NORMAL);
+-      
++
+       storeOp->setAttr("startConst", rewriter.getI32IntegerAttr(0));
+       storeOp->setAttr("otherStart", rewriter.getI32IntegerAttr(0));
+       storeOp->setAttr("kAxis", rewriter.getI32IntegerAttr(1));
+@@ -2732,7 +2732,7 @@ struct StageNonLoadOperandPattern : public OpRewritePattern<triton::DotOp> {
+           /*padding=*/std::optional<triton::PaddingOption>(),
+           triton::CacheModifier::NONE, triton::EvictionPolicy::NORMAL,
+           /*isVolatile=*/false);
+-      
++
+       loadOp->setAttr("startConst", rewriter.getI32IntegerAttr(0));
+       loadOp->setAttr("otherStart", rewriter.getI32IntegerAttr(0));
+       loadOp->setAttr("kAxis", rewriter.getI32IntegerAttr(kAxis));
+diff --git a/bishengir/test/Conversion/HIVMToStandard/HIVMToStandard/convert-hivm-to-standard.mlir b/bishengir/test/Conversion/HIVMToStandard/HIVMToStandard/convert-hivm-to-standard.mlir
+index 2a2526fa7..db15d75e8 100644
+--- a/bishengir/test/Conversion/HIVMToStandard/HIVMToStandard/convert-hivm-to-standard.mlir
++++ b/bishengir/test/Conversion/HIVMToStandard/HIVMToStandard/convert-hivm-to-standard.mlir
+@@ -2613,6 +2613,20 @@ module {
+   }
+ }
+ 
++// -----
++module attributes {hacc.target = #hacc.target<"Ascend910B4">} {
++  // CHECK-LABEL: func @test_sync_block_lock_unlock_unordered
++  func.func @test_sync_block_lock_unlock_unordered() attributes {hacc.entry, hacc.function_kind = #hacc.function_kind<DEVICE>} {
++    %lock = memref.alloc() : memref<1xi64>
++    // CHECK: call @sync_block_lock_unordered
++    hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%lock : memref<1xi64>)
++    // CHECK: call @sync_block_unlock_unordered
++    hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%lock : memref<1xi64>)
++    // CHECK-NOT: ordering
++    return
++  }
++}
++
+ // -----
+ module {
+   func.func @test_sort_op_check_1d() attributes {hacc.function_kind = #hacc.function_kind<DEVICE>} {
+diff --git a/bishengir/test/Conversion/HIVMToStandard/RegBase/convert-hivm-to-standard.mlir b/bishengir/test/Conversion/HIVMToStandard/RegBase/convert-hivm-to-standard.mlir
+index bd71a298a..e43fc8f92 100644
+--- a/bishengir/test/Conversion/HIVMToStandard/RegBase/convert-hivm-to-standard.mlir
++++ b/bishengir/test/Conversion/HIVMToStandard/RegBase/convert-hivm-to-standard.mlir
+@@ -183,9 +183,10 @@ module {
+   func.func @test_sync_block_lock_unlock_unordered() attributes {hacc.entry, hacc.function_kind = #hacc.function_kind<DEVICE>} {
+     %lock = memref.alloc() : memref<1xi64>
+     // CHECK: call @sync_block_lock_unordered
+-    hivm.hir.sync_block_lock {hivm.sync_block_lock_unordered} lock_var(%lock : memref<1xi64>)
++    hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%lock : memref<1xi64>)
+     // CHECK: call @sync_block_unlock_unordered
+-    hivm.hir.sync_block_unlock {hivm.sync_block_lock_unordered} lock_var(%lock : memref<1xi64>)
++    hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%lock : memref<1xi64>)
++    // CHECK-NOT: ordering
+     return
+   }
+ }
+@@ -195,11 +196,12 @@ module {
+   func.func @test_sync_block_lock_unlock_unordered_with_subblock() attributes {hacc.entry, hacc.function_kind = #hacc.function_kind<DEVICE>} {
+     %lock = memref.alloc() : memref<1xi64>
+     // CHECK: call @sync_block_lock_unordered_with_subblock
+-    hivm.hir.sync_block_lock {hivm.sync_block_lock_unordered, hivm.sync_block_lock_with_subblock}
++    hivm.hir.sync_block_lock {hivm.sync_block_lock_with_subblock, ordering = #hivm.ordering<unordered>}
+         lock_var(%lock : memref<1xi64>)
+     // CHECK: call @sync_block_unlock_unordered_with_subblock
+-    hivm.hir.sync_block_unlock {hivm.sync_block_lock_unordered, hivm.sync_block_lock_with_subblock}
++    hivm.hir.sync_block_unlock {hivm.sync_block_lock_with_subblock, ordering = #hivm.ordering<unordered>}
+         lock_var(%lock : memref<1xi64>)
++    // CHECK-NOT: ordering
+     return
+   }
+ }
+diff --git a/bishengir/test/Dialect/HFusion/FlattenOps/hfusion-flatten-atomic-xchg-allow-flatten.mlir b/bishengir/test/Dialect/HFusion/FlattenOps/hfusion-flatten-atomic-xchg-allow-flatten.mlir
+index b8d746619..3c73330fd 100644
+--- a/bishengir/test/Dialect/HFusion/FlattenOps/hfusion-flatten-atomic-xchg-allow-flatten.mlir
++++ b/bishengir/test/Dialect/HFusion/FlattenOps/hfusion-flatten-atomic-xchg-allow-flatten.mlir
+@@ -36,11 +36,11 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9599">} {
+     scope.scope : () -> () {
+       %alloc_3 = memref.alloc() : memref<1x4x128x16x3xf8E4M3FN>
+       %11 = hivm.hir.create_sync_block_lock : memref<1xi64>
+-      hivm.hir.sync_block_lock lock_var(%11 : memref<1xi64>)
++      hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%11 : memref<1xi64>)
+       memref.copy %expand_shape_1, %alloc_3 : memref<1x4x128x16x3xf8E4M3FN, strided<[24576, 6144, 48, 3, 1], offset: ?>> to memref<1x4x128x16x3xf8E4M3FN>
+       memref.copy %expand_shape, %expand_shape_1 : memref<1x4x128x16x3xf8E4M3FN> to memref<1x4x128x16x3xf8E4M3FN, strided<[24576, 6144, 48, 3, 1], offset: ?>>
+       memref.copy %alloc_3, %expand_shape : memref<1x4x128x16x3xf8E4M3FN> to memref<1x4x128x16x3xf8E4M3FN>
+-      hivm.hir.sync_block_unlock lock_var(%11 : memref<1xi64>)
++      hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%11 : memref<1xi64>)
+       scope.return
+     } {hivm.allow_flatten, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+     %reinterpret_cast_2 = memref.reinterpret_cast %arg4 to offset: [%9], sizes: [4, 128, 16, 3], strides: [6144, 48, 3, 1] : memref<?xf8E4M3FN> to memref<4x128x16x3xf8E4M3FN, strided<[6144, 48, 3, 1], offset: ?>>
+diff --git a/bishengir/test/Dialect/HFusion/regbase/Normalize/hfusion-decompose-atomic-return-sync.mlir b/bishengir/test/Dialect/HFusion/regbase/Normalize/hfusion-decompose-atomic-return-sync.mlir
+new file mode 100644
+index 000000000..099de0672
+--- /dev/null
++++ b/bishengir/test/Dialect/HFusion/regbase/Normalize/hfusion-decompose-atomic-return-sync.mlir
+@@ -0,0 +1,73 @@
++// RUN: bishengir-opt --hfusion-normalize-ops="use-regbase=true" %s -split-input-file | FileCheck %s
++
++// Spin-lock style CAS: snapshot GM into UB, then atomic_cas on the same GM word.
++// The return snapshot must stay inside the same sync-block critical section as CAS.
++//
++// CHECK-LABEL: func.func @test_atomic_cas_return_snapshot_outer_lock
++// CHECK: %[[LOCK:.*]] = hivm.hir.create_sync_block_lock : memref<1xi64>
++// CHECK: hivm.hir.sync_block_lock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: memref.copy %{{.*}}, %{{.*}} : memref<1xi32> to memref<1xi32>
++// CHECK-NOT: hfusion.atomic_cas
++// CHECK: hivm.hir.sync_block_unlock lock_var(%[[LOCK]] : memref<1xi64>)
++module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
++  func.func @test_atomic_cas_return_snapshot_outer_lock(
++      %arg0: memref<?xi8>, %arg1: memref<?xi8>,
++      %lock: memref<1xi32>,
++      %cmp: memref<1xi32>,
++      %new: memref<1xi32>) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "aiv", parallel_mode = "simd"} {
++    %c0 = arith.constant 0 : index
++    %snapshot = memref.alloc() : memref<1xi32>
++    memref.copy %lock, %snapshot : memref<1xi32> to memref<1xi32>
++    %old = memref.load %snapshot[%c0] : memref<1xi32>
++    %old_tensor = bufferization.to_tensor %snapshot restrict writable : memref<1xi32>
++    %cond = arith.cmpi ne, %old, %old : i32
++    hfusion.atomic_cas ins(%cmp, %new : memref<1xi32>, memref<1xi32>) outs(%lock : memref<1xi32>)
++    scf.if %cond {
++      %t = tensor.extract %old_tensor[%c0] : tensor<1xi32>
++      %dead = arith.addi %t, %t : i32
++    }
++    return
++  }
++}
++
++// -----
++
++// CHECK-LABEL: func.func @test_linalg_cas_return_snapshot_outer_lock
++// CHECK: %[[LOCK:.*]] = hivm.hir.create_sync_block_lock : memref<1xi64>
++// CHECK: hivm.hir.sync_block_lock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: memref.copy
++// CHECK: linalg.generic {{.*}} attrs = {GenericAtomicRMW = "cas", {{.*}} already_sync}
++// CHECK: hivm.hir.sync_block_unlock lock_var(%[[LOCK]] : memref<1xi64>)
++#map = affine_map<(d0) -> (d0)>
++module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
++  func.func @test_linalg_cas_return_snapshot_outer_lock(
++      %arg0: memref<?xi8>, %arg1: memref<?xi8>,
++      %lock: memref<1xi32>,
++      %cmp: memref<1xi32>,
++      %new: memref<1xi32>) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "aiv", parallel_mode = "simd"} {
++    %c0 = arith.constant 0 : index
++    %c0_i32 = arith.constant 0 : i32
++    %c1_i32 = arith.constant 1 : i32
++    %snapshot = memref.alloc() : memref<1xi32>
++    memref.copy %lock, %snapshot : memref<1xi32> to memref<1xi32>
++    %old = memref.load %snapshot[%c0] : memref<1xi32>
++    %old_tensor = bufferization.to_tensor %snapshot restrict writable : memref<1xi32>
++    %cond = arith.cmpi ne, %old, %old : i32
++    linalg.generic {
++      indexing_maps = [#map, #map, #map, #map],
++      iterator_types = ["parallel"]
++    } ins(%lock, %cmp, %new : memref<1xi32>, memref<1xi32>, memref<1xi32>)
++      outs(%lock : memref<1xi32>)
++      attrs = {GenericAtomicRMW = "cas", MemSemantic = "acq_rel", MemSyncScope = "gpu", Software} {
++      ^bb0(%in: i32, %expected: i32, %desired: i32, %out: i32):
++        %eq = arith.cmpi eq, %in, %expected : i32
++        %sel = arith.select %eq, %desired, %in : i32
++        linalg.yield %sel : i32
++    }
++    scf.if %cond {
++      %t = tensor.extract %old_tensor[%c0] : tensor<1xi32>
++      %dead = arith.addi %t, %t : i32
++    }
++    return
++  }
++}
+diff --git a/bishengir/test/Dialect/HFusion/regbase/Normalize/hfusion-normalize-atomic-ops.mlir b/bishengir/test/Dialect/HFusion/regbase/Normalize/hfusion-normalize-atomic-ops.mlir
+index 9ef26d81c..ee2e1907f 100644
+--- a/bishengir/test/Dialect/HFusion/regbase/Normalize/hfusion-normalize-atomic-ops.mlir
++++ b/bishengir/test/Dialect/HFusion/regbase/Normalize/hfusion-normalize-atomic-ops.mlir
+@@ -22,12 +22,12 @@ func.func @test_NormalizeCumOpF16ToF32Type_cumprod_f16(%arg0: tensor<4x64xf16>,
+ 
+ // CHECK-LABEL: func.func @test_NormalizeAtomicOps_Elemwise_atomic_or_i16
+ // CHECK: %[[LOCK:.*]] = hivm.hir.create_sync_block_lock : memref<1xi64>
+-// CHECK: hivm.hir.sync_block_lock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ // CHECK: %[[LHS:.*]] = bufferization.to_tensor %{{.*}} restrict writable : memref<256xi16>
+ // CHECK: %[[DST:.*]] = tensor.empty() : tensor<256xi16>
+ // CHECK: %[[RES:.*]] = hfusion.elemwise_binary {fun = #hfusion.binary_fn<vor>} ins(%[[LHS]], %{{.*}} : tensor<256xi16>, tensor<256xi16>) outs(%[[DST]] : tensor<256xi16>) -> tensor<256xi16>
+ // CHECK: bufferization.materialize_in_destination %[[RES]] in writable %{{.*}} : (tensor<256xi16>, memref<256xi16, strided<[1], offset: ?>>) -> ()
+-// CHECK: hivm.hir.sync_block_unlock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ // CHECK-NOT: bufferization.to_memref
+ // CHECK-NOT: hfusion.store
+ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+@@ -45,12 +45,12 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+ 
+ // CHECK-LABEL: func.func @test_NormalizeAtomicOps_Elemwise_atomic_umax_i16
+ // CHECK: %[[LOCK:.*]] = hivm.hir.create_sync_block_lock : memref<1xi64>
+-// CHECK: hivm.hir.sync_block_lock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ // CHECK: %[[LHS:.*]] = bufferization.to_tensor %{{.*}} restrict writable : memref<256xi16>
+ // CHECK: %[[DST:.*]] = tensor.empty() : tensor<256xi16>
+ // CHECK: %[[RES:.*]] = linalg.elemwise_binary {fun = #linalg.binary_fn<max_unsigned>} ins(%[[LHS]], %{{.*}} : tensor<256xi16>, tensor<256xi16>) outs(%[[DST]] : tensor<256xi16>) -> tensor<256xi16>
+ // CHECK: bufferization.materialize_in_destination %[[RES]] in writable %{{.*}} : (tensor<256xi16>, memref<256xi16, strided<[1], offset: ?>>) -> ()
+-// CHECK: hivm.hir.sync_block_unlock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ // CHECK-NOT: bufferization.to_memref
+ // CHECK-NOT: hfusion.store
+ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+@@ -68,12 +68,12 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+ 
+ // CHECK-LABEL: func.func @test_NormalizeAtomicOps_Elemwise_atomic_max_i64
+ // CHECK: %[[LOCK:.*]] = hivm.hir.create_sync_block_lock : memref<1xi64>
+-// CHECK: hivm.hir.sync_block_lock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ // CHECK: %[[LHS:.*]] = bufferization.to_tensor %{{.*}} restrict writable : memref<256xi64>
+ // CHECK: %[[DST:.*]] = tensor.empty() : tensor<256xi64>
+ // CHECK: %[[RES:.*]] = linalg.elemwise_binary {fun = #linalg.binary_fn<max_signed>} ins(%[[LHS]], %{{.*}} : tensor<256xi64>, tensor<256xi64>) outs(%[[DST]] : tensor<256xi64>) -> tensor<256xi64>
+ // CHECK: bufferization.materialize_in_destination %[[RES]] in writable %{{.*}} : (tensor<256xi64>, memref<256xi64, strided<[1], offset: ?>>) -> ()
+-// CHECK: hivm.hir.sync_block_unlock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ // CHECK-NOT: bufferization.to_memref
+ // CHECK-NOT: hfusion.store
+ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+@@ -107,13 +107,13 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+ 
+ // CHECK-LABEL: func.func @test_NormalizeAtomicOps_Elemwise_atomic_and
+ // CHECK: %[[VAL_9:.*]] = hivm.hir.create_sync_block_lock : memref<1xi64>
+-// CHECK: hivm.hir.sync_block_lock lock_var(%[[VAL_9]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%[[VAL_9]] : memref<1xi64>)
+ // CHECK: memref.copy %[[VAL_4:.*]], %[[VAL_6:.*]] : memref<256xi16, strided<[1], offset: ?>> to memref<256xi16>
+ // CHECK: %[[VAL_10:.*]] = bufferization.to_tensor %[[VAL_6]] restrict writable : memref<256xi16>
+ // CHECK: %[[DST:.*]] = tensor.empty() : tensor<256xi16>
+ // CHECK: %[[VAL_11:.*]] = hfusion.elemwise_binary {fun = #hfusion.binary_fn<vand>} ins(%[[VAL_10]], %{{.*}} : tensor<256xi16>, tensor<256xi16>) outs(%[[DST]] : tensor<256xi16>) -> tensor<256xi16>
+ // CHECK: bufferization.materialize_in_destination %[[VAL_11]] in writable %[[VAL_4]] : (tensor<256xi16>, memref<256xi16, strided<[1], offset: ?>>) -> ()
+-// CHECK: hivm.hir.sync_block_unlock lock_var(%[[VAL_9]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%[[VAL_9]] : memref<1xi64>)
+ // CHECK-NOT: bufferization.to_memref
+ // CHECK-NOT: hfusion.store
+ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+@@ -131,13 +131,13 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+ 
+ // CHECK-LABEL: func.func @test_NormalizeAtomicOps_Elemwise_atomic_add_i64
+ // CHECK: %[[VAL_9:.*]] = hivm.hir.create_sync_block_lock : memref<1xi64>
+-// CHECK: hivm.hir.sync_block_lock lock_var(%[[VAL_9]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%[[VAL_9]] : memref<1xi64>)
+ // CHECK: memref.copy %[[VAL_4:.*]], %[[VAL_6:.*]] : memref<256xi64, strided<[1], offset: ?>> to memref<256xi64>
+ // CHECK: %[[VAL_10:.*]] = bufferization.to_tensor %[[VAL_6]] restrict writable : memref<256xi64>
+ // CHECK: %[[DST:.*]] = tensor.empty() : tensor<256xi64>
+ // CHECK: %[[VAL_11:.*]] = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%[[VAL_10]], %{{.*}} : tensor<256xi64>, tensor<256xi64>) outs(%[[DST]] : tensor<256xi64>) -> tensor<256xi64>
+ // CHECK: bufferization.materialize_in_destination %[[VAL_11]] in writable %[[VAL_4]] : (tensor<256xi64>, memref<256xi64, strided<[1], offset: ?>>) -> ()
+-// CHECK: hivm.hir.sync_block_unlock lock_var(%[[VAL_9]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%[[VAL_9]] : memref<1xi64>)
+ // CHECK-NOT: bufferization.to_memref
+ // CHECK-NOT: hfusion.store
+ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+@@ -155,14 +155,14 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+ 
+ // CHECK-LABEL: func.func @test_NormalizeAtomicOps_Elemwise_atomic_add_fp8
+ // CHECK: %[[VAL_9:.*]] = hivm.hir.create_sync_block_lock : memref<1xi64>
+-// CHECK: hivm.hir.sync_block_lock lock_var(%[[VAL_9]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%[[VAL_9]] : memref<1xi64>)
+ // CHECK: memref.copy %[[VAL_4:.*]], %[[VAL_6:.*]] : memref<256xf8E4M3FN, strided<[1], offset: ?>> to memref<256xf8E4M3FN>
+ // CHECK: %[[VAL_11:.*]] = hfusion.cast {cast = #hfusion.type_fn<cast_signed>, enable_overflow = true, round_mode = #hfusion.round_mode<rint>} ins(%{{.*}} : tensor<256xf8E4M3FN>) outs(%{{.*}} : tensor<256xf32>) -> tensor<256xf32>
+ // CHECK: %[[BIN_DST:.*]] = tensor.empty() : tensor<256xf32>
+ // CHECK: %[[VAL_12:.*]] = linalg.elemwise_binary {fun = #linalg.binary_fn<add>} ins(%[[VAL_11]], %{{.*}} : tensor<256xf32>, tensor<256xf32>) outs(%[[BIN_DST]] : tensor<256xf32>) -> tensor<256xf32>
+ // CHECK: %[[VAL_13:.*]] = hfusion.cast {cast = #hfusion.type_fn<cast_signed>, enable_overflow = true, round_mode = #hfusion.round_mode<rint>} ins(%[[VAL_12]] : tensor<256xf32>) outs(%{{.*}} : tensor<256xf8E4M3FN>) -> tensor<256xf8E4M3FN>
+ // CHECK: bufferization.materialize_in_destination %[[VAL_13]] in writable %[[VAL_4]] : (tensor<256xf8E4M3FN>, memref<256xf8E4M3FN, strided<[1], offset: ?>>) -> ()
+-// CHECK: hivm.hir.sync_block_unlock lock_var(%[[VAL_9]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%[[VAL_9]] : memref<1xi64>)
+ // CHECK-NOT: bufferization.to_memref
+ // CHECK-NOT: hfusion.store
+ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+@@ -180,13 +180,13 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+ 
+ // CHECK-LABEL: func.func @test_NormalizeAtomicOps_Elemwise_atomic_dyn_and
+ // CHECK: %[[VAL_9:.*]] = hivm.hir.create_sync_block_lock : memref<1xi64>
+-// CHECK: hivm.hir.sync_block_lock lock_var(%[[VAL_9]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%[[VAL_9]] : memref<1xi64>)
+ // CHECK: memref.copy %[[VAL_4:.*]], %[[VAL_6:.*]] : memref<?x?xi16, strided<[512, 1], offset: ?>> to memref<?x?xi16, strided<[256, 1]>>
+ // CHECK: %[[DST:.*]] = tensor.empty() : tensor<12x256xi16>
+ // CHECK: %[[VAL_11:.*]] = hfusion.elemwise_binary {fun = #hfusion.binary_fn<vand>} ins(%{{.*}}, %{{.*}} : tensor<12x256xi16>, tensor<12x256xi16>) outs(%[[DST]] : tensor<12x256xi16>) -> tensor<12x256xi16>
+ // CHECK: %[[VAL_12:.*]] = tensor.extract_slice %[[VAL_11:.*]][0, 0] [%{{.*}}, %{{.*}}] [1, 1] : tensor<12x256xi16> to tensor<?x?xi16>
+ // CHECK: bufferization.materialize_in_destination %[[VAL_12]] in writable %[[VAL_4]] : (tensor<?x?xi16>, memref<?x?xi16, strided<[512, 1], offset: ?>>) -> ()
+-// CHECK: hivm.hir.sync_block_unlock lock_var(%[[VAL_9]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%[[VAL_9]] : memref<1xi64>)
+ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+   func.func @test_NormalizeAtomicOps_Elemwise_atomic_dyn_and(%arg0 : memref<?xi16> {tt.divisibility = 16 : i32}, %arg1 : memref<?xi16> {tt.divisibility = 16 : i32}, %arg2: index, %arg3: index, %arg4: index) {
+     %reinterpret_cast = memref.reinterpret_cast %arg0 to offset: [%arg4], sizes: [12, 256], strides: [512, 1] : memref<?xi16> to memref<12x256xi16, strided<[512, 1], offset: ?>>
+@@ -205,12 +205,12 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+ 
+ // CHECK-LABEL: func.func @test_NormalizeAtomicOps_CAS_atomic_cas_i16x4
+ // CHECK: %[[LOCK:.*]] = hivm.hir.create_sync_block_lock : memref<1xi64>
+-// CHECK: hivm.hir.sync_block_lock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ // CHECK: %[[CMP:.*]] = hfusion.compare {compare_fn = #hfusion.compare_fn<veq>} ins(%{{.*}}, %{{.*}} : tensor<4xi16>, tensor<4xi16>) outs(%{{.*}} : tensor<4xi1>) -> tensor<4xi1>
+ // CHECK: %[[SEL:.*]] = hfusion.select ins(%[[CMP]], %{{.*}}, %{{.*}} : tensor<4xi1>, tensor<4xi16>, tensor<4xi16>) outs(%{{.*}} : tensor<4xi16>) -> tensor<4xi16>
+ // CHECK: bufferization.materialize_in_destination %[[SEL]] in writable %{{.*}} : (tensor<4xi16>, memref<4xi16>) -> ()
+ // CHECK-NOT: hfusion.cast
+-// CHECK: hivm.hir.sync_block_unlock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ // CHECK-NOT: bufferization.to_memref
+ // CHECK-NOT: hfusion.atomic_cas
+ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+@@ -228,11 +228,11 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+ 
+ // CHECK-LABEL:   func.func @test_NormalizeAtomicOps_CAS_triton_atomic_cas_1D
+ // CHECK: %[[VAL_10:.*]] = hivm.hir.create_sync_block_lock : memref<1xi64>
+-// CHECK: hivm.hir.sync_block_lock lock_var(%[[VAL_10]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%[[VAL_10]] : memref<1xi64>)
+ // CHECK: %[[VAL_14:.*]] = hfusion.compare {compare_fn = #hfusion.compare_fn<veq>} ins(%[[VAL_12:.*]], %{{.*}} : tensor<1xi64>, tensor<1xi64>) outs(%{{.*}} : tensor<1xi1>) -> tensor<1xi1>
+ // CHECK: %[[VAL_15:.*]] = hfusion.select ins(%[[VAL_14]], %{{.*}}, %[[VAL_12]] : tensor<1xi1>, tensor<1xi64>, tensor<1xi64>) outs(%{{.*}} : tensor<1xi64>) -> tensor<1xi64>
+ // CHECK: bufferization.materialize_in_destination %[[VAL_15]] in writable %{{.*}} : (tensor<1xi64>, memref<1xi64>) -> ()
+-// CHECK: hivm.hir.sync_block_unlock lock_var(%[[VAL_10]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%[[VAL_10]] : memref<1xi64>)
+ // CHECK: return
+ // CHECK-NOT: bufferization.to_memref
+ // CHECK-NOT: hfusion.atomic_cas
+@@ -251,13 +251,13 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+ 
+ // CHECK-LABEL: func.func @test_NormalizeAtomicOps_CAS_triton_atomic_cas_fp8
+ // CHECK: %[[VAL_10:.*]] = hivm.hir.create_sync_block_lock : memref<1xi64>
+-// CHECK: hivm.hir.sync_block_lock lock_var(%[[VAL_10]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%[[VAL_10]] : memref<1xi64>)
+ // CHECK-DAG: %[[VAL_12:.*]] = hfusion.cast {cast = #hfusion.type_fn<cast_signed>, enable_overflow = true, round_mode = #hfusion.round_mode<rint>} ins(%[[VAL_11:.*]] : tensor<1xf8E4M3FN>) outs(%{{.*}} : tensor<1xf32>) -> tensor<1xf32>
+ // CHECK-DAG: %[[VAL_13:.*]] = hfusion.cast {cast = #hfusion.type_fn<cast_signed>, enable_overflow = true, round_mode = #hfusion.round_mode<rint>} ins(%{{.*}} : tensor<1xf8E4M3FN>) outs(%{{.*}} : tensor<1xf32>) -> tensor<1xf32>
+ // CHECK: %[[VAL_14:.*]] = hfusion.compare {compare_fn = #hfusion.compare_fn<veq>} ins(%[[VAL_12]], %[[VAL_13]] : tensor<1xf32>, tensor<1xf32>) outs(%{{.*}} : tensor<1xi1>) -> tensor<1xi1>
+ // CHECK: %[[VAL_15:.*]] = hfusion.select ins(%[[VAL_14]], %{{.*}}, %[[VAL_11]] : tensor<1xi1>, tensor<1xf8E4M3FN>, tensor<1xf8E4M3FN>) outs(%[[VAL_11]] : tensor<1xf8E4M3FN>) -> tensor<1xf8E4M3FN>
+ // CHECK: bufferization.materialize_in_destination %[[VAL_15]] in writable %{{.*}} : (tensor<1xf8E4M3FN>, memref<1xf8E4M3FN>) -> ()
+-// CHECK: hivm.hir.sync_block_unlock lock_var(%[[VAL_10]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%[[VAL_10]] : memref<1xi64>)
+ // CHECK: return
+ // CHECK-NOT: bufferization.to_memref
+ // CHECK-NOT: hfusion.atomic_cas
+@@ -277,10 +277,10 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+ // CHECK-LABEL: func.func @test_NormalizeAtomicOps_XCHG_atomic_xchg_2d_i16
+ // CHECK: scope.scope : () -> () {
+ // CHECK: %[[LOCK:.*]] = hivm.hir.create_sync_block_lock : memref<1xi64>
+-// CHECK: hivm.hir.sync_block_lock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ // CHECK: memref.copy %[[GM:.*]], %[[TMP:.*]] : memref<2x4xi16> to memref<2x4xi16>
+ // CHECK: bufferization.materialize_in_destination %{{.*}} in writable %[[GM]] : (tensor<2x4xi16>, memref<2x4xi16>) -> ()
+-// CHECK: hivm.hir.sync_block_unlock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ // CHECK: scope.return
+ // CHECK: } {hivm.allow_flatten, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+ // CHECK-NOT: bufferization.to_memref
+@@ -299,10 +299,10 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+ // CHECK-LABEL:   func.func @test_NormalizeAtomicOps_XCHG_triton_atomic_xchg_1D
+ // CHECK: scope.scope : () -> () {
+ // CHECK: %[[VAL_10:.*]] = hivm.hir.create_sync_block_lock : memref<1xi64>
+-// CHECK: hivm.hir.sync_block_lock lock_var(%[[VAL_10]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%[[VAL_10]] : memref<1xi64>)
+ // CHECK: memref.copy %[[GM_SRC:.*]], %[[TMP_BUF:.*]] : memref<1xi64> to memref<1xi64>
+ // CHECK: bufferization.materialize_in_destination %{{.*}} in writable %[[GM_SRC]] : (tensor<1xi64>, memref<1xi64>) -> ()
+-// CHECK: hivm.hir.sync_block_unlock lock_var(%[[VAL_10]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%[[VAL_10]] : memref<1xi64>)
+ // CHECK: scope.return
+ // CHECK: } {hivm.allow_flatten, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+ // CHECK: return
+diff --git a/bishengir/test/Dialect/HFusion/regbase/Normalize/hfusion-normalize-atomic-tensor-input.mlir b/bishengir/test/Dialect/HFusion/regbase/Normalize/hfusion-normalize-atomic-tensor-input.mlir
+index 19cad6bcb..e83ab6c04 100644
+--- a/bishengir/test/Dialect/HFusion/regbase/Normalize/hfusion-normalize-atomic-tensor-input.mlir
++++ b/bishengir/test/Dialect/HFusion/regbase/Normalize/hfusion-normalize-atomic-tensor-input.mlir
+@@ -3,11 +3,11 @@
+ // CHECK-LABEL: func.func @test_NormalizeAtomicOps_XCHG_tensor_ins_no_return
+ // CHECK: scope.scope : () -> () {
+ // CHECK: %[[LOCK:.*]] = hivm.hir.create_sync_block_lock : memref<1xi64>
+-// CHECK: hivm.hir.sync_block_lock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ // CHECK: memref.copy %[[GM:.*]], %[[TMP:.*]] : memref<1x1x4x4xi32, strided<[16, 16, 4, 1], offset: ?>> to memref<1x1x4x4xi32>
+ // CHECK: bufferization.materialize_in_destination %[[UB:.*]] in writable %[[GM]] : (tensor<1x1x4x4xi32>, memref<1x1x4x4xi32, strided<[16, 16, 4, 1], offset: ?>>) -> ()
+ // CHECK-NOT: memref.copy %[[TMP]], %{{.*}}
+-// CHECK: hivm.hir.sync_block_unlock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ // CHECK: scope.return
+ // CHECK: } {hivm.allow_flatten, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+ // CHECK-NOT: hfusion.atomic_xchg
+@@ -83,11 +83,11 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+ // CHECK: bufferization.materialize_in_destination %{{.*}} in writable %{{.*}} : (tensor<4xi16>, memref<4xi16>) -> ()
+ // CHECK: bufferization.materialize_in_destination %{{.*}} in writable %{{.*}} : (tensor<4xi16>, memref<4xi16>) -> ()
+ // CHECK: %[[LOCK:.*]] = hivm.hir.create_sync_block_lock : memref<1xi64>
+-// CHECK: hivm.hir.sync_block_lock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ // CHECK: %[[CMP:.*]] = hfusion.compare {compare_fn = #hfusion.compare_fn<veq>} ins(%{{.*}}, %{{.*}} : tensor<4xi16>, tensor<4xi16>) outs(%{{.*}} : tensor<4xi1>) -> tensor<4xi1>
+ // CHECK: %[[SEL:.*]] = hfusion.select ins(%[[CMP]], %{{.*}}, %{{.*}} : tensor<4xi1>, tensor<4xi16>, tensor<4xi16>) outs(%{{.*}} : tensor<4xi16>) -> tensor<4xi16>
+ // CHECK: bufferization.materialize_in_destination %[[SEL]] in writable %{{.*}} : (tensor<4xi16>, memref<4xi16>) -> ()
+-// CHECK: hivm.hir.sync_block_unlock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+   func.func @test_NormalizeAtomicOps_CAS_tensor_ins(%arg0: memref<4xi16>, %arg1: tensor<4xi16>, %arg2: tensor<4xi16>) {
+     hfusion.atomic_cas ins(%arg1, %arg2 : tensor<4xi16>, tensor<4xi16>) outs(%arg0 : memref<4xi16>)
+diff --git a/bishengir/test/Dialect/HIVM/hivm-op-decompose.mlir b/bishengir/test/Dialect/HIVM/hivm-op-decompose.mlir
+index 40572a120..c5b95c705 100644
+--- a/bishengir/test/Dialect/HIVM/hivm-op-decompose.mlir
++++ b/bishengir/test/Dialect/HIVM/hivm-op-decompose.mlir
+@@ -2283,3 +2283,16 @@ func.func @test_scalar_f32_to_si64(%0: f32, %1 : memref<1xi64>) {
+   memref.store %6, %1[%c0] : memref<1xi64>
+   return
+ }
++
++// -----
++// A5 leftover software atomics in hivm-decompose-op stay unordered.
++module attributes {hacc.target = #hacc.target<"Ascend950PR_9599">} {
++  // CHECK: hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var
++  // CHECK: hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var
++  func.func @test_decompose_atomic_and_op_a5(%arg0: memref<?xi8> {hacc.arg_type = #hacc.arg_type<sync_block_lock>}, %arg1: memref<16xi32>, %arg2: memref<16xi32>) {
++    %alloc = memref.alloc() : memref<16xi32>
++    hivm.hir.load ins(%arg1 : memref<16xi32>) outs(%alloc : memref<16xi32>)
++    hivm.hir.store ins(%alloc : memref<16xi32>) outs(%arg2 : memref<16xi32>) atomic = <and>
++    return
++  }
++}
+diff --git a/bishengir/test/Dialect/HIVM/lower-create-sync-block-lock.mlir b/bishengir/test/Dialect/HIVM/lower-create-sync-block-lock.mlir
+index b3ac3e624..c72c44f31 100644
+--- a/bishengir/test/Dialect/HIVM/lower-create-sync-block-lock.mlir
++++ b/bishengir/test/Dialect/HIVM/lower-create-sync-block-lock.mlir
+@@ -29,12 +29,18 @@ module {
+ module attributes {hivm.module_core_type = #hivm.module_core_type<MIX>} {
+   func.func @test_unordered_lock_mix_subblock_stride(
+       %arg0: memref<?xi8>) -> (tensor<1xi64>, tensor<1xi64>) {
+-    %lock0 = hivm.hir.create_sync_block_lock from %arg0
+-        {hivm.sync_block_lock_unordered} :
++    %lock0 = hivm.hir.create_sync_block_lock from %arg0 :
+         from memref<?xi8> to memref<1xi64>
+-    %lock1 = hivm.hir.create_sync_block_lock from %arg0
+-        {hivm.sync_block_lock_unordered} :
++    hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>}
++        lock_var(%lock0 : memref<1xi64>)
++    hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>}
++        lock_var(%lock0 : memref<1xi64>)
++    %lock1 = hivm.hir.create_sync_block_lock from %arg0 :
+         from memref<?xi8> to memref<1xi64>
++    hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>}
++        lock_var(%lock1 : memref<1xi64>)
++    hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>}
++        lock_var(%lock1 : memref<1xi64>)
+     %res0 = bufferization.to_tensor %lock0 restrict writable : memref<1xi64>
+     %res1 = bufferization.to_tensor %lock1 restrict writable : memref<1xi64>
+     return %res0, %res1 : tensor<1xi64>, tensor<1xi64>
+diff --git a/bishengir/test/Dialect/HIVM/mark-sync-block-lock-with-subblock.mlir b/bishengir/test/Dialect/HIVM/mark-sync-block-lock-with-subblock.mlir
+index cb5663106..869a5fb9a 100644
+--- a/bishengir/test/Dialect/HIVM/mark-sync-block-lock-with-subblock.mlir
++++ b/bishengir/test/Dialect/HIVM/mark-sync-block-lock-with-subblock.mlir
+@@ -50,54 +50,54 @@ module attributes {hacc.hivmc_version = #hacc.hivmc_version<"0.2.0">} {
+ // CHECK-LABEL: func.func @skips_hivmc_below_0_2_0
+ // CHECK: hivm.hir.sync_block_lock lock_var(
+ // CHECK: return
+-module attributes {hacc.hivmc_version = #hacc.hivmc_version<"0.1.0">} {
+-  func.func @skips_hivmc_below_0_2_0() attributes {mix_mode = "mix", hacc.function_kind = #hacc.function_kind<DEVICE>} {
+-    %lock = hivm.hir.create_sync_block_lock : memref<1xi64>
+-    hivm.hir.sync_block_lock lock_var(%lock : memref<1xi64>)
+-    return
+-  }
+-}
+-
+-// -----
+-
+-// Regbase modules may not have hivmc_version; mix kernels should still get the
+-// with_subblock marker.
+-// CHECK-LABEL: func.func @marks_without_hivmc_version_on_regbase
+-// CHECK: hivm.hir.sync_block_lock {hivm.sync_block_lock_with_subblock} lock_var(
+-// CHECK: hivm.hir.sync_block_unlock {hivm.sync_block_lock_with_subblock} lock_var(
+-// CHECK: return
+-module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+-  func.func @marks_without_hivmc_version_on_regbase() attributes {mix_mode = "mix", hacc.function_kind = #hacc.function_kind<DEVICE>} {
+-    %lock = hivm.hir.create_sync_block_lock : memref<1xi64>
+-    hivm.hir.sync_block_lock lock_var(%lock : memref<1xi64>)
+-    hivm.hir.sync_block_unlock lock_var(%lock : memref<1xi64>)
+-    return
+-  }
+-}
+-
+-// -----
+-
+-// CHECK-LABEL: func.func @skips_ops_already_tagged
+-// CHECK: hivm.hir.sync_block_lock {hivm.sync_block_lock_with_subblock} lock_var(
+-// CHECK: return
+-module attributes {hacc.hivmc_version = #hacc.hivmc_version<"0.2.0">} {
++module attributes {hacc.hivmc_version = #hacc.hivmc_version<"0.1.0">} {
++  func.func @skips_hivmc_below_0_2_0() attributes {mix_mode = "mix", hacc.function_kind = #hacc.function_kind<DEVICE>} {
++    %lock = hivm.hir.create_sync_block_lock : memref<1xi64>
++    hivm.hir.sync_block_lock lock_var(%lock : memref<1xi64>)
++    return
++  }
++}
++
++// -----
++
++// Regbase modules may not have hivmc_version; mix kernels should still get the
++// with_subblock marker.
++// CHECK-LABEL: func.func @marks_without_hivmc_version_on_regbase
++// CHECK: hivm.hir.sync_block_lock {hivm.sync_block_lock_with_subblock} lock_var(
++// CHECK: hivm.hir.sync_block_unlock {hivm.sync_block_lock_with_subblock} lock_var(
++// CHECK: return
++module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
++  func.func @marks_without_hivmc_version_on_regbase() attributes {mix_mode = "mix", hacc.function_kind = #hacc.function_kind<DEVICE>} {
++    %lock = hivm.hir.create_sync_block_lock : memref<1xi64>
++    hivm.hir.sync_block_lock lock_var(%lock : memref<1xi64>)
++    hivm.hir.sync_block_unlock lock_var(%lock : memref<1xi64>)
++    return
++  }
++}
++
++// -----
++
++// CHECK-LABEL: func.func @skips_ops_already_tagged
++// CHECK: hivm.hir.sync_block_lock {hivm.sync_block_lock_with_subblock} lock_var(
++// CHECK: return
++module attributes {hacc.hivmc_version = #hacc.hivmc_version<"0.2.0">} {
+   func.func @skips_ops_already_tagged() attributes {mix_mode = "mix", hacc.function_kind = #hacc.function_kind<DEVICE>} {
+     %lock = hivm.hir.create_sync_block_lock : memref<1xi64>
+     hivm.hir.sync_block_lock {hivm.sync_block_lock_with_subblock} lock_var(%lock : memref<1xi64>)
+     return
+   }
+ }
+-
+-// -----
+-
+-// CHECK-LABEL: func.func @marks_unordered_lock_in_mix
+-// CHECK: hivm.hir.sync_block_lock {hivm.sync_block_lock_unordered, hivm.sync_block_lock_with_subblock}
+-// CHECK: hivm.hir.sync_block_unlock {hivm.sync_block_lock_unordered, hivm.sync_block_lock_with_subblock}
+-module attributes {hacc.hivmc_version = #hacc.hivmc_version<"0.2.0">} {
+-  func.func @marks_unordered_lock_in_mix() attributes {mix_mode = "mix", hacc.function_kind = #hacc.function_kind<DEVICE>} {
+-    %lock = hivm.hir.create_sync_block_lock : memref<1xi64>
+-    hivm.hir.sync_block_lock {hivm.sync_block_lock_unordered} lock_var(%lock : memref<1xi64>)
+-    hivm.hir.sync_block_unlock {hivm.sync_block_lock_unordered} lock_var(%lock : memref<1xi64>)
+-    return
+-  }
+-}
++
++// -----
++
++// CHECK-LABEL: func.func @marks_unordered_lock_in_mix
++// CHECK: hivm.hir.sync_block_lock {hivm.sync_block_lock_with_subblock, ordering = #hivm.ordering<unordered>}
++// CHECK: hivm.hir.sync_block_unlock {hivm.sync_block_lock_with_subblock, ordering = #hivm.ordering<unordered>}
++module attributes {hacc.hivmc_version = #hacc.hivmc_version<"0.2.0">} {
++  func.func @marks_unordered_lock_in_mix() attributes {mix_mode = "mix", hacc.function_kind = #hacc.function_kind<DEVICE>} {
++    %lock = hivm.hir.create_sync_block_lock : memref<1xi64>
++    hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%lock : memref<1xi64>)
++    hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%lock : memref<1xi64>)
++    return
++  }
++}
+diff --git a/bishengir/test/Dialect/HIVM/regbase/Normalize/hivm-normalize-atomic-ops.mlir b/bishengir/test/Dialect/HIVM/regbase/Normalize/hivm-normalize-atomic-ops.mlir
+index 09eff8f83..22c7a87c0 100644
+--- a/bishengir/test/Dialect/HIVM/regbase/Normalize/hivm-normalize-atomic-ops.mlir
++++ b/bishengir/test/Dialect/HIVM/regbase/Normalize/hivm-normalize-atomic-ops.mlir
+@@ -2,12 +2,12 @@
+ 
+ // CHECK-LABEL: func.func @test_NormalizeAtomicOps_Elemwise_atomic_or_i16
+ // CHECK: %[[LOCK:.*]] = hivm.hir.create_sync_block_lock : memref<1xi64>
+-// CHECK: hivm.hir.sync_block_lock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ // CHECK: %[[LHS:.*]] = bufferization.to_tensor %{{.*}} restrict writable : memref<256xi16>
+ // CHECK: %[[DST:.*]] = tensor.empty() : tensor<256xi16>
+ // CHECK: %[[RES:.*]] = hivm.hir.vor ins(%[[LHS]], %{{.*}} : tensor<256xi16>, tensor<256xi16>) outs(%[[DST]] : tensor<256xi16>) -> tensor<256xi16>
+ // CHECK: bufferization.materialize_in_destination %[[RES]] in writable %{{.*}} : (tensor<256xi16>, memref<256xi16, strided<[1], offset: ?>>) -> ()
+-// CHECK: hivm.hir.sync_block_unlock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ // CHECK-NOT: bufferization.to_memref
+ // CHECK-NOT: hivm.hir.store
+ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+@@ -25,11 +25,11 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+ 
+ // CHECK-LABEL: func.func @test_NormalizeAtomicOps_CAS_atomic_cas_i16
+ // CHECK: %[[LOCK:.*]] = hivm.hir.create_sync_block_lock : memref<1xi64>
+-// CHECK: hivm.hir.sync_block_lock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ // CHECK: %[[CMP:.*]] = hivm.hir.vcmp
+ // CHECK: %[[SEL:.*]] = hivm.hir.vsel ins(%[[CMP]], %{{.*}}, %{{.*}} : tensor<256xi1>, tensor<256xi16>, tensor<256xi16>) outs(%{{.*}} : tensor<256xi16>) -> tensor<256xi16>
+ // CHECK: bufferization.materialize_in_destination %[[SEL]] in writable %{{.*}} : (tensor<256xi16>, memref<256xi16, strided<[1]>>) -> ()
+-// CHECK: hivm.hir.sync_block_unlock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ // CHECK-NOT: bufferization.to_memref
+ // CHECK-NOT: hivm.hir.atomic_cas
+ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+@@ -52,10 +52,10 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+ // CHECK-LABEL: func.func @test_NormalizeAtomicOps_XCHG_atomic_xchg_i16
+ // CHECK: scope.scope : () -> () {
+ // CHECK: %[[LOCK:.*]] = hivm.hir.create_sync_block_lock : memref<1xi64>
+-// CHECK: hivm.hir.sync_block_lock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ // CHECK: memref.copy %{{.*}}, %{{.*}} : memref<256xi16, strided<[1]>> to memref<256xi16>
+ // CHECK: bufferization.materialize_in_destination %{{.*}} in writable %{{.*}} : (tensor<256xi16>, memref<256xi16, strided<[1]>>) -> ()
+-// CHECK: hivm.hir.sync_block_unlock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ // CHECK: scope.return
+ // CHECK: } {hivm.allow_flatten, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+ // CHECK-NOT: bufferization.to_memref
+diff --git a/bishengir/test/Dialect/HIVM/regbase/Normalize/hivm-normalize-atomic-tensor-input.mlir b/bishengir/test/Dialect/HIVM/regbase/Normalize/hivm-normalize-atomic-tensor-input.mlir
+index 92bf35d30..66701d872 100644
+--- a/bishengir/test/Dialect/HIVM/regbase/Normalize/hivm-normalize-atomic-tensor-input.mlir
++++ b/bishengir/test/Dialect/HIVM/regbase/Normalize/hivm-normalize-atomic-tensor-input.mlir
+@@ -3,12 +3,12 @@
+ // CHECK-LABEL: func.func @test_NormalizeAtomicOps_Store_tensor_ins_atomic_or
+ // CHECK: bufferization.materialize_in_destination %[[UB:.*]] in writable %{{.*}} : (tensor<256xi16>, memref<256xi16>) -> ()
+ // CHECK: %[[LOCK:.*]] = hivm.hir.create_sync_block_lock : memref<1xi64>
+-// CHECK: hivm.hir.sync_block_lock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ // CHECK: %[[LHS:.*]] = bufferization.to_tensor %{{.*}} restrict writable : memref<256xi16>
+ // CHECK: %[[DST:.*]] = tensor.empty() : tensor<256xi16>
+ // CHECK: %[[RES:.*]] = hivm.hir.vor ins(%[[LHS]], %{{.*}} : tensor<256xi16>, tensor<256xi16>) outs(%[[DST]] : tensor<256xi16>) -> tensor<256xi16>
+ // CHECK: bufferization.materialize_in_destination %[[RES]] in writable %{{.*}} : (tensor<256xi16>, memref<256xi16, strided<[1], offset: ?>>) -> ()
+-// CHECK: hivm.hir.sync_block_unlock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+   func.func @test_NormalizeAtomicOps_Store_tensor_ins_atomic_or(%arg0 : memref<?xi16> {tt.divisibility = 16 : i32}, %arg1 : tensor<256xi16>) {
+     %c256_i32 = arith.constant 256 : i32
+@@ -40,13 +40,13 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+ // CHECK-LABEL: func.func @test_NormalizeAtomicOps_Store_tensor_ins_atomic_dyn_and
+ // CHECK: bufferization.materialize_in_destination %[[UB:.*]] in writable %{{.*}} : (tensor<?x?xi16>, memref<?x?xi16, strided<[256, 1]>>) -> ()
+ // CHECK: %[[LOCK:.*]] = hivm.hir.create_sync_block_lock : memref<1xi64>
+-// CHECK: hivm.hir.sync_block_lock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ // CHECK: memref.copy %[[GM:.*]], %{{.*}} : memref<?x?xi16, strided<[512, 1], offset: ?>> to memref<?x?xi16, strided<[256, 1]>>
+ // CHECK: %[[DST:.*]] = tensor.empty() : tensor<12x256xi16>
+ // CHECK: %[[RES:.*]] = hivm.hir.vand ins(%{{.*}}, %{{.*}} : tensor<12x256xi16>, tensor<12x256xi16>) outs(%[[DST]] : tensor<12x256xi16>) -> tensor<12x256xi16>
+ // CHECK: %[[SLICE:.*]] = tensor.extract_slice %[[RES]][0, 0] [%{{.*}}, %{{.*}}] [1, 1] : tensor<12x256xi16> to tensor<?x?xi16>
+ // CHECK: bufferization.materialize_in_destination %[[SLICE]] in writable %[[GM]] : (tensor<?x?xi16>, memref<?x?xi16, strided<[512, 1], offset: ?>>) -> ()
+-// CHECK: hivm.hir.sync_block_unlock lock_var(%[[LOCK]] : memref<1xi64>)
++// CHECK: hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%[[LOCK]] : memref<1xi64>)
+ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+   func.func @test_NormalizeAtomicOps_Store_tensor_ins_atomic_dyn_and(%arg0: memref<?xi16>, %arg1: memref<?xi16>, %arg2: index, %arg3: index, %arg4: index) {
+     %reinterpret_cast = memref.reinterpret_cast %arg0 to offset: [%arg4], sizes: [12, 256], strides: [512, 1] : memref<?xi16> to memref<12x256xi16, strided<[512, 1], offset: ?>>
+diff --git a/bishengir/test/Dialect/HIVM/sync-block-hoisting.mlir b/bishengir/test/Dialect/HIVM/sync-block-hoisting.mlir
+index 6e8e371ae..e8f7a5351 100644
+--- a/bishengir/test/Dialect/HIVM/sync-block-hoisting.mlir
++++ b/bishengir/test/Dialect/HIVM/sync-block-hoisting.mlir
+@@ -80,3 +80,25 @@ func.func @hoist_sync_in_for_loop_if_statement(%arg0: memref<16xi32>, %arg1: mem
+   }
+   return
+ }
++
++// -----
++
++// Unordered lock (native $ordering): create may hoist; lock/unlock stay in loop.
++// CHECK-LABEL: func.func @unordered_lock_stays_in_for_loop(
++// CHECK: hivm.hir.create_sync_block_lock
++// CHECK: scf.for
++// CHECK: hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>}
++// CHECK: hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>}
++func.func @unordered_lock_stays_in_for_loop(%arg0: memref<16xi32>, %arg1: memref<16xi32>) {
++  %c1_i32 = arith.constant 1 : i32
++  %c8_i32 = arith.constant 8 : i32
++  %c0_i32 = arith.constant 0 : i32
++  scf.for %arg2 = %c0_i32 to %c8_i32 step %c1_i32  : i32 {
++    %0 = hivm.hir.create_sync_block_lock : memref<1xi64>
++    hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%0 : memref<1xi64>)
++    %alloc = memref.alloc() : memref<16xi32>
++    hivm.hir.vadd ins(%arg0, %arg1 : memref<16xi32>, memref<16xi32>) outs(%alloc : memref<16xi32>)
++    hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%0 : memref<1xi64>)
++  }
++  return
++}
+diff --git a/bishengir/test/Dialect/HIVM/sync-block-lock-unordered.mlir b/bishengir/test/Dialect/HIVM/sync-block-lock-unordered.mlir
+index 729358ba3..98295027c 100644
+--- a/bishengir/test/Dialect/HIVM/sync-block-lock-unordered.mlir
++++ b/bishengir/test/Dialect/HIVM/sync-block-lock-unordered.mlir
+@@ -1,32 +1,38 @@
+ // RUN: bishengir-opt --hivm-insert-infer-sync-block-lock-num-and-init-func -split-input-file %s | FileCheck %s
+ 
+-// CHECK: func.func @unordered_single_lock_infer_sync_block_lock_num_function() -> i64
+-// CHECK: %[[NUM:.*]] = arith.constant 4294967296 : i64
+-// CHECK: return %[[NUM]]
+-// CHECK: func.func @unordered_single_lock_infer_sync_block_lock_init_function() -> i64
+-// CHECK: %[[INIT:.*]] = arith.constant 0 : i64
+-// CHECK: return %[[INIT]]
+-// CHECK-LABEL: func.func @unordered_single_lock(
+-func.func @unordered_single_lock(
++// CHECK: func.func @unordered_single_lock_infer_sync_block_lock_num_function() -> i64
++// CHECK: %[[NUM:.*]] = arith.constant 4294967296 : i64
++// CHECK: return %[[NUM]]
++// CHECK: func.func @unordered_single_lock_infer_sync_block_lock_init_function() -> i64
++// CHECK: %[[INIT:.*]] = arith.constant 0 : i64
++// CHECK: return %[[INIT]]
++// CHECK-LABEL: func.func @unordered_single_lock(
++func.func @unordered_single_lock(
+               %arg0: i64 {hacc.arg_type = #hacc.arg_type<ffts_base_address>},
+               %arg1: memref<?xi8> {hacc.arg_type = #hacc.arg_type<sync_block_lock>}) {
+-  hivm.hir.create_sync_block_lock from %arg1 {hivm.sync_block_lock_unordered} : from memref<?xi8> to memref<1xi64>
++  %lock = hivm.hir.create_sync_block_lock from %arg1 : from memref<?xi8> to memref<1xi64>
++  hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%lock : memref<1xi64>)
++  hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%lock : memref<1xi64>)
+   return
+ }
+ 
+ // -----
+ 
+-// CHECK: func.func @unordered_two_locks_infer_sync_block_lock_num_function() -> i64
+-// CHECK: %[[NUM:.*]] = arith.constant 8589934592 : i64
+-// CHECK: return %[[NUM]]
+-// CHECK: func.func @unordered_two_locks_infer_sync_block_lock_init_function() -> i64
+-// CHECK: %[[INIT:.*]] = arith.constant 0 : i64
+-// CHECK: return %[[INIT]]
+-// CHECK-LABEL: func.func @unordered_two_locks(
+-func.func @unordered_two_locks(
++// CHECK: func.func @unordered_two_locks_infer_sync_block_lock_num_function() -> i64
++// CHECK: %[[NUM:.*]] = arith.constant 8589934592 : i64
++// CHECK: return %[[NUM]]
++// CHECK: func.func @unordered_two_locks_infer_sync_block_lock_init_function() -> i64
++// CHECK: %[[INIT:.*]] = arith.constant 0 : i64
++// CHECK: return %[[INIT]]
++// CHECK-LABEL: func.func @unordered_two_locks(
++func.func @unordered_two_locks(
+               %arg0: i64 {hacc.arg_type = #hacc.arg_type<ffts_base_address>},
+               %arg1: memref<?xi8> {hacc.arg_type = #hacc.arg_type<sync_block_lock>}) {
+-  hivm.hir.create_sync_block_lock from %arg1 {hivm.sync_block_lock_unordered} : from memref<?xi8> to memref<1xi64>
+-  hivm.hir.create_sync_block_lock from %arg1 {hivm.sync_block_lock_unordered} : from memref<?xi8> to memref<1xi64>
++  %lock0 = hivm.hir.create_sync_block_lock from %arg1 : from memref<?xi8> to memref<1xi64>
++  hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%lock0 : memref<1xi64>)
++  hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%lock0 : memref<1xi64>)
++  %lock1 = hivm.hir.create_sync_block_lock from %arg1 : from memref<?xi8> to memref<1xi64>
++  hivm.hir.sync_block_lock {ordering = #hivm.ordering<unordered>} lock_var(%lock1 : memref<1xi64>)
++  hivm.hir.sync_block_unlock {ordering = #hivm.ordering<unordered>} lock_var(%lock1 : memref<1xi64>)
+   return
+ }
+diff --git a/bishengir/test/Dialect/Triton/lower-remaining-tensor-dialect.mlir b/bishengir/test/Dialect/Triton/lower-remaining-tensor-dialect.mlir
+index 13df07c58..853b7ab90 100644
+--- a/bishengir/test/Dialect/Triton/lower-remaining-tensor-dialect.mlir
++++ b/bishengir/test/Dialect/Triton/lower-remaining-tensor-dialect.mlir
+@@ -53,8 +53,8 @@ module {
+       // expected-error @+1 {{tensor.yield is an unsupported tensor dialect operation}}
+       tensor.yield %val : i32
+     } : tensor<2xi32> to tensor<4xi32>
+-    
++
+     tt.store %dstPtr, %res : !tt.ptr<tensor<4xi32>>
+     tt.return
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/bishengir/test/Dialect/Triton/rewrite-slice-op-to-memory-ops.mlir b/bishengir/test/Dialect/Triton/rewrite-slice-op-to-memory-ops.mlir
+index be9bb573d..b1397d6c5 100644
+--- a/bishengir/test/Dialect/Triton/rewrite-slice-op-to-memory-ops.mlir
++++ b/bishengir/test/Dialect/Triton/rewrite-slice-op-to-memory-ops.mlir
+@@ -15,7 +15,7 @@
+ // CHECK: %[[PTR:.*]] = tt.addptr %[[SPLAT]], %[[ADD]] : tensor<2x6x!tt.ptr<f32>>, tensor<2x6xi32>
+ // CHECK: %[[LOAD:.*]] = tt.load %[[PTR]] : tensor<2x6x!tt.ptr<f32>>
+ // CHECK: %[[TRUNC:.*]] = arith.truncf %[[LOAD]] : tensor<2x6xf32> to tensor<2x6xf16>
+-// CHECK: tt.store %{{.*}}, %[[TRUNC]] : tensor<2x6x!tt.ptr<f16>> 
++// CHECK: tt.store %{{.*}}, %[[TRUNC]] : tensor<2x6x!tt.ptr<f16>>
+ tt.func @extractSlice(%src: !tt.ptr<f32>, %dst: !tt.ptr<f16>) {
+   %0 = tt.make_range {end = 6 : i32, start = 0 : i32} : tensor<6xi32>
+   %1 = tt.make_range {end = 4 : i32, start = 0 : i32} : tensor<4xi32>
+@@ -67,7 +67,7 @@ tt.func @extractSlice(%src: !tt.ptr<f32>, %dst: !tt.ptr<f16>) {
+ // CHECK: %[[LOAD:.*]] = tt.load %[[PTR]] : tensor<2x6x!tt.ptr<f32>>
+ // CHECK: %[[TRUNC:.*]] = arith.truncf %[[LOAD]] : tensor<2x6xf32> to tensor<2x6xf16>
+ // CHECK: %[[ADD:.*]] = arith.addf %[[TRUNC]], %[[TRUNC]] : tensor<2x6xf16>
+-// CHECK: tt.store %{{.*}}, %[[ADD]] : tensor<2x6x!tt.ptr<f16>> 
++// CHECK: tt.store %{{.*}}, %[[ADD]] : tensor<2x6x!tt.ptr<f16>>
+ tt.func @extractSliceBinaryOp(%src: !tt.ptr<f32>, %dst: !tt.ptr<f16>) {
+   %0 = tt.make_range {end = 6 : i32, start = 0 : i32} : tensor<6xi32>
+   %1 = tt.make_range {end = 4 : i32, start = 0 : i32} : tensor<4xi32>
+@@ -179,13 +179,13 @@ tt.func @extractSliceTensorPtrOffset(%src: !tt.ptr<f32>, %dst: !tt.ptr<f16>, %of
+ // CHECK-DAG: %[[CMP_2:.*]] = arith.cmpi slt, %[[MASK_RANGE_2]], %[[CST_3]] : tensor<2xi32>
+ // CHECK-DAG: %[[MASK_EXPAND_2:.*]] = tt.expand_dims %[[CMP_2]] {axis = 1 : i32} : tensor<2xi1> -> tensor<2x1xi1>
+ // CHECK-DAG: %[[MASK_BROADCAST_2:.*]] = tt.broadcast %[[MASK_EXPAND_2]] : tensor<2x1xi1> -> tensor<2x6xi1>
+-// CHECK-DAG: %[[CMP_6:.*]] = arith.cmpi slt, %[[RANGE_6]], %[[CST_5]] : tensor<6xi32> 
++// CHECK-DAG: %[[CMP_6:.*]] = arith.cmpi slt, %[[RANGE_6]], %[[CST_5]] : tensor<6xi32>
+ // CHECK-DAG: %[[MASK_EXPAND_6:.*]] = tt.expand_dims %[[CMP_6]] {axis = 0 : i32} : tensor<6xi1> -> tensor<1x6xi1>
+ // CHECK-DAG: %[[MASK_BROADCAST_6:.*]] = tt.broadcast %[[MASK_EXPAND_6]] : tensor<1x6xi1> -> tensor<2x6xi1>
+ // CHECK-DAG: %[[MASK:.*]] = arith.andi %[[MASK_BROADCAST_2]], %[[MASK_BROADCAST_6]] : tensor<2x6xi1>
+ // CHECK: %[[LOAD:.*]] = tt.load %[[PTR]], %[[MASK]] : tensor<2x6x!tt.ptr<f32>>
+ // CHECK: %[[TRUNC:.*]] = arith.truncf %[[LOAD]] : tensor<2x6xf32> to tensor<2x6xf16>
+-// CHECK: tt.store %{{.*}}, %[[TRUNC]] : tensor<2x6x!tt.ptr<f16>> 
++// CHECK: tt.store %{{.*}}, %[[TRUNC]] : tensor<2x6x!tt.ptr<f16>>
+ tt.func @extractSlicePreserveMask(%src: !tt.ptr<f32>, %dst: !tt.ptr<f16>) {
+   %0 = tt.make_range {end = 6 : i32, start = 0 : i32} : tensor<6xi32>
+   %1 = tt.make_range {end = 4 : i32, start = 0 : i32} : tensor<4xi32>
+@@ -550,7 +550,7 @@ tt.func @insertSliceTensorPtrDoubleStore(%src1: !tt.ptr<f16>, %src2: !tt.ptr<f16
+ // CHECK: %[[IN_SLICE_2D:.*]] = tt.broadcast %{{.*}} : tensor<4x1xi1> -> tensor<4x6xi1>
+ // CHECK: %[[INSERT_MASK:.*]] = arith.xori %[[IN_SLICE_2D]], %{{.*}} : tensor<4x6xi1>
+ // CHECK: %[[STORE_MASK:.*]] = arith.andi %[[INSERT_MASK]], %[[OLD_MASK]] : tensor<4x6xi1>
+-// CHECK: tt.store %{{.*}}, %[[EXT2]], %[[STORE_MASK]] : tensor<4x6x!tt.ptr<f32>> 
++// CHECK: tt.store %{{.*}}, %[[EXT2]], %[[STORE_MASK]] : tensor<4x6x!tt.ptr<f32>>
+ // CHECK: %[[CMP_6:.*]] = arith.cmpi slt, %[[OLD_RANGE_6]], %[[CST_5]] : tensor<6xi32>
+ // CHECK: %[[EXPAND_6:.*]] = tt.expand_dims %[[CMP_6]] {axis = 0 : i32} : tensor<6xi1> -> tensor<1x6xi1>
+ // CHECK: %[[BROADCAST_6:.*]] = tt.broadcast %[[EXPAND_6]] : tensor<1x6xi1> -> tensor<2x6xi1>

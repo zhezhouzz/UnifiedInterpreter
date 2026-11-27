@@ -1,0 +1,8 @@
+{
+  "title": "SIMT function call from SIMD code (sin)",
+  "iid": 1001,
+  "updated_at": "2026-11-20T13:04:38.675+08:00",
+  "state": "closed",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1001",
+  "linked_mrs": []
+}

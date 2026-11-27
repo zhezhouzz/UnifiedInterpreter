@@ -1,0 +1,93 @@
+diff --git a/bishengir/lib/Dialect/HFusion/Transforms/SimplifyOps.cpp b/bishengir/lib/Dialect/HFusion/Transforms/SimplifyOps.cpp
+index cff2d621b..5df8f7290 100644
+--- a/bishengir/lib/Dialect/HFusion/Transforms/SimplifyOps.cpp
++++ b/bishengir/lib/Dialect/HFusion/Transforms/SimplifyOps.cpp
+@@ -315,16 +315,24 @@ static bool isRangePreservingCastChain(ArrayRef<CastOp> castChain) {
+ // Precision rank of a floating point type (higher == more precision). Returns
+ // -1 for non float types so that the float-only checks below skip integer
+ // casts.
++//
++// The rank is the significand width, which is what a down/up round trip is
++// about: a narrow significand rounds every value it sees and widening it
++// afterwards cannot restore the lost low bits. Deriving the rank from the type
++// instead of tabulating a few named types keeps every float type on the same
++// scale. A hardcoded table silently falls through to the -1 sentinel for any
++// type it does not list, and hasPrecisionDownUpPattern then treats those hops
++// as "not a float" and skips them -- which is exactly how `f32 -> f8E4M3FN ->
++// f32` used to escape the check: fp8 was missing from the table, both hops were
++// skipped, CastOpPattern folded the pair away and the fp8 quantization
++// disappeared, including its saturation to +-448 and its 3-bit significand
++// rounding. Ranking by width also keeps low precision types such as f6/f4 or
++// the fp8 variants from ever ranking above f64.
+ static int getPrecisionRank(Type type) {
+-  if (type.isBF16())
+-    return 0; // lowest precision
+-  if (type.isF16())
+-    return 1;
+-  if (type.isF32())
+-    return 2;
+-  if (type.isF64())
+-    return 3; // highest precision
+-  return -1;  // non-float type
++  auto floatType = dyn_cast<FloatType>(type);
++  if (!floatType)
++    return -1; // non-float type
++  return static_cast<int>(floatType.getFPMantissaWidth());
+ }
+ 
+ // Helper to test for fastmath<contract> attribute.
+diff --git a/bishengir/test/Dialect/HFusion/hfusion-simplify-ops-cast-op.mlir b/bishengir/test/Dialect/HFusion/hfusion-simplify-ops-cast-op.mlir
+index eb43e5709..484cd0bb6 100644
+--- a/bishengir/test/Dialect/HFusion/hfusion-simplify-ops-cast-op.mlir
++++ b/bishengir/test/Dialect/HFusion/hfusion-simplify-ops-cast-op.mlir
+@@ -354,3 +354,50 @@ func.func @looped_cast_scalar_iterarg_kept(
+   }
+   return %r : bf16
+ }
++
++
++// -----
++//
++// Regression (#961): `f32 -> f8E4M3FN -> f32` is not the identity. The fp8 hop
++// saturates to +-448 and rounds the significand to 3 bits, so folding the pair
++// away deletes the quantization. getPrecisionRank used to return -1 for fp8,
++// which made hasPrecisionDownUpPattern skip both hops and let CastOpPattern
++// remove the whole chain.
++//
++// CHECK-LABEL: func.func @keep_fp8_roundtrip
++// CHECK: hfusion.cast
++// CHECK-SAME: tensor<16x32xf32>) outs({{.*}} : tensor<16x32xf8E4M3FN>)
++// CHECK: hfusion.cast
++// CHECK-SAME: tensor<16x32xf8E4M3FN>) outs({{.*}} : tensor<16x32xf32>)
++
++func.func @keep_fp8_roundtrip(%src: tensor<16x32xf32>) -> tensor<16x32xf32> {
++  %f8 = tensor.empty() : tensor<16x32xf8E4M3FN>
++  %f32 = tensor.empty() : tensor<16x32xf32>
++  %q = hfusion.cast {cast = #hfusion.type_fn<cast_signed>,
++                     round_mode = #hfusion.round_mode<rint>}
++      ins(%src : tensor<16x32xf32>) outs(%f8 : tensor<16x32xf8E4M3FN>)
++      -> tensor<16x32xf8E4M3FN>
++  %dq = hfusion.cast {cast = #hfusion.type_fn<cast_signed>,
++                      round_mode = #hfusion.round_mode<rint>}
++      ins(%q : tensor<16x32xf8E4M3FN>) outs(%f32 : tensor<16x32xf32>)
++      -> tensor<16x32xf32>
++  return %dq : tensor<16x32xf32>
++}
++
++// -----
++//
++// Counter-case: a single `f32 -> f16` cast is not a round trip and must keep
++// being simplified as before, i.e. this test only guards against over-blocking
++// in getCastChainBlockReason.
++//
++// CHECK-LABEL: func.func @single_downcast_is_not_a_chain
++// CHECK: hfusion.cast
++
++func.func @single_downcast_is_not_a_chain(%src: tensor<16x32xf32>) -> tensor<16x32xf16> {
++  %f16 = tensor.empty() : tensor<16x32xf16>
++  %r = hfusion.cast {cast = #hfusion.type_fn<cast_signed>,
++                     round_mode = #hfusion.round_mode<rint>}
++      ins(%src : tensor<16x32xf32>) outs(%f16 : tensor<16x32xf16>)
++      -> tensor<16x32xf16>
++  return %r : tensor<16x32xf16>
++}

@@ -1,0 +1,200 @@
+[
+  {
+    "function": "ca_f16_plain",
+    "location": "loc(\"<stdin>\":5:5)",
+    "op": "memref.copy",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "ca_f16_plain",
+    "location": "loc(\"<stdin>\":6:5)",
+    "op": "hivm.hir.l12l0",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "ca_f16_transpose",
+    "location": "loc(\"<stdin>\":12:5)",
+    "op": "memref.copy",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "ca_f16_transpose",
+    "location": "loc(\"<stdin>\":13:5)",
+    "op": "hivm.hir.l12l0",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "cb_f16_plain",
+    "location": "loc(\"<stdin>\":19:5)",
+    "op": "memref.copy",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "cb_f16_plain",
+    "location": "loc(\"<stdin>\":20:5)",
+    "op": "hivm.hir.l12l0",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "cb_f16_transpose",
+    "location": "loc(\"<stdin>\":26:5)",
+    "op": "memref.copy",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "cb_f16_transpose",
+    "location": "loc(\"<stdin>\":27:5)",
+    "op": "hivm.hir.l12l0",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "ca_bf16_plain",
+    "location": "loc(\"<stdin>\":33:5)",
+    "op": "memref.copy",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "ca_bf16_plain",
+    "location": "loc(\"<stdin>\":34:5)",
+    "op": "hivm.hir.l12l0",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "ca_bf16_transpose",
+    "location": "loc(\"<stdin>\":40:5)",
+    "op": "memref.copy",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "ca_bf16_transpose",
+    "location": "loc(\"<stdin>\":41:5)",
+    "op": "hivm.hir.l12l0",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "cb_bf16_plain",
+    "location": "loc(\"<stdin>\":47:5)",
+    "op": "memref.copy",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "cb_bf16_plain",
+    "location": "loc(\"<stdin>\":48:5)",
+    "op": "hivm.hir.l12l0",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "cb_bf16_transpose",
+    "location": "loc(\"<stdin>\":54:5)",
+    "op": "memref.copy",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "cb_bf16_transpose",
+    "location": "loc(\"<stdin>\":55:5)",
+    "op": "hivm.hir.l12l0",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "ca_f32_plain",
+    "location": "loc(\"<stdin>\":61:5)",
+    "op": "memref.copy",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "ca_f32_plain",
+    "location": "loc(\"<stdin>\":62:5)",
+    "op": "hivm.hir.l12l0",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "ca_f32_transpose",
+    "location": "loc(\"<stdin>\":68:5)",
+    "op": "memref.copy",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "ca_f32_transpose",
+    "location": "loc(\"<stdin>\":69:5)",
+    "op": "hivm.hir.l12l0",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "cb_f32_plain",
+    "location": "loc(\"<stdin>\":75:5)",
+    "op": "memref.copy",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "cb_f32_plain",
+    "location": "loc(\"<stdin>\":76:5)",
+    "op": "hivm.hir.l12l0",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "cb_f32_transpose",
+    "location": "loc(\"<stdin>\":82:5)",
+    "op": "memref.copy",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "cb_f32_transpose",
+    "location": "loc(\"<stdin>\":83:5)",
+    "op": "hivm.hir.l12l0",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "transpose_hint",
+    "location": "loc(\"<stdin>\":92:5)",
+    "op": "hivm.hir.l12l0",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "a_parent_views",
+    "location": "loc(\"<stdin>\":98:5)",
+    "op": "memref.copy",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "a_parent_views",
+    "location": "loc(\"<stdin>\":101:5)",
+    "op": "hivm.hir.l12l0",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "b_parent_views",
+    "location": "loc(\"<stdin>\":107:5)",
+    "op": "memref.copy",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "b_parent_views",
+    "location": "loc(\"<stdin>\":110:5)",
+    "op": "hivm.hir.l12l0",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "legacy_partition",
+    "location": "loc(\"<stdin>\":116:5)",
+    "op": "memref.copy",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "legacy_partition",
+    "location": "loc(\"<stdin>\":117:5)",
+    "op": "hivm.hir.l12l0",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "gm_to_l1_to_l0",
+    "location": "loc(\"<stdin>\":123:5)",
+    "op": "memref.copy",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "gm_to_l1_to_l0",
+    "location": "loc(\"<stdin>\":124:5)",
+    "op": "hivm.hir.l12l0",
+    "reason": "missing Core interpretation"
+  }
+]

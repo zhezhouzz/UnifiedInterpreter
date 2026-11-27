@@ -1,0 +1,8 @@
+{
+  "title": "[HIVM][DecomposeAllocTensorCopy] AIC 上 alloc_tensor(copy %vbrc) 应重算广播而非全量拷贝",
+  "iid": 1037,
+  "updated_at": "2026-11-21T15:43:23.267+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1037",
+  "linked_mrs": []
+}

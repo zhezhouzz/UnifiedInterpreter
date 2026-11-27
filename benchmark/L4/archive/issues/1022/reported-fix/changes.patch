@@ -1,0 +1,306 @@
+diff --git a/bishengir/include/bishengir/Dialect/HIVM/Transforms/Passes.td b/bishengir/include/bishengir/Dialect/HIVM/Transforms/Passes.td
+index a2ffc428ac..f72058872a 100644
+--- a/bishengir/include/bishengir/Dialect/HIVM/Transforms/Passes.td
++++ b/bishengir/include/bishengir/Dialect/HIVM/Transforms/Passes.td
+@@ -314,7 +314,7 @@ def VFOperandSubstitution
+ def PlanMemory : HIVMPass<"hivm-plan-memory", "ModuleOp"> {
+   let summary = "Plan memory for HIVM Ops";
+   let constructor = "mlir::hivm::createPlanMemoryPass()";
+-  let dependentDialects = ["hivm::HIVMDialect", ];
++  let dependentDialects = ["hivm::HIVMDialect", "annotation::AnnotationDialect"];
+   let options =
+       [Option<"memMode", "mem-plan-mode", "hivm::MemPlanMode",
+               "hivm::MemPlanMode::LOCAL_MEM_PLAN",
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/PlanMemory.cpp b/bishengir/lib/Dialect/HIVM/Transforms/PlanMemory.cpp
+index 577de1b3b0..79072917f1 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/PlanMemory.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/PlanMemory.cpp
+@@ -57,6 +57,126 @@ using namespace util;
+ 
+ namespace {
+ 
++// Follow local views. Other uses must consume the buffer without forwarding
++// its address. This bounds the lifetime of a yielded allocation to one
++// backedge.
++static bool collectLoopBufferUses(Value value, OpOperand *returned,
++                                  SmallVectorImpl<OpOperand *> &accesses) {
++  SetVector<Value> views;
++  views.insert(value);
++  for (unsigned i = 0; i < views.size(); ++i) {
++    for (OpOperand &use : views[i].getUses()) {
++      Operation *user = use.getOwner();
++      if (&use == returned || isa<annotation::MarkOp>(user))
++        continue;
++      if (auto view = dyn_cast<ViewLikeOpInterface>(user)) {
++        views.insert(view->getResult(0));
++        continue;
++      }
++      auto store = dyn_cast<memref::StoreOp>(user);
++      if (isa<memref::LoadOp>(user) ||
++          (store && store.getMemRef() == use.get()) ||
++          ((isa<DestinationStyleOpInterface>(user) || hivm::isVFCall(user)) &&
++           user->getNumResults() == 0)) {
++        accesses.push_back(&use);
++        continue;
++      }
++      return false;
++    }
++  }
++  return true;
++}
++
++// A caller can still observe an initial allocation through another reference.
++// Only reuse it for the copy at the backedge when every other use precedes the
++// loop, including through views.
++static bool canReuseLoopInit(scf::ForOp loop, OpOperand &init) {
++  if (!init.get().getDefiningOp<memref::AllocOp>())
++    return false;
++  SmallVector<OpOperand *> accesses;
++  if (!collectLoopBufferUses(init.get(), &init, accesses))
++    return false;
++  return llvm::all_of(accesses, [&](OpOperand *use) {
++    Operation *user = loop->getBlock()->findAncestorOpInBlock(*use->getOwner());
++    return user && user != loop && user->isBeforeInBlock(loop);
++  });
++}
++
++// A scope executes its body exactly once. Compare operations in the common
++// block through scope boundaries, without assuming execution of other regions.
++static bool precedesInScopes(Operation *writer, Operation *reader) {
++  auto parentScope = [](Operation *op) -> Operation * {
++    return dyn_cast_or_null<scope::ScopeOp>(op->getParentOp());
++  };
++  for (auto *write = writer; write; write = parentScope(write))
++    for (auto *read = reader; read; read = parentScope(read))
++      if (write->getBlock() == read->getBlock())
++        return write != read && write->isBeforeInBlock(read);
++  return false;
++}
++
++static void preserveLoopCarry(scf::ForOp loop, OpOperand &yield,
++                              BlockArgument incoming, OpOperand &init) {
++  OpOperand *returned = &yield;
++  while (auto result = dyn_cast<OpResult>(returned->get())) {
++    auto scope = dyn_cast<scope::ScopeOp>(result.getOwner());
++    if (!scope)
++      break;
++    if (!result.hasOneUse() || scope->getNextNode() != returned->getOwner())
++      return;
++    returned = &scope.getBody()->getTerminator()->getOpOperand(
++        result.getResultNumber());
++  }
++
++  auto alloc = returned->get().getDefiningOp<memref::AllocOp>();
++  if (!alloc || alloc->getBlock() != returned->getOwner()->getBlock() ||
++      !alloc.getType().hasStaticShape() ||
++      !alloc.getType().getLayout().isIdentity())
++    return;
++  auto space = GetBufferSpaceAttr(alloc.getResult());
++  if (!space || space->getAddressSpace() != AddressSpace::UB)
++    return;
++
++  SmallVector<OpOperand *> writes, incomingUses;
++  if (!collectLoopBufferUses(alloc.getResult(), returned, writes) ||
++      !collectLoopBufferUses(incoming, nullptr, incomingUses))
++    return;
++  // A prior write to the fresh allocation makes it unsafe to reuse the old
++  // value's slot, even if their final consumer supports an in-place result.
++  bool overlap = llvm::any_of(writes, [&](OpOperand *use) {
++    Operation *writer = use->getOwner();
++    auto dps = dyn_cast<DestinationStyleOpInterface>(writer);
++    if (!(dps && dps.isDpsInit(use)) &&
++        !hasEffect<MemoryEffects::Write>(writer, use->get()))
++      return false;
++    return llvm::any_of(incomingUses, [&](OpOperand *incomingUse) {
++      return precedesInScopes(writer, incomingUse->getOwner());
++    });
++  });
++  if (!overlap)
++    return;
++
++  // A new allocation at the backedge can share with the previous iteration:
++  // its only write follows all uses of the incoming value in this iteration.
++  OpBuilder builder(returned->getOwner());
++  auto carry = builder.create<memref::AllocOp>(alloc.getLoc(), alloc.getType());
++  if (!canReuseLoopInit(loop, init)) {
++    auto mark = builder.create<annotation::MarkOp>(alloc.getLoc(), carry);
++    mark->setAttr(HIVMMemoryUniqueAttr::getMnemonic(), builder.getUnitAttr());
++  }
++  if (alloc.getType().getRank() == 0) {
++    // HIVM copy library calls require at least one dimension.
++    Value scalar =
++        builder.create<memref::LoadOp>(alloc.getLoc(), alloc, ValueRange{});
++    builder.create<memref::StoreOp>(alloc.getLoc(), scalar, carry,
++                                    ValueRange{});
++  } else {
++    builder.create<hivm::CopyOp>(alloc.getLoc(), TypeRange{}, alloc.getResult(),
++                                 carry.getResult());
++  }
++  returned->set(carry);
++}
++
+ bool hasStandaloneMmad(func::FuncOp func) {
+   return func.walk([](MmadL0Op) { return WalkResult::interrupt(); })
+       .wasInterrupted();
+@@ -3811,6 +3931,16 @@ void PlanMemoryPass::runOnOperation() {
+       continue;
+     if (hivm::isVF(funcOp))
+       continue;
++    if (memMode == MemPlanMode::LOCAL_MEM_PLAN &&
++        hacc::utils::isAscend960(moduleOp)) {
++      funcOp.walk([](scf::ForOp loop) {
++        auto yield = cast<scf::YieldOp>(loop.getBody()->getTerminator());
++        for (auto [out, incoming, init] :
++             llvm::zip_equal(yield->getOpOperands(), loop.getRegionIterArgs(),
++                             loop.getInitArgsMutable()))
++          preserveLoopCarry(loop, out, incoming, init);
++      });
++    }
+     // Select once per function. MMAD L1 and functions without MMAD L0 retain
+     // the legacy policy, even when another function in the module uses MMAD L0.
+     this->enableMmadL0Planning = this->memMode == MemPlanMode::LOCAL_MEM_PLAN &&
+diff --git a/bishengir/test/Dialect/HIVM/plan-memory-loop-carry-rank-zero.mlir b/bishengir/test/Dialect/HIVM/plan-memory-loop-carry-rank-zero.mlir
+new file mode 100644
+index 0000000000..4e67d6c742
+--- /dev/null
++++ b/bishengir/test/Dialect/HIVM/plan-memory-loop-carry-rank-zero.mlir
+@@ -0,0 +1,32 @@
++// RUN: bishengir-opt %s --hacc-append-device-spec=target=Ascend960DT_968B7 --hivm-plan-memory | FileCheck %s
++// RUN: bishengir-opt %s --hacc-append-device-spec=target=Ascend960DT_968B7 --hivm-plan-memory --hivm-lower-to-loops --hivm-decompose-op --canonicalize --convert-hivm-to-std -o /dev/null
++
++!ub = memref<f32, #hivm.address_space<ub>>
++
++// CHECK-LABEL: func.func @rank_zero
++// CHECK: %[[SUM:.*]] = arith.addf
++// CHECK-NEXT: memref.store %[[SUM]], %[[NEW:.*]][]
++// CHECK-NEXT: %[[BACK:.*]] = hivm.hir.pointer_cast
++// CHECK-NEXT: %[[VALUE:.*]] = memref.load %[[NEW]][]
++// CHECK-NEXT: memref.store %[[VALUE]], %[[BACK]][]
++// CHECK-NEXT: scf.yield %[[BACK]]
++func.func @rank_zero() -> f32 {
++  %c0 = arith.constant 0 : index
++  %c1 = arith.constant 1 : index
++  %c2 = arith.constant 2 : index
++  %two = arith.constant 2.0 : f32
++  %five = arith.constant 5.0 : f32
++  %initial = memref.alloc() : !ub
++  memref.store %five, %initial[] : !ub
++  %result = scf.for %i = %c0 to %c2 step %c1 iter_args(%prev = %initial) -> (!ub) {
++    %new = memref.alloc() : !ub
++    memref.store %two, %new[] : !ub
++    %a = memref.load %prev[] : !ub
++    %b = memref.load %new[] : !ub
++    %sum = arith.addf %a, %b : f32
++    memref.store %sum, %new[] : !ub
++    scf.yield %new : !ub
++  }
++  %value = memref.load %result[] : !ub
++  return %value : f32
++}
+diff --git a/bishengir/test/Dialect/HIVM/plan-memory-loop-carry.mlir b/bishengir/test/Dialect/HIVM/plan-memory-loop-carry.mlir
+new file mode 100644
+index 0000000000..5643774687
+--- /dev/null
++++ b/bishengir/test/Dialect/HIVM/plan-memory-loop-carry.mlir
+@@ -0,0 +1,101 @@
++// RUN: bishengir-opt %s --hacc-append-device-spec=target=Ascend960DT_968B7 --hivm-plan-memory | FileCheck %s
++// RUN: bishengir-opt %s --hacc-append-device-spec=target=Ascend950PR_950z --hivm-plan-memory | FileCheck %s --check-prefix=A5
++
++!ub = memref<64xf32, #hivm.address_space<ub>>
++!gm = memref<64xf32, #hivm.address_space<gm>>
++
++// Starting at 5, two additions of an initialized 2 must produce 9. Using a
++// single slot for the broadcast and incoming value instead produces 4.
++// CHECK-LABEL: func.func @initialized
++// CHECK-DAG: %[[FRESH_ADDR:.*]] = arith.constant 0 : i64
++// CHECK-DAG: %[[INIT_ADDR:.*]] = arith.constant 256 : i64
++// CHECK: %[[INIT:.*]] = hivm.hir.pointer_cast(%[[INIT_ADDR]])
++// CHECK: iter_args(%[[PREV:.*]] = %[[INIT]])
++// CHECK: %[[FRESH:.*]] = hivm.hir.pointer_cast(%[[FRESH_ADDR]])
++// CHECK: hivm.hir.vbrc {{.*}} outs(%[[FRESH]]
++// CHECK: hivm.hir.vadd ins(%[[PREV]], %[[FRESH]]
++// CHECK: %[[CARRY:.*]] = hivm.hir.pointer_cast(%[[INIT_ADDR]])
++// CHECK: hivm.hir.copy ins(%[[FRESH]] {{.*}} outs(%[[CARRY]]
++// CHECK: scf.yield %[[CARRY]]
++func.func @initialized(%out: !gm) {
++  %c0 = arith.constant 0 : index
++  %c1 = arith.constant 1 : index
++  %c2 = arith.constant 2 : index
++  %two = arith.constant 2.0 : f32
++  %five = arith.constant 5.0 : f32
++  %initial = memref.alloc() : !ub
++  hivm.hir.vbrc ins(%five : f32) outs(%initial : !ub)
++  %result = scf.for %i = %c0 to %c2 step %c1 iter_args(%prev = %initial) -> (!ub) {
++    %fresh = memref.alloc() : !ub
++    scope.scope : () -> () {
++      hivm.hir.vbrc ins(%two : f32) outs(%fresh : !ub)
++      scope.return
++    } {no_inline}
++    hivm.hir.vadd ins(%prev, %fresh : !ub, !ub) outs(%fresh : !ub)
++    scf.yield %fresh : !ub
++  }
++  hivm.hir.store ins(%result : !ub) outs(%out : !gm)
++  return
++}
++
++// A zero-trip loop returns the exact input. With positive trips, an alias
++// retained by the caller still observes the original storage.
++// CHECK-LABEL: func.func @external_init(
++// CHECK-SAME: %[[INIT:[^:]+]]: memref
++// CHECK: %[[LOOP:.*]] = scf.for {{.*}} iter_args(%[[PREV:.*]] = %[[INIT]])
++// CHECK: %[[FRESH:.*]] = hivm.hir.pointer_cast
++// CHECK: hivm.hir.vadd ins(%[[PREV]], %[[FRESH]]
++// CHECK: %[[BACK:.*]] = hivm.hir.pointer_cast
++// CHECK: hivm.hir.copy ins(%[[FRESH]] {{.*}} outs(%[[BACK]]
++// CHECK: scf.yield %[[BACK]]
++// CHECK: return %[[LOOP]]
++func.func @external_init(%initial: !ub, %n: index, %two: f32) -> !ub {
++  %c0 = arith.constant 0 : index
++  %c1 = arith.constant 1 : index
++  %result = scf.for %i = %c0 to %n step %c1 iter_args(%prev = %initial) -> (!ub) {
++    %new = memref.alloc() : !ub
++    hivm.hir.vbrc ins(%two : f32) outs(%new : !ub)
++    hivm.hir.vadd ins(%prev, %new : !ub, !ub) outs(%new : !ub)
++    scf.yield %new : !ub
++  }
++  return %result : !ub
++}
++
++// The single update can already consume its previous value in place.
++// CHECK-LABEL: func.func @single_update
++// CHECK: hivm.hir.vadd
++// CHECK-NEXT: scf.yield
++// A5-LABEL: func.func @single_update
++// A5: hivm.hir.vadd
++// A5-NEXT: scf.yield
++func.func @single_update(%initial: !ub, %n: index) -> !ub {
++  %c0 = arith.constant 0 : index
++  %c1 = arith.constant 1 : index
++  %result = scf.for %i = %c0 to %n step %c1 iter_args(%prev = %initial) -> (!ub) {
++    %new = memref.alloc() : !ub
++    hivm.hir.vadd ins(%prev, %prev : !ub, !ub) outs(%new : !ub)
++    scf.yield %new : !ub
++  }
++  return %result : !ub
++}
++
++// CHECK-LABEL: func.func @scalar_writer
++// CHECK: memref.store {{.*}}, %[[NEW:.*]][
++// CHECK: memref.load %[[PREV:.*]][
++// CHECK: memref.store {{.*}}, %[[NEW]][
++// CHECK: hivm.hir.copy ins(%[[NEW]] {{.*}} outs(%[[BACK:[^ ]+]]
++// CHECK: scf.yield %[[BACK]]
++func.func @scalar_writer(%index: index, %initial: !ub, %n: index, %value: f32) -> !ub {
++  %c0 = arith.constant 0 : index
++  %c1 = arith.constant 1 : index
++  %result = scf.for %i = %c0 to %n step %c1 iter_args(%prev = %initial) -> (!ub) {
++    %new = memref.alloc() : !ub
++    memref.store %value, %new[%index] : !ub
++    %a = memref.load %prev[%index] : !ub
++    %b = memref.load %new[%index] : !ub
++    %sum = arith.addf %a, %b : f32
++    memref.store %sum, %new[%index] : !ub
++    scf.yield %new : !ub
++  }
++  return %result : !ub
++}

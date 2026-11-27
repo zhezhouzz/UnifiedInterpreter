@@ -1,0 +1,24 @@
+{
+  "id": "memory-planning/plan-memory-vf--11-vf_a",
+  "tier": "L3",
+  "category": "memory-planning",
+  "source_ref": "https://gitcode.com/Ascend/AscendNPU-IR/blob/fbdf863a8c8c268e5cfea0d5f1d921e227267fd5/bishengir/test/Dialect/HIVM/plan-memory-vf.mlir",
+  "chip_profile": null,
+  "core_ratio": null,
+  "compile_argv": [
+    "bishengir-opt",
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2",
+    "-hivm-lower-multi-buffer-counter"
+  ],
+  "entry_functions": [
+    "vf_a",
+    "vf_b",
+    "kernel_one_kill"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "split_index": 11,
+  "upstream_path": "bishengir/test/Dialect/HIVM/plan-memory-vf.mlir"
+}

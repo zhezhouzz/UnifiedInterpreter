@@ -1,0 +1,8 @@
+[
+  {
+    "function": "test_infer_plan_memory_if_yield",
+    "location": "loc(\"<stdin>\":15:10)",
+    "op": "scf.if",
+    "reason": "loop-carried values or yielded joins need bindings"
+  }
+]

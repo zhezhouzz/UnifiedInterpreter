@@ -1,0 +1,69 @@
+diff --git a/bishengir/lib/Dialect/HFusion/Transforms/SimplifyOps.cpp b/bishengir/lib/Dialect/HFusion/Transforms/SimplifyOps.cpp
+index f89039fb1..344185b1e 100644
+--- a/bishengir/lib/Dialect/HFusion/Transforms/SimplifyOps.cpp
++++ b/bishengir/lib/Dialect/HFusion/Transforms/SimplifyOps.cpp
+@@ -189,14 +189,8 @@ public:
+ 
+     // Helper to get precision rank for float types (higher = more precision)
+     auto getPrecisionRank = [](Type type) -> int {
+-      if (type.isBF16())
+-        return 0; // lowest precision
+-      if (type.isF16())
+-        return 1;
+-      if (type.isF32())
+-        return 2;
+-      if (type.isF64())
+-        return 3; // highest precision
++      if (auto floatType = mlir::dyn_cast<mlir::FloatType>(type))
++        return floatType.getFPMantissaWidth();
+       return -1;  // non-float type
+     };
+ 
+diff --git a/bishengir/test/Dialect/HFusion/hfusion-simplify-ops.mlir b/bishengir/test/Dialect/HFusion/hfusion-simplify-ops.mlir
+index 92d4195f1..1ae3b1bf8 100644
+--- a/bishengir/test/Dialect/HFusion/hfusion-simplify-ops.mlir
++++ b/bishengir/test/Dialect/HFusion/hfusion-simplify-ops.mlir
+@@ -763,3 +763,43 @@ func.func @hoist_mul_sub_matmul_chain(%a: tensor<128x17xbf16>, %b: tensor<17x19x
+   %matmul3 = linalg.matmul {input_precision = "ieee"} ins(%sub, %d : tensor<128x23xf32>, tensor<23x128xf32>) outs(%init3 : tensor<128x128xf32>) -> tensor<128x128xf32>
+   return %matmul3 : tensor<128x128xf32>
+ }
++
++// -----
++// CHECK-LABEL: @fp8DownUpKept
++// CHECK: hfusion.cast
++// CHECK: hfusion.cast
++// CHECK: return
++func.func @fp8DownUpKept(%arg0: tensor<f32>) -> tensor<f32> {
++    %empty_f8 = tensor.empty() : tensor<f8E4M3FN>
++    %empty_f32 = tensor.empty() : tensor<f32>
++    %0 = hfusion.cast ins(%arg0 : tensor<f32>) outs(%empty_f8 : tensor<f8E4M3FN>) -> tensor<f8E4M3FN>
++    %1 = hfusion.cast ins(%0 : tensor<f8E4M3FN>) outs(%empty_f32 : tensor<f32>) -> tensor<f32>
++    return %1 : tensor<f32>
++}
++
++// -----
++// CHECK-LABEL: @fp8E5M2DownUpKept
++// CHECK: hfusion.cast
++// CHECK: hfusion.cast
++// CHECK: return
++func.func @fp8E5M2DownUpKept(%arg0: tensor<f32>) -> tensor<f32> {
++    %empty_f8 = tensor.empty() : tensor<f8E5M2>
++    %empty_f32 = tensor.empty() : tensor<f32>
++    %0 = hfusion.cast ins(%arg0 : tensor<f32>) outs(%empty_f8 : tensor<f8E5M2>) -> tensor<f8E5M2>
++    %1 = hfusion.cast ins(%0 : tensor<f8E5M2>) outs(%empty_f32 : tensor<f32>) -> tensor<f32>
++    return %1 : tensor<f32>
++}
++
++// -----
++// CHECK-LABEL: @fp8DownUpFastmathFolds
++// CHECK-NOT: hfusion.cast
++// CHECK: return
++func.func @fp8DownUpFastmathFolds(%arg0: tensor<f32>) -> tensor<f32> {
++    %empty_f8 = tensor.empty() : tensor<f8E4M3FN>
++    %empty_f32 = tensor.empty() : tensor<f32>
++    %0 = hfusion.cast {arith.fastmath = #arith.fastmath<contract>} ins(%arg0 : tensor<f32>) outs(%empty_f8 : tensor<f8E4M3FN>) -> tensor<f8E4M3FN>
++    %1 = hfusion.cast ins(%0 : tensor<f8E4M3FN>) outs(%empty_f32 : tensor<f32>) -> tensor<f32>
++    return %1 : tensor<f32>
++}
++
++// -----

@@ -1,0 +1,14 @@
+{
+  "issue": 1026,
+  "mr": "5303",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/5303",
+  "commit": "3b682d4956d76ec6115fa01dc8540d48960950f1",
+  "parent": "3433f3b6d7dafbc86c223fa54bfb874f09fe2e32",
+  "title": "[HFusion][HIVM] fix: Lower counted loops with sliced matmul inputs",
+  "tests": [
+    "bishengir/test/Dialect/HFusion/hfusion-uplift-while-to-for/hfusion-uplift-singleton-counter.mlir",
+    "bishengir/test/Dialect/HIVM/convert-layout-to-transpose.mlir",
+    "bishengir/test/Dialect/HIVM/propagate-convert-layout-cbuf-reshape.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

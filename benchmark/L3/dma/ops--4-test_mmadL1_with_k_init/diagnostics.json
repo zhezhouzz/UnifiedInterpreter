@@ -1,0 +1,20 @@
+[
+  {
+    "function": "test_mmadL1_with_k_init",
+    "location": "loc(\"<stdin>\":3:14)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "test_mmadL1_with_k_init",
+    "location": "loc(\"<stdin>\":12:18)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  },
+  {
+    "function": "test_mmadL1_with_k_init",
+    "location": "loc(\"<stdin>\":13:18)",
+    "op": "memref.alloc",
+    "reason": "allocation space unspecified"
+  }
+]

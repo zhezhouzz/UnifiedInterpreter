@@ -1,0 +1,11 @@
+{
+  "title": "[Bug][A6] Unscaled FP8 grouped GEMM selects the microscaled matrix instruction",
+  "iid": 1017,
+  "updated_at": "2026-11-20T15:12:51.182+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1017",
+  "linked_mrs": [
+    "5331"
+  ],
+  "attachment_commit": "5ba46fddf9a09a45a361360aeaf5d2d4cf7d1e0f"
+}

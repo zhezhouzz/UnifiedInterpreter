@@ -1,0 +1,10 @@
+{
+  "title": "[Feature]: Simplify the L1-to-L0 copy API by inferring copy parameters from buffer views",
+  "iid": 1046,
+  "updated_at": "2026-11-23T10:54:50.004+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1046",
+  "linked_mrs": [
+    "5251"
+  ]
+}

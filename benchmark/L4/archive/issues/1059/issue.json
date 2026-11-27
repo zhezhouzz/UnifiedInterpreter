@@ -1,0 +1,8 @@
+{
+  "title": "[Feature]: Avoid redundant computations after broadcast",
+  "iid": 1059,
+  "updated_at": "2026-11-23T21:43:56.768+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1059",
+  "linked_mrs": []
+}

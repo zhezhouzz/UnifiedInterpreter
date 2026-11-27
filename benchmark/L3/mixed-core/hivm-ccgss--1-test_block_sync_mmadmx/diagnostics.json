@@ -1,0 +1,14 @@
+[
+  {
+    "function": "test_block_sync_mmadmx",
+    "location": "loc(\"<stdin>\":6:5)",
+    "op": "hivm.hir.set_ffts_base_addr",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_block_sync_mmadmx",
+    "location": "loc(\"<stdin>\":29:5)",
+    "op": "hivm.hir.mmadmxL1",
+    "reason": "missing Core interpretation"
+  }
+]

@@ -1,0 +1,11 @@
+{
+  "issue": 1025,
+  "mr": "4137",
+  "commit": "a75cab62dad8cb188b421533b9bdf341d73b724a",
+  "parent": "5b734a755a2b2da824602c68b16518ce92fd6719",
+  "title": "[AscendNPU IR][HFusion][SimplifyOps] fix: support all FP types in hfusion-simplify-ops",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/4137",
+  "tests": [
+    "bishengir/test/Dialect/HFusion/hfusion-simplify-ops.mlir"
+  ]
+}

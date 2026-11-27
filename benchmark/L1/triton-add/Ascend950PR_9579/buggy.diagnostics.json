@@ -1,0 +1,50 @@
+[
+  {
+    "function": "add_kernel",
+    "location": "loc(\"<stdin>\":48:5)",
+    "op": "hivm.hir.set_ctrl",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "add_kernel",
+    "location": "loc(\"<stdin>\":49:5)",
+    "op": "hivm.hir.set_ctrl",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "add_kernel",
+    "location": "loc(\"<stdin>\":62:11)",
+    "op": "arith.maxsi",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "add_kernel",
+    "location": "loc(\"<stdin>\":63:11)",
+    "op": "arith.minsi",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "add_kernel",
+    "location": "loc(\"<stdin>\":67:7)",
+    "op": "func.call",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "add_kernel",
+    "location": "loc(\"<stdin>\":77:7)",
+    "op": "func.call",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "add_kernel",
+    "location": "loc(\"<stdin>\":88:5)",
+    "op": "func.call",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "add_kernel",
+    "location": "loc(\"<stdin>\":94:5)",
+    "op": "hivm.hir.set_ctrl",
+    "reason": "missing Core interpretation"
+  }
+]

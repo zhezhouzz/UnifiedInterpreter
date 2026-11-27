@@ -1,0 +1,20 @@
+{
+  "id": "issue-input/987",
+  "tier": "L3",
+  "category": "issue-input",
+  "source_ref": "https://gitcode.com/Ascend/AscendNPU-IR/blob/bde7b26693ebd2c8d4afe3b378d67a8790120dad/bishengir/test/Conversion/HIVMToStandard/RegBase/convert-hivm-to-standard-ascend960.mlir",
+  "chip_profile": "Ascend960",
+  "core_ratio": null,
+  "compile_argv": [
+    "bishengir-opt",
+    "-allow-unregistered-dialect",
+    "-hivm-graph-sync-solver=solver-version=v2"
+  ],
+  "entry_functions": [
+    "test_mmadmxL1_transpose_with_config"
+  ],
+  "expected_verdict": null,
+  "oracle_note": "Compiler replay and translation regression only. No execution oracle.",
+  "compiler": "fbdf863a8c8c268e5cfea0d5f1d921e227267fd5",
+  "split_index": 3
+}

@@ -1,0 +1,31 @@
+{
+  "id": "missing-wait",
+  "tier": "L1",
+  "category": "protocol-model",
+  "source_ref": "authored protocol",
+  "chip_profile": "Ascend910B1",
+  "core_ratio": "0:1",
+  "compile_argv": [
+    "bishengir-opt",
+    "-canonicalize"
+  ],
+  "entry_functions": [
+    "kernel"
+  ],
+  "expected_verdict": {
+    "buggy": "race",
+    "fixed": "safe"
+  },
+  "oracle_note": "Each GM input lane is 7. vabs must read 7.",
+  "execution": {
+    "streams": [
+      "kernel"
+    ],
+    "initial": {
+      "gm:0": 7
+    },
+    "reads": {
+      "vabs": 7
+    }
+  }
+}

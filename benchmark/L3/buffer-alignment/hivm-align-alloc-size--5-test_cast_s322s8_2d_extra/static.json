@@ -1,0 +1,4 @@
+{
+  "passed": false,
+  "reason": "source does not specify an active-stream configuration"
+}

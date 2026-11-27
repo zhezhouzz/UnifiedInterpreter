@@ -1,0 +1,32 @@
+[
+  {
+    "function": "test_tensor_insert_no_crash",
+    "location": "loc(\"<stdin>\":5:5)",
+    "op": "hivm.hir.set_ffts_base_addr",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_tensor_insert_no_crash",
+    "location": "loc(\"<stdin>\":24:5)",
+    "op": "hivm.hir.mmadL1",
+    "reason": "mmadL1 sync_related_args require internal MTE1/M protocol"
+  },
+  {
+    "function": "test_tensor_insert_no_crash",
+    "location": "loc(\"<stdin>\":35:10)",
+    "op": "tensor.empty",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_tensor_insert_no_crash",
+    "location": "loc(\"<stdin>\":36:17)",
+    "op": "tensor.insert",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_tensor_insert_no_crash",
+    "location": "loc(\"<stdin>\":37:18)",
+    "op": "tensor.extract",
+    "reason": "missing Core interpretation"
+  }
+]

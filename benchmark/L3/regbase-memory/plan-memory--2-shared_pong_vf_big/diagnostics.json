@@ -1,0 +1,44 @@
+[
+  {
+    "function": "shared_pong_l1_outline",
+    "location": "loc(\"<stdin>\":24:7)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "shared_pong_l1_outline",
+    "location": "loc(\"<stdin>\":29:7)",
+    "op": "func.call",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "shared_pong_l1_outline",
+    "location": "loc(\"<stdin>\":31:7)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "shared_pong_l1_outline",
+    "location": "loc(\"<stdin>\":35:7)",
+    "op": "func.call",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "shared_pong_l1_outline",
+    "location": "loc(\"<stdin>\":41:7)",
+    "op": "func.call",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "shared_pong_l1_outline",
+    "location": "loc(\"<stdin>\":43:7)",
+    "op": "func.call",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "shared_pong_l1_outline",
+    "location": "loc(\"<stdin>\":46:7)",
+    "op": "func.call",
+    "reason": "missing Core interpretation"
+  }
+]

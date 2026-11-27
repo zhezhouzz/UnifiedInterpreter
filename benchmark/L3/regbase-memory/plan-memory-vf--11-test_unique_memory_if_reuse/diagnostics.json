@@ -1,0 +1,14 @@
+[
+  {
+    "function": "test_unique_memory_if_reuse",
+    "location": "loc(\"<stdin>\":5:5)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_unique_memory_if_reuse",
+    "location": "loc(\"<stdin>\":12:10)",
+    "op": "scf.if",
+    "reason": "loop-carried values or yielded joins need bindings"
+  }
+]

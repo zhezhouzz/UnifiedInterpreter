@@ -1,0 +1,68 @@
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/CreatePreload.cpp b/bishengir/lib/Dialect/HIVM/Transforms/CreatePreload.cpp
+index a6daceba4..fedb5de3a 100644
+--- a/bishengir/lib/Dialect/HIVM/Transforms/CreatePreload.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/CreatePreload.cpp
+@@ -228,11 +228,15 @@ preprocessLoopArgs(scf::ForOp forOp, SmallVector<Value> &newInitArgs,
+       newInitArgs.push_back(initArg);
+     }
+   }
+-  Value newUpperbound = b.create<arith::MulIOp>(
+-      info.ub.getLoc(), info.maxPreloadValue, info.step);
+-  newUpperbound =
+-      b.create<arith::AddIOp>(info.ub.getLoc(), info.ub, newUpperbound);
+-  return newUpperbound;
++  Value extraIters = b.create<arith::MulIOp>(info.ub.getLoc(),
++                                             info.maxPreloadValue, info.step);
++  Value expandedUb =
++      b.create<arith::AddIOp>(info.ub.getLoc(), info.ub, extraIters);
++  // Keep empty loops empty: extra drain IVs would still run cloned SET/WAIT.
++  Value nonempty = b.create<arith::CmpIOp>(
++      info.ub.getLoc(), arith::CmpIPredicate::slt, info.lb, info.ub);
++  return b.create<arith::SelectOp>(info.ub.getLoc(), nonempty, expandedUb,
++                                   info.lb);
+ }
+ 
+ static Value getPreloadCondition(const PreloadInfo &info, Location loc,
+diff --git a/bishengir/test/Dialect/HIVM/hivm-create-preload-empty-loop.mlir b/bishengir/test/Dialect/HIVM/hivm-create-preload-empty-loop.mlir
+new file mode 100644
+index 000000000..47d376020
+--- /dev/null
++++ b/bishengir/test/Dialect/HIVM/hivm-create-preload-empty-loop.mlir
+@@ -0,0 +1,22 @@
++// RUN: bishengir-opt %s -create-preload | FileCheck %s
++
++// Empty loops (lb >= ub) must not grow by max_preload_num * step.
++
++// CHECK-LABEL: func.func @empty_preload_loop
++// CHECK-SAME: %[[LB:.*]]: i32, %[[UB:.*]]: i32, %[[STEP:.*]]: i32
++// CHECK: %[[EXTRA:.*]] = arith.muli %[[STEP]], %{{.+}}
++// CHECK: %[[EXPANDED:.*]] = arith.addi %[[UB]], %[[EXTRA]]
++// CHECK: %[[NONEMPTY:.*]] = arith.cmpi slt, %[[LB]], %[[UB]]
++// CHECK: %[[NEWUB:.*]] = arith.select %[[NONEMPTY]], %[[EXPANDED]], %[[LB]]
++// CHECK: scf.for {{.*}} = %[[LB]] to %[[NEWUB]] step %[[STEP]]
++func.func @empty_preload_loop(%lb: i32, %ub: i32, %step: i32) -> i32 {
++  %c0 = arith.constant 0 : i32
++  %0 = scf.for %i = %lb to %ub step %step iter_args(%acc = %c0) -> (i32) : i32 {
++    %s0 = scope.scope : () -> i32 {
++      %r0 = arith.addi %acc, %i : i32
++      scope.return %r0 : i32
++    } {no_inline, hivm.preload_num = 0 : i32, hivm.max_preload_num = 2 : i32}
++    scf.yield %s0 : i32
++  }
++  return %0 : i32
++}
+diff --git a/bishengir/test/Dialect/HIVM/hivm-create-preload.mlir b/bishengir/test/Dialect/HIVM/hivm-create-preload.mlir
+index 7b8dee1c5..c919c7500 100644
+--- a/bishengir/test/Dialect/HIVM/hivm-create-preload.mlir
++++ b/bishengir/test/Dialect/HIVM/hivm-create-preload.mlir
+@@ -676,7 +676,9 @@ module {
+   // CHECK-DAG: %[[C1:.*]] = arith.constant 1 : i32
+   // CHECK-DAG: %[[C2:.*]] = arith.constant 2 : i32
+ 
+-  // CHECK: %[[NEW_UB:.*]] = arith.addi %[[UB]], %[[C2]] : i32
++  // CHECK: %[[EXTRA:.*]] = arith.addi %[[UB]], %[[C2]] : i32
++  // CHECK: %[[NONEMPTY:.*]] = arith.cmpi slt, %[[LB]], %[[UB]] : i32
++  // CHECK: %[[NEW_UB:.*]] = arith.select %[[NONEMPTY]], %[[EXTRA]], %[[LB]] : i32
+   // CHECK: %[[RESULTS:.*]]:2 = scf.for %[[NEW_IV:.*]] = %[[LB]] to %[[NEW_UB]] step %[[C1]] iter_args(%[[ARG0:.*]] = %[[INIT0]], %[[ARG1:.*]] = %[[INIT1]]) -> (i32, i32) : i32 {
+ 
+   // CHECK: %[[MAPPED_IV:.*]] = arith.subi %[[NEW_IV]], %[[C1]] : i32

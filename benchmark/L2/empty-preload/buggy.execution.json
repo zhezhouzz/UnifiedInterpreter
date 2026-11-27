@@ -1,0 +1,6 @@
+{
+  "verdict": "deadlock",
+  "states_discovered": 1,
+  "witness": [],
+  "observation": "blocked PCs (0, 0, 0), queues (), live tokens []"
+}

@@ -1,0 +1,35 @@
+{
+  "id": "cross-loop-placement",
+  "tier": "L2",
+  "category": "protocol-model",
+  "source_ref": "!3508 loop-placement minimal model",
+  "chip_profile": "Ascend910B1",
+  "core_ratio": "1:1",
+  "compile_argv": [
+    "bishengir-opt",
+    "-canonicalize"
+  ],
+  "entry_functions": [
+    "producer",
+    "consumer"
+  ],
+  "expected_verdict": {
+    "buggy": "deadlock",
+    "fixed": "safe"
+  },
+  "oracle_note": "Two dynamic rounds at both endpoints. Hoisting set out of the loop leaves the second queued MTE2 wait blocked.",
+  "execution": {
+    "streams": [
+      "producer",
+      "consumer"
+    ],
+    "initial": {},
+    "arguments": {
+      "0": 2
+    },
+    "kinds": [
+      "AIC",
+      "AIV"
+    ]
+  }
+}

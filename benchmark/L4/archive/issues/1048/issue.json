@@ -1,0 +1,8 @@
+{
+  "title": "[Bug]: hfusion-flatten-ops crashes on slices of scf.while region arguments",
+  "iid": 1048,
+  "updated_at": "2026-11-23T13:14:46.892+08:00",
+  "state": "closed",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1048",
+  "linked_mrs": []
+}

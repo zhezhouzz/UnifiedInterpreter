@@ -1,0 +1,12 @@
+{
+  "issue": null,
+  "mr": "3406",
+  "url": "https://gitcode.com/Ascend/AscendNPU-IR/merge_requests/3406",
+  "commit": "a930f820919495b57e5a563097044829c262bfe3",
+  "parent": "9acec72249cb725bf568347013756b5321bca627",
+  "title": "[HIVM][Subtiling] fix: preserve common tiling axis",
+  "tests": [
+    "bishengir/test/Dialect/HIVM/tile-cube-vector-loop.mlir"
+  ],
+  "diff_scope": "merge-base to pinned MR head"
+}

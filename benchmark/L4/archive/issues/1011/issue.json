@@ -1,0 +1,8 @@
+{
+  "title": "A5 3D tl.dot（batched matmul）：A 由向量核产生时结果错误，缺 UB→L1 的 NZ 布局转换",
+  "iid": 1011,
+  "updated_at": "2026-11-20T10:14:45.855+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1011",
+  "linked_mrs": []
+}

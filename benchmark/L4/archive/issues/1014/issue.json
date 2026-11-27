@@ -1,0 +1,8 @@
+{
+  "title": "[A5][性能] 非对齐 pointwise cat 的第二路 load 退化为逐元素搬运",
+  "iid": 1014,
+  "updated_at": "2026-11-20T14:18:47.556+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1014",
+  "linked_mrs": []
+}

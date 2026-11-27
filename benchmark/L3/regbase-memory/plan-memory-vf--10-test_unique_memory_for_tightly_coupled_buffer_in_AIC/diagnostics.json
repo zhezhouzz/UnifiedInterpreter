@@ -1,0 +1,20 @@
+[
+  {
+    "function": "test_unique_memory_for_tightly_coupled_buffer_in_AIC",
+    "location": "loc(\"<stdin>\":7:5)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_unique_memory_for_tightly_coupled_buffer_in_AIV",
+    "location": "loc(\"<stdin>\":15:5)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "test_unique_memory_for_tightly_coupled_buffer_in_AIV",
+    "location": "loc(\"<stdin>\":17:10)",
+    "op": "scf.if",
+    "reason": "loop-carried values or yielded joins need bindings"
+  }
+]

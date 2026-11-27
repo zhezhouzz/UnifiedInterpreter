@@ -1,0 +1,8 @@
+{
+  "title": "div 用例对照结论：标杆按 f32 真除法、Triton 按 dtype 语义，tl.store 隐式截断放大差异",
+  "iid": 1006,
+  "updated_at": "2026-11-19T20:19:57.350+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1006",
+  "linked_mrs": []
+}

@@ -1,0 +1,14 @@
+[
+  {
+    "function": "single_guarded_consumer_selection",
+    "location": "loc(\"<stdin>\":10:7)",
+    "op": "annotation.mark",
+    "reason": "missing Core interpretation"
+  },
+  {
+    "function": "single_guarded_consumer_selection",
+    "location": "loc(\"<stdin>\":11:7)",
+    "op": "test.before_guard",
+    "reason": "missing Core interpretation"
+  }
+]

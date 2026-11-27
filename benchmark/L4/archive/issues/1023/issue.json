@@ -1,0 +1,11 @@
+{
+  "title": "[Bug][A6] MIX kernels initialize a private vector input on both cores",
+  "iid": 1023,
+  "updated_at": "2026-11-20T15:13:44.161+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1023",
+  "linked_mrs": [
+    "5337"
+  ],
+  "attachment_commit": "b48ced476faddb38f8328550ae3c713c02520703"
+}

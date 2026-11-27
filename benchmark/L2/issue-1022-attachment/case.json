@@ -1,0 +1,24 @@
+{
+  "id": "issue-1022-attachment",
+  "tier": "L2",
+  "category": "reported before/after",
+  "source_ref": "L4/archive/issues/1022/evidence.zip",
+  "chip_profile": "Ascend960DT_968B7",
+  "core_ratio": "0:1",
+  "compile_argv": [
+    "bishengir-opt",
+    "-allow-unregistered-dialect"
+  ],
+  "entry_functions": [
+    "initialized",
+    "external_init",
+    "single_update",
+    "scalar_writer"
+  ],
+  "expected_verdict": {
+    "buggy": "wrong_value",
+    "fixed": "safe"
+  },
+  "variants": true,
+  "oracle_note": "Full reporter function bodies. Only the module device header was removed: pinned reader rejects UB_BANK_GROUP_COUNT. Replay is a parse/print; general loop carries remain diagnosed."
+}

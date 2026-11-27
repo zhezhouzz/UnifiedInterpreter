@@ -1,0 +1,11 @@
+{
+  "title": "[Bug][A6] Local PlanMemory overwrites a live loop-carried UB value",
+  "iid": 1022,
+  "updated_at": "2026-11-20T15:13:35.199+08:00",
+  "state": "opened",
+  "web_url": "https://gitcode.com/Ascend/AscendNPU-IR/issues/1022",
+  "linked_mrs": [
+    "5336"
+  ],
+  "attachment_commit": "7240264d51f61dac0627f421d186c257761a8b04"
+}
