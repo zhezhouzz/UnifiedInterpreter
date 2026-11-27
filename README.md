@@ -1,5 +1,7 @@
 # UnifiedInterpreter
 
+[Offline Linux x86_64 executable and usage guide](docs/offline-executable.md)
+
 UnifiedInterpreter is an OCaml 5 prototype for a unified, effect-based
 interpreter design inspired by the Huawei AscendNPU IR interpreter question.
 
