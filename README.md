@@ -35,7 +35,37 @@ handler while sharing SSA values and memory across stages. The mixed example is
 manually derived from the archived HFusion input. Trace field `ir_stage` records
 each operation's stage; `stage` records the CLI execution mode.
 
-The H1–H5 demonstration described below remains a separate shallow embedding.
+The source interpreter also accepts parsed HFusion and HIVM modules. H1 tracks
+instruction sites and the execution budget, H2 maps the active stream to its
+block and subblock, H3 evaluates vector and tensor operations, H4 accesses
+typed memory, and H5 drives submitted tasks, flags and barriers. The default
+policy selects the first stream that can progress and completes its earliest
+eligible task before issuing another instruction. Delayed transfers read and
+write shared storage at completion. With no runnable stream or task, pending
+waits and signals are reported as a deadlock.
+
+Run the [interpreter benchmark matrix](scripts/check_interpreter_matrix.py)
+with the frontend environment and a BiShengIR compiler that supports AVE.
+It saves each launch and execution result under `_build/interpreter-matrix`.
+For example, these commands prepare the two FIFO runs and repeat the HIVM run
+with its instruction locations on standard error.
+
+```sh
+opam exec --switch=unified-interpreter -- dune build bin/main.exe
+.venv-attention/bin/python scripts/check_interpreter_matrix.py --bishengir-opt "$BISHENGIR_OPT" --filter fifo-copy
+_build/default/bin/main.exe run benchmarks/ir-pairs/fixture/fifo-copy/hivm.mlir \
+  --stage hivm --launch _build/interpreter-matrix/hivm/fixture/fifo-copy/launch.json --trace
+```
+
+JSON output includes execution status,
+completed task count, per-stream return values, and the final bytes of each
+named storage in `memory_hex`. The FIFO case writes three little-endian i32
+values `[7, 7, 7]` to `gm:0`. An OCaml caller can pass the same module and
+launch configuration directly to
+[`Hivm_trace.Execution.run_module`](lib/hivm/source_execution.mli).
+The [recorded matrix](benchmarks/results/interpreter-matrix.csv) lists the
+actual outcome, checks, parse time, execution time and process peak RSS for
+each source. Each row covers one concrete launch and scheduling order.
 
 Two small MLIR kernel examples are available in
 [`examples/kernels`](examples/kernels): vector addition and row sum, each with
