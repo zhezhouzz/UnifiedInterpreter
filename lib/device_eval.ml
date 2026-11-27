@@ -16,7 +16,7 @@ type observation = { operation : string; reads : access list; writes : access li
 type context = {
   loc : location; memory : memory; register_bytes : int; counters : (string,int) Hashtbl.t;
   control : (int,bool) Hashtbl.t; mutable reads : access list; mutable writes : access list;
-  mutable observe : observation -> unit;
+  mutable observe : observation -> unit; observe_accesses : bool;
 }
 let add_access intervals bank first width =
   match intervals with
@@ -30,17 +30,17 @@ let ranges xs =
   List.rev (List.fold_left (fun acc x -> add_access acc x.bank x.first (x.limit-x.first)) [] sorted)
 
 let record ?evidence ?(possible_reads=[]) ?(possible_writes=[]) ?(masks=[]) ?(offsets=[]) ?(indexed=[]) c operation detail =
-  c.observe {operation; detail; evidence; reads = ranges c.reads; writes = ranges c.writes;
+  if c.observe_accesses then c.observe {operation; detail; evidence; reads = ranges c.reads; writes = ranges c.writes;
              possible_reads;possible_writes;masks;offsets;indexed};
   c.reads <- []; c.writes <- []
 let flush c operation = if c.reads <> [] || c.writes <> [] then record c operation ""
 let read c v ix =
   let a = index v ix in
-  c.reads <- add_access c.reads v.bank a (bits v.ty);
+  if c.observe_accesses then c.reads <- add_access c.reads v.bank a (bits v.ty);
   read_bits c.memory v a
 let write c v ix x =
   let a = index v ix in
-  c.writes <- add_access c.writes v.bank a (bits v.ty);
+  if c.observe_accesses then c.writes <- add_access c.writes v.bank a (bits v.ty);
   write_bits c.memory v a x
 
 let size v = product v.shape
@@ -289,14 +289,18 @@ let memory_op c env op =
       if offsets.shape <> dst.shape || mask.shape <> dst.shape || other.shape <> dst.shape ||
         src.ty <> dst.ty || other.ty <> dst.ty || offsets.ty <> I64 || not (List.mem mask.ty [I1;I8])
       then invalid_arg "indirect_load types";
-      let reads = Array.init (size dst) (fun i ->
+      let sample i =
         let ix = coords dst.shape i in
         let from,pos = if read c mask ix = 0L then other,ix else
           src,indexed_address src (read c offsets ix) in
         let raw = read c from pos in
-        write c dst ix raw; {source=from.bank;source_bit=index from pos;raw}) in
-      record ~evidence:(Gather (dst,reads)) ~possible_reads:(List.concat_map extent [src;offsets;mask;other])
-        ~masks:(extent mask) ~offsets:(extent offsets) ~indexed:(extent src) c "indirect_load" ""
+        write c dst ix raw; from,pos,raw in
+      if c.observe_accesses then (
+        let reads=Array.init (size dst) (fun i->let from,pos,raw=sample i in
+          {source=from.bank;source_bit=index from pos;raw}) in
+        record ~evidence:(Gather (dst,reads)) ~possible_reads:(List.concat_map extent [src;offsets;mask;other])
+          ~masks:(extent mask) ~offsets:(extent offsets) ~indexed:(extent src) c "indirect_load" "")
+      else for i=0 to size dst-1 do ignore (sample i) done
   | Indirect_store (s,o,m,d) | Scatter_tensor (s,o,m,d) ->
       let src = ev s and offsets = ev o and mask = ev m and dst = buf d in
       (match op with Scatter_tensor _ -> ignore (tensor src) | _ -> ());

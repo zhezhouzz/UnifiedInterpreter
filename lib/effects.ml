@@ -43,6 +43,15 @@ type _ Effect.t += Wait : int * string -> unit Effect.t
 type _ Effect.t += Barrier : int * string -> unit Effect.t
 type _ Effect.t += With_handlers : handler_stage list * (unit -> unit) -> unit Effect.t
 
+type _ Effect.t += Source_step : string -> unit Effect.t
+type _ Effect.t += Instance_id : int Effect.t
+type _ Effect.t += Core_location : Device_ast.location Effect.t
+type device_env = (string * Device_value.value) list
+type _ Effect.t += Device_compute : Device_eval.context * device_env * Device_ast.expr -> Device_value.value Effect.t
+type _ Effect.t += Device_memory : Device_eval.context * device_env * Device_ast.instruction -> unit Effect.t
+type _ Effect.t += Access_memory : (unit -> 'a) -> 'a Effect.t
+type _ Effect.t += Schedule : (unit -> 'a) -> 'a Effect.t
+
 let trace msg = perform (Trace msg)
 
 let program_id axis = perform (Program_id axis)

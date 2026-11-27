@@ -17,6 +17,7 @@ type fiber = { mutable next : (unit -> unit) option; mutable blocked : int optio
                mutable tasks : task list }
 
 let run ?schedule ?prefix ?on_step ?on_stop ?on_blocked ?on_iteration ?execute ?copy_bank ?(record_events=true)
+    ?(record_choices=true) ?(observe_accesses=true) ?source_step ?(source_effects=false) ?on_finish
     ?(replay_error=fun reason -> Invalid_argument reason)
     ?(iteration_ordinals=false) (program : program) inputs bindings =
   if program.register_bytes <= 0 then invalid_arg "invalid register size";
@@ -40,7 +41,7 @@ let run ?schedule ?prefix ?on_step ?on_stop ?on_blocked ?on_iteration ?execute ?
     let current = ref (S,"entry",[],[]) in
     let observe o = let p,site,path,loops = !current in append id p site path loops "access" (Some o) in
     let c = {loc=stream.location;memory;register_bytes=program.register_bytes;
-      counters=Hashtbl.create 4;control=Hashtbl.create 4;reads=[];writes=[];observe} in
+      counters=Hashtbl.create 4;control=Hashtbl.create 4;reads=[];writes=[];observe;observe_accesses} in
     let submit pipe site path loops job synchronous =
       let number = !serial in incr serial;
       Effect.perform (Enqueue ({number;pipe;site;path;loops;job}, synchronous)) in
@@ -62,7 +63,10 @@ let run ?schedule ?prefix ?on_step ?on_stop ?on_blocked ?on_iteration ?execute ?
         idx+1,env) (0,env) commands |> snd
     and instruction nested p site path loops env cmd =
       current := p,site,path,loops;
-      let ev e = let x = eval c env e in flush c "load"; x in
+      Option.iter (fun visit -> visit id site path) source_step;
+      let ev e =
+        let x=if source_effects then Effect.perform (Effects.Device_compute (c,env,e)) else eval c env e in
+        flush c "load"; x in
       let num e = integer (ev e) in
       let require_host () = if nested then invalid_arg ("nested pipe submission at " ^ site) in
       match cmd with
@@ -128,7 +132,8 @@ let run ?schedule ?prefix ?on_step ?on_stop ?on_blocked ?on_iteration ?execute ?
                 tensor_cell t (coords t.dimensions i)) in
           record c "debug" (label ^ " " ^ String.concat "," (List.map Int64.to_string data)); env
       | (Store _ | Masked_store _ | Copy _ | Copy_tensor _ | Fill _ | Indirect_load _ | Indirect_store _
-        | Scatter_tensor _ | Nd2nz _ | Mmad _ | Fixpipe_row_split _) -> memory_op c env cmd; env in
+        | Scatter_tensor _ | Nd2nz _ | Mmad _ | Fixpipe_row_split _) ->
+          (if source_effects then Effect.perform (Effects.Device_memory (c,env,cmd)) else memory_op c env cmd); env in
     fiber.next <- Some (fun () ->
       Effect.Deep.match_with (fun () -> ignore (block false S "scalar" [] [] bindings stream.body)) ()
         {retc=(fun () -> fiber.next <- None);exnc=raise;
@@ -160,6 +165,7 @@ let run ?schedule ?prefix ?on_step ?on_stop ?on_blocked ?on_iteration ?execute ?
      | Receive ks -> List.iter (Hashtbl.remove tokens) ks | Action work -> work () | Fence -> ());
     fiber.tasks <- List.filter (fun x -> x.number <> t.number) fiber.tasks;
     if fiber.blocked = Some t.number then fiber.blocked <- None;
+    Option.iter (fun f->f ()) on_finish;
     append id t.pipe t.site t.path t.loops "done" None in
   let host id f = match f.next,f.blocked with
     | Some step,None -> Some (Host id,step) | _ -> None in
@@ -169,7 +175,8 @@ let run ?schedule ?prefix ?on_step ?on_stop ?on_blocked ?on_iteration ?execute ?
     Array.to_seqi fibers |> Seq.find_map (fun (id,f) ->
       match completion id f (fun _ -> true) with None -> host id f | step -> step) in
   let apply (choice,step) =
-    decisions := choice :: !decisions; recent := []; submitted := None;
+    if record_choices then decisions := choice :: !decisions;
+    recent := []; submitted := None;
     step ();
     Option.iter (fun f -> f {choice;submission= !submitted;observations=List.rev !recent}) on_step in
   let unfinished () = Array.exists (fun f -> f.next <> None || f.tasks <> []) fibers in

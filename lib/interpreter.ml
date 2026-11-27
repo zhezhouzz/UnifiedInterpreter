@@ -8,6 +8,8 @@ type state = {
   global : (string, Tensor.t) Hashtbl.t;
   mutable trace : string list;
   mutable current_pid : int;
+  mutable source_step : string -> unit;
+  mutable location : int -> Device_ast.location;
 }
 
 let make_state inputs output output_dims =
@@ -16,7 +18,8 @@ let make_state inputs output output_dims =
     (fun (name, tensor) -> Hashtbl.replace global name (Tensor.copy tensor))
     inputs;
   Hashtbl.replace global output (Tensor.zeros output_dims);
-  { global; trace = []; current_pid = 0 }
+  { global; trace = []; current_pid = 0; source_step = ignore;
+    location = (fun _ -> invalid_arg "missing source launch coordinates") }
 
 let add_trace state msg = state.trace <- msg :: state.trace
 
@@ -119,6 +122,8 @@ module H1 = struct
         effc =
           (fun (type a) (eff : a Effect.t) ->
             match eff with
+            | Source_step site ->
+                Some (fun (k : (a, _) continuation) -> state.source_step site; continue k ())
             | Trace msg ->
                 Some
                   (fun (k : (a, _) continuation) ->
@@ -139,6 +144,8 @@ module H2 = struct
         effc =
           (fun (type a) (eff : a Effect.t) ->
             match eff with
+            | Instance_id -> Some (fun (k : (a, _) continuation) -> continue k state.current_pid)
+            | Core_location -> Some (fun (k : (a, _) continuation) -> continue k (state.location state.current_pid))
             | Program_id axis ->
                 Some
                   (fun (k : (a, _) continuation) ->
@@ -151,10 +158,15 @@ module H2 = struct
       }
 end
 
+type extension = { interpret : 'a. 'a Effect.t -> (unit -> 'a) option }
+let empty_extension = {interpret=(fun _ -> None)}
+let handle_extension (type a) extension (request : a Effect.t) =
+  Option.map (fun evaluate k -> continue k (evaluate ())) (extension.interpret request)
+
 module H3 = struct
   let name = "H3/SIMD-T-map"
 
-  let run state thunk =
+  let run ?(extension=empty_extension) state thunk =
     match_with thunk ()
       {
         retc = Fun.id;
@@ -162,6 +174,8 @@ module H3 = struct
         effc =
           (fun (type a) (eff : a Effect.t) ->
             match eff with
+            | Device_compute (ctx,env,expr) ->
+                Some (fun (k : (a, _) continuation) -> continue k (Device_eval.eval ctx env expr))
             | Arange (start, stop) ->
                 Some
                   (fun (k : (a, _) continuation) ->
@@ -213,14 +227,14 @@ module H3 = struct
                          (pp_active mask (Array.length values))
                          (pp_dtype dtype));
                     continue k (eval_reduce dtype op values mask))
-            | _ -> None);
+            | _ -> handle_extension extension eff);
       }
 end
 
 module H4 = struct
   let name = "H4/on-chip-memory-map"
 
-  let run state thunk =
+  let run ?(extension=empty_extension) state thunk =
     match_with thunk ()
       {
         retc = Fun.id;
@@ -228,6 +242,9 @@ module H4 = struct
         effc =
           (fun (type a) (eff : a Effect.t) ->
             match eff with
+            | Access_memory f -> Some (fun (k : (a, _) continuation) -> continue k (f ()))
+            | Device_memory (ctx,env,op) ->
+                Some (fun (k : (a, _) continuation) -> continue k (Device_eval.memory_op ctx env op))
             | Load load ->
                 Some
                   (fun (k : (a, _) continuation) ->
@@ -272,7 +289,7 @@ module H4 = struct
                     wait core "ub_to_gm";
                     eval_store state store;
                     continue k ())
-            | _ -> None);
+            | _ -> handle_extension extension eff);
       }
 end
 
@@ -287,6 +304,8 @@ module H5 = struct
         effc =
           (fun (type a) (eff : a Effect.t) ->
             match eff with
+            | Schedule drive ->
+                Some (fun (k : (a, _) continuation) -> continue k (drive ()))
             | Alloc_local (core, name, cells) ->
                 Some
                   (fun (k : (a, _) continuation) ->
