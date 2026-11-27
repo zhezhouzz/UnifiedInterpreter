@@ -1,13 +1,13 @@
 # Binary distribution and Docker
 
-## Download and run
+## Build and run locally
 
-GitHub Actions builds and tests Linux x86_64 native executables on every push,
-pull request, and manual workflow run. Download the
-`unified-interpreter-linux-x86_64` artifact from the workflow's **Artifacts**
-section. Unzip the artifact, then verify and extract its archive:
+Build this distribution from a configured project checkout, then verify and
+extract the archive. GitHub Actions publishes the [offline executable](offline-executable.md).
 
 ```sh
+opam exec -- sh scripts/package_binary.sh
+cd _build/release
 sha256sum --check unified-interpreter-linux-x86_64.tar.gz.sha256
 tar -xzf unified-interpreter-linux-x86_64.tar.gz
 cd unified-interpreter
@@ -80,7 +80,3 @@ docker run --rm --entrypoint kernel-example unified-interpreter --kernel row-sum
 Mount custom input files into `/input` and pass their absolute container paths
 with `--ir` or `--input`. Keep the default working directory so the bundled
 examples remain available.
-
-The CI workflow also verifies the relocated binary distribution and builds and
-executes the runtime image, including both attention stages and the mixed-stage
-example. It uploads the binary archive and checksum as workflow artifacts.

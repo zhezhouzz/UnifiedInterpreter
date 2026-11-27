@@ -15,8 +15,9 @@ attention, inspecting results and traces, and executing mixed-stage IR.
 See the [attention interpreter design](docs/attention-interpreter-design.md) for
 the semantic layers, handlers, execution model, code reading guide and limits.
 
-Download native Linux binaries from GitHub Actions or build and run the Docker
-image using the [binary distribution and Docker guide](docs/binary-distribution.md).
+GitHub Actions publishes the [offline Linux executable](docs/offline-executable.md).
+For a local build of the multi-binary distribution or runtime image, see the
+[binary distribution and Docker guide](docs/binary-distribution.md).
 
 ```sh
 ATTENTION_PYTHON=python3.12 sh scripts/bootstrap_attention.sh

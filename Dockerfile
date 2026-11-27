@@ -1,4 +1,4 @@
-FROM ubuntu:24.04 AS builder
+FROM ubuntu:24.04 AS build-base
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -25,16 +25,19 @@ COPY scripts/bootstrap_attention.sh scripts/bootstrap_attention.sh
 RUN ATTENTION_PYTHON=python3 sh scripts/bootstrap_attention.sh
 
 COPY . .
-RUN opam exec -- dune runtest \
-    && opam exec -- sh scripts/package_binary.sh
+RUN opam exec -- dune runtest
 
-FROM builder AS offline-builder
+FROM build-base AS offline-builder
+RUN opam exec -- dune build bin/main.exe
 RUN apt-get update && apt-get install -y --no-install-recommends busybox-static bubblewrap time \
     && rm -rf /var/lib/apt/lists/*
 ENV BISHENGIR_OPT=/opt/vendor/triton/backends/ascend/bishengir/bin/bishengir-opt
 RUN .venv-attention/bin/python -m pip install --no-deps --target /opt/vendor \
     --index-url https://mirrors.huaweicloud.com/ascend/repos/pypi triton-ascend==3.6.0.post2 \
     && opam exec -- .venv-attention/bin/python scripts/build_offline.py --bishengir-opt "$BISHENGIR_OPT"
+
+FROM build-base AS builder
+RUN opam exec -- sh scripts/package_binary.sh
 
 FROM ubuntu:24.04 AS runtime
 

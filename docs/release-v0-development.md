@@ -126,4 +126,4 @@ XDG_CACHE_HOME="$PWD/_build/release-cache-check" \
   --stage hivm --seed 17 --trace-db :memory:
 ```
 
-推送分支或手动触发 GitHub Actions 后，查看 `Build binaries and Docker image` 工作流。离线基准测试通过后，工作流上传 `offline-interpreter-linux-x86_64` 构建产物，其中包含带 SHA-256 校验文件的发布压缩包、`results.csv` 和用户使用文档。[发布步骤](../.github/workflows/build.yml)
+推送分支或手动触发 GitHub Actions 后，查看 `Build and verify offline interpreter` 工作流。离线基准测试通过后，工作流上传 `offline-interpreter-linux-x86_64` 构建产物，其中包含带 SHA-256 校验文件的发布压缩包、`results.csv` 和用户使用文档。[发布步骤](../.github/workflows/build.yml)
