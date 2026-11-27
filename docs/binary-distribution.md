@@ -14,11 +14,11 @@ cd unified-interpreter
 ```
 
 The executables target Ubuntu 24.04 (glibc 2.39 or newer). Install Python 3.12
-or newer, Python's venv support, and the GMP runtime. On Ubuntu 24.04:
+or newer, Python's venv support, and the GMP and SQLite runtimes. On Ubuntu 24.04:
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y python3 python3-venv libgmp10
+sudo apt-get install -y python3 python3-venv libgmp10 libsqlite3-0
 ATTENTION_PYTHON=python3 sh scripts/bootstrap_attention.sh
 bin/unified-interpreter
 bin/kernel-example --kernel vector-add

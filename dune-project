@@ -15,4 +15,6 @@
   rocq-stdpp
   zarith
   z3
+  sqlite3
+  digestif
   yojson))

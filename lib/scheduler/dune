@@ -1,4 +1,10 @@
 (library
  (name ir_scheduler)
+ (modules ir_scheduler catalog_scheduler source_scheduler)
  (flags (:standard -open Stdlib))
- (libraries unified_interpreter hivm_trace hfusion_trace))
+ (libraries unified_interpreter hivm_trace hfusion_trace source_schedules))
+
+(library
+ (name source_schedules)
+ (modules trace_history trace_delivery)
+ (libraries unified_interpreter sqlite3 digestif))

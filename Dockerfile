@@ -2,7 +2,7 @@ FROM ubuntu:24.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential ca-certificates curl git libgmp-dev opam pkg-config \
+    build-essential ca-certificates curl git libgmp-dev libsqlite3-dev opam pkg-config \
     python3 python3-venv unzip \
     && rm -rf /var/lib/apt/lists/*
 
@@ -32,7 +32,7 @@ FROM ubuntu:24.04 AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates libgmp10 python3 python3-venv \
+    ca-certificates libgmp10 libsqlite3-0 python3 python3-venv \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --uid 10001 --create-home interpreter
 

@@ -9,6 +9,8 @@ depends: [
   "rocq-stdpp"
   "zarith"
   "z3"
+  "sqlite3"
+  "digestif"
   "yojson"
   "odoc" {with-doc}
 ]
