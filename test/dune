@@ -12,6 +12,13 @@
  (libraries unified_interpreter))
 
 (test
+ (name test_source_execution)
+ (modules test_source_execution)
+ (deps ../scripts/mlir_frontend.py ../scripts/scheduler_affine.py ../scripts/attention_frontend.py
+       ../scripts/attention_dialects.py ../requirements-attention.txt)
+ (libraries hivm_trace yojson zarith))
+
+(test
  (name test_bug_traces)
  (modules test_bug_traces)
  (libraries unified_interpreter zarith))

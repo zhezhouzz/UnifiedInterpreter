@@ -3,6 +3,8 @@ module Ast = Attention_runtime.Parser
 module Module_ast = Hivm_module
 module Mlir = Mlir_lowering
 module Mlir_device = Mlir_device
+module Execution = Source_execution
+module Execution_value = Execution_value
 
 (** 从解析得到的模块 AST 生成、导出和回放 trace。 *)
 module Source = Mlir_trace
