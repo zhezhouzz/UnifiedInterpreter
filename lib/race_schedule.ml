@@ -24,10 +24,17 @@ type t = {
   pairs : pair list;
   cutoffs : int option list;
   boundaries : string list;
+  blocked_control : bool;
 }
 
 module Addresses = Set.Make (struct type t = address let compare = compare end)
 module Indices = Set.Make (Int)
+
+let visibility prefix schedule =
+  let key node=node.id,(match node.phase with Emit _ -> None | Finish f -> Some f.pipe) in
+  let keys=Hashtbl.create (Array.length prefix.nodes) in
+  Array.iter (fun node -> Hashtbl.add keys (key node) ()) prefix.nodes;
+  Array.map (fun node -> Hashtbl.mem keys (key node)) schedule.nodes
 
 let allocation_checks nodes =
   let reserves = Hashtbl.create 16 in
@@ -91,7 +98,7 @@ let conflict_pairs nodes =
     | _ -> ()) nodes;
   List.rev !pairs
 
-let compile ?loop_bound ?(capacity=1) program =
+let compile ?loop_bound ?pair_limit ?(capacity=1) program =
   if capacity < 1 then invalid_arg "flag capacity must be positive";
   if Option.fold ~none:false ~some:(fun bound -> bound < 0) loop_bound then
     invalid_arg "Bug_traces: negative loop bound";
@@ -99,6 +106,7 @@ let compile ?loop_bound ?(capacity=1) program =
   if not (unique (List.map (fun (s : stream) -> s.id) program.streams)) then
     invalid_arg "Core_lang: duplicate stream";
   let nodes = ref [] and count = ref 0 and cutoffs = ref [] and boundaries = ref [] in
+  let blocked_control = ref false in
   let add id phase =
     let index = !count in
     incr count;
@@ -176,7 +184,8 @@ let compile ?loop_bound ?(capacity=1) program =
       | Fence pipes -> List.iter (fun pipe -> enqueue pipe Bar) pipes
       | _ -> ()
     ) plan.actions;
-    Option.iter (fun reason -> boundaries := reason :: !boundaries) plan.boundary;
+    Option.iter (function Blocked_control -> blocked_control := true
+      | Incomplete reason -> boundaries := reason :: !boundaries) plan.boundary;
     if plan.cutoff then cutoffs := !previous :: !cutoffs
   ) (List.sort (fun ((a:stream),_) (b,_) -> compare a.id b.id) (plans program.streams));
   let nodes = Array.of_list (List.rev !nodes) in
@@ -197,7 +206,10 @@ let compile ?loop_bound ?(capacity=1) program =
     | Unallocated -> ()
     | Allocated_after ns -> allocations.(i) <- Allocated_after (List.sort_uniq compare
         (ns @ List.filter_map (Hashtbl.find_opt writer) fp.reads))) (footprint n.phase)) nodes;
-  { capacity; nodes; allocations; pairs = conflict_pairs nodes; cutoffs = !cutoffs; boundaries=List.rev !boundaries }
+  let skip_pairs=Option.fold ~none:false ~some:(fun limit ->
+    Array.exists (fun node -> List.exists (fun i -> i>=limit) node.id.iterations) nodes) pair_limit in
+  { capacity; nodes; allocations; pairs = (if !blocked_control || skip_pairs then [] else conflict_pairs nodes);
+    cutoffs = !cutoffs; boundaries=List.rev !boundaries; blocked_control= !blocked_control }
 
 module Keys = Map.Make (struct type t = key let compare = compare end)
 type state = { seen : Z.t; tokens : int Keys.t }

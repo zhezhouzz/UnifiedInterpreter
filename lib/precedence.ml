@@ -2,25 +2,44 @@
     同一层的就绪事件可以交换。按层展开前驱闭包即可得到最短前缀。 *)
 type t = { ancestors : Z.t array; order : int array; reachable : bool array }
 
-let build predecessors =
+(* 每次调度增加一个已执行事件。同一事件集合的后续可行性只需求解一次。 *)
+let can_finish size seen successors =
+  let final=Z.pred (Z.shift_left Z.one size) and memo=Hashtbl.create 32 in
+  let rec visit state =
+    let key=seen state in
+    Z.equal key final || (match Hashtbl.find_opt memo key with
+      | Some answer -> answer
+      | None ->
+          let answer=Seq.exists visit (successors state) in
+          Hashtbl.add memo key answer;answer) in
+  visit
+
+let topological_order ?(visit=fun _ _ -> ()) predecessors =
   let size = Array.length predecessors in
   let pending = Array.map List.length predecessors and successors = Array.make size [] in
   let queue = Queue.create () and visited = ref [] in
-  let ancestors = Array.make size Z.zero and reachable = Array.make size false in
   Array.iteri (fun i parents ->
     List.iter (fun p -> if p >= 0 then successors.(p) <- i :: successors.(p)) parents;
     if parents=[] then Queue.add i queue) predecessors;
   while not (Queue.is_empty queue) do
     let i = Queue.take queue in
     visited := i :: !visited;
-    reachable.(i) <- true;
-    let closure = Z.logor ancestors.(i) (Z.shift_left Z.one i) in
+    visit i successors.(i);
     List.iter (fun j ->
-      ancestors.(j) <- Z.logor ancestors.(j) closure;
       pending.(j) <- pending.(j)-1;
       if pending.(j)=0 then Queue.add j queue) successors.(i)
   done;
-  {ancestors;reachable;order=Array.of_list (List.rev !visited)}
+  Array.of_list (List.rev !visited)
+
+let build predecessors =
+  let size=Array.length predecessors in
+  let ancestors=Array.make size Z.zero and reachable=Array.make size false in
+  let visit i successors =
+    reachable.(i)<-true;
+    let closure=Z.logor ancestors.(i) (Z.shift_left Z.one i) in
+    List.iter (fun j -> ancestors.(j)<-Z.logor ancestors.(j) closure) successors in
+  let order=topological_order ~visit predecessors in
+  {ancestors;reachable;order}
 
 let unordered graph a b = graph.reachable.(a) && graph.reachable.(b) &&
   not (Z.testbit graph.ancestors.(a) b || Z.testbit graph.ancestors.(b) a)

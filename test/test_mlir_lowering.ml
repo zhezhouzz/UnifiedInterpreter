@@ -80,7 +80,7 @@ let issue316 () =
       check_locations ast hivm
     ) Bug_traces.[Search;Solve]
   ) ["hivm","../examples/kernels/issue316_vexp_hivm.mlir",0;
-     "hivm","../examples/kernels/issue316_missing_ready_hivm.mlir",5;
+     "hivm","../examples/kernels/issue316_missing_ready_hivm.mlir",0;
      "hfusion","../benchmarks/ir-pairs/issue316/ordered/hfusion.mlir",0;
      "hfusion","../benchmarks/ir-pairs/issue316/missing-ready/hfusion.mlir",9]
 

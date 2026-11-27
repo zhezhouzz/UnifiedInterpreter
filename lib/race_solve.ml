@@ -7,7 +7,6 @@ type encoding = {
   solver : Solver.solver;
   present : Expr.expr array;
   clock : Expr.expr array;
-  size : Expr.expr;
 }
 
 exception Inconclusive of string
@@ -81,8 +80,7 @@ let encode ?timeout_ms schedule =
     | [] | [_] -> alternating (Array.of_list (List.rev sends)) (Array.of_list (List.rev waits))
     | _ -> shared_key sends waits
   ) flags;
-  let size = sum (List.map indicator (Array.to_list present)) in
-  { ctx; solver; present; clock; size }
+  { ctx; solver; present; clock }
 
 let check enc assumptions = match Solver.check enc.solver assumptions with
   | Solver.SATISFIABLE -> Some (Option.get (Solver.get_model enc.solver))
@@ -101,19 +99,26 @@ let prefix enc model last =
   through (List.sort compare events)
 
 let shortest enc schedule assumptions last model =
+  let prefix_size=Arithmetic.mk_add enc.ctx (Array.to_list (Array.mapi (fun i time ->
+    let before=(if i<=last then Arithmetic.mk_le else Arithmetic.mk_lt) enc.ctx time enc.clock.(last) in
+    Boolean.mk_ite enc.ctx before (Arithmetic.Integer.mk_numeral_i enc.ctx 1)
+      (Arithmetic.Integer.mk_numeral_i enc.ctx 0)) enc.clock)) in
   let rec minimize lower witness =
     let length = List.length witness in
     if lower >= length then replay_indices schedule witness else
     let bound = lower + (length - lower) / 2 in
-    let cap = Arithmetic.mk_le enc.ctx enc.size (Arithmetic.Integer.mk_numeral_i enc.ctx bound) in
+    let cap = Arithmetic.mk_le enc.ctx prefix_size (Arithmetic.Integer.mk_numeral_i enc.ctx bound) in
     match check enc (cap :: assumptions) with
     | None -> minimize (bound + 1) witness
     | Some model -> minimize lower (prefix enc model last) in
   minimize 2 (prefix enc model last)
 
-let solve_pair enc schedule {a; b; addresses} =
+let solve_pair ?within enc schedule {a; b; addresses} =
   let direction a b =
-    [enc.present.(a); enc.present.(b); Arithmetic.mk_lt enc.ctx enc.clock.(a) enc.clock.(b)] in
+    let after=Option.fold ~none:[] ~some:(fun mask -> Array.to_seqi mask |> Stdlib.Seq.filter_map
+      (fun (i,allowed) -> if allowed then None else Some (Arithmetic.mk_lt enc.ctx enc.clock.(b) enc.clock.(i)))
+      |> List.of_seq) within in
+    Arithmetic.mk_lt enc.ctx enc.clock.(a) enc.clock.(b)::after in
   let ab = direction a b and ba = direction b a in
   Option.bind (check enc ab) (fun forward ->
     Option.map (fun reverse -> Result.{
@@ -122,20 +127,70 @@ let solve_pair enc schedule {a; b; addresses} =
       second_then_first = shortest enc schedule ba a reverse
     }) (check enc ba))
 
-let witness ?timeout_ms schedule first second =
-  let matches {a;b;_} =
-    let x = schedule.nodes.(a).id and y = schedule.nodes.(b).id in
-    (x = first && y = second) || (x = second && y = first) in
-  Option.bind (List.find_opt matches schedule.pairs)
-    (fun pair -> solve_pair (encode ?timeout_ms schedule) schedule pair)
+let complete_encoding ?timeout_ms schedule =
+  let enc=encode ?timeout_ms schedule in
+  Solver.add enc.solver (Array.to_list enc.present);enc
 
-let general schedule =
-  let enc = encode schedule in
-  let races = List.filter_map (solve_pair enc schedule) schedule.pairs in
+let can_extend schedule =
+  if schedule.blocked_control || schedule.boundaries<>[] || schedule.cutoffs<>[] then (fun _ -> false) else
+  match Race_search.precedence schedule with
+  | Some parents ->
+      let complete=Array.length (Precedence.topological_order parents)=Array.length parents in
+      (fun _ -> complete)
+  | None ->
+      let enc=complete_encoding schedule in
+      fun prefix ->
+        let positions=Array.make (Array.length enc.clock) None in
+        List.iteri (fun t i -> positions.(i)<-Some t) prefix;
+        let int=Arithmetic.Integer.mk_numeral_i enc.ctx and length=List.length prefix in
+        let times=Array.mapi (fun i clock -> match positions.(i) with
+          | None -> Arithmetic.mk_ge enc.ctx clock (int length)
+          | Some t -> Boolean.mk_eq enc.ctx clock (int t)) enc.clock in
+        Option.is_some (check enc (Array.to_list times))
+
+let witness ?within ?timeout_ms schedule first second =
+  let locate id=Array.find_index (fun n -> n.id=id && match n.phase with
+    | Finish {item=Operation _;_} | Emit {action=Immediate (Operation _);_} -> true | _ -> false) schedule.nodes in
+  match locate first,locate second with
+  | Some x,Some y when x<>y && not schedule.blocked_control && schedule.boundaries=[] && schedule.cutoffs=[] ->
+      let a=min x y and b=max x y in
+      (match conflict_pairs [|schedule.nodes.(a);schedule.nodes.(b)|] with
+       | [p] ->
+           let pair={p with a;b} in
+           (match Race_search.precedence schedule with
+            | Some parents -> (match (Race_search.from_predecessors ?within Precedence.Bfs
+                {schedule with pairs=[pair]} parents).races with [w] -> Some w | _ -> None)
+            | None -> solve_pair ?within (complete_encoding ?timeout_ms schedule) schedule pair)
+       | _ -> None)
+  | _ -> None
+
+let general ?within ?timeout_ms schedule =
+  let enc = complete_encoding ?timeout_ms schedule in
+  let races = List.filter_map (solve_pair ?within enc schedule) schedule.pairs in
   let truncated = List.exists (function
     | None -> true | Some n -> Option.is_some (check enc [enc.present.(n)])) schedule.cutoffs in
   Result.{races; truncated}
 
-let generate schedule = match Race_search.precedence schedule with
-  | Some parents -> Race_search.from_predecessors Precedence.Smt schedule parents
-  | None -> general schedule
+let generate ?within ?timeout_ms schedule = match Race_search.precedence schedule with
+  | Some parents -> Race_search.from_predecessors ?within Precedence.Smt schedule parents
+  | None -> general ?within ?timeout_ms schedule
+
+(* 多发送者的令牌次序由模型决定。要求所有事件出现，避免选中无法继续的前缀。 *)
+let complete_direction enc rounds a b =
+  let ctx=enc.ctx in
+  let k=Arithmetic.Integer.mk_const_s ctx "prefix_rounds" in
+  let int=Arithmetic.Integer.mk_numeral_i ctx in
+  let before i j=Arithmetic.mk_lt ctx enc.clock.(i) enc.clock.(j) in
+  let limits=Array.to_list (Array.mapi (fun i round ->
+    Boolean.mk_or ctx [Arithmetic.mk_le ctx (int round) k;before b i]) rounds) in
+  let assumptions=before a b :: limits in
+  let rec choose lo hi best =
+    if lo>hi then best else
+    let mid=lo+(hi-lo)/2 in
+    match check enc (Arithmetic.mk_le ctx k (int mid)::assumptions) with
+    | None -> choose (mid+1) hi best
+    | Some model -> choose lo (mid-1) (Some model) in
+  Option.map (fun model ->
+    let ordered=Array.to_list (Array.mapi (fun i clock ->
+      Arithmetic.Integer.get_big_int (Option.get (Model.eval model clock true)),i) enc.clock) in
+    List.map snd (List.sort compare ordered)) (choose 0 (Array.fold_left max 0 rounds) None)

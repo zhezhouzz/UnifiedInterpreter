@@ -110,7 +110,9 @@ let issue316 () =
     let fixed_result = H.generate method_ fixed in
     assert (fixed_result.races = []);
     assert (fixed_result.status = (if method_ = Benchmark_traces.Symbolic then H.No_race else Complete_search));
-    let result = H.generate method_ buggy in
+    let result = match method_ with Symbolic -> H.generate method_ buggy | Concrete _ ->
+      assert ((H.generate ~n:3 method_ buggy).races=[]);
+      H.generate ~n:2 method_ buggy in
     assert (Z.gt (Option.get result.n) Z.zero && result.races <> []);
     let actions = List.concat_map (fun (r : H.race) ->
       ignore (check_pair missing r); r.forward @ r.reverse) result.races in

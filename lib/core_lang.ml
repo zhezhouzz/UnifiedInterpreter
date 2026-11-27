@@ -89,7 +89,8 @@ type event =
 let integer value = match demand value with VInt n -> n | _ -> invalid_arg "Core_lang: expected integer"
 let lookup env = function Literal v -> v | Var x -> List.assoc x env
 
-type stream_plan = { actions : (occurrence * action) list; cutoff : bool; boundary : string option }
+type stream_boundary = Blocked_control | Incomplete of string
+type stream_plan = { actions : (occurrence * action) list; cutoff : bool; boundary : stream_boundary option }
 
 let scalar_pipe = -1
 let async_pipe = -2
@@ -101,6 +102,7 @@ let stream_plan ?loop_bound program stream =
   if Option.fold ~none:false ~some:(fun bound -> bound < 0) loop_bound then
     invalid_arg "Core_lang: negative loop bound";
   let actions = ref [] in
+  let boundary = ref None in
   let enclosing_actions = ref None in
   let counters = ref (Hashtbl.create 4) in
   let evaluate f =
@@ -140,7 +142,8 @@ let stream_plan ?loop_bound program stream =
           let local = bind variables values ((x, VInt index) :: env) in
           run local (0 :: path) (ordinal :: iterations) body
             (loop (ordinal + 1) (Z.add index stride))) in
-      Z.sign stride <> 0 && loop 0 lo (args (List.map snd carried)) in
+      if Z.sign stride=0 then (boundary:=Some Blocked_control;false)
+      else loop 0 lo (args (List.map snd carried)) in
     match command with
     | While_values (inputs,after,results,before,body,rest) ->
         let rec loop ordinal values =
@@ -237,6 +240,6 @@ let stream_plan ?loop_bound program stream =
         for_loop x lo hi stride carried results body rest
   in
   match run stream.params [] [] stream.body (fun _ -> false) with
-  | cutoff -> {actions=List.rev (Option.value !enclosing_actions ~default:!actions);cutoff;boundary=None}
+  | cutoff -> {actions=List.rev (Option.value !enclosing_actions ~default:!actions);cutoff;boundary= !boundary}
   | exception Prefix_boundary reason ->
-      {actions=List.rev (Option.value !enclosing_actions ~default:!actions);cutoff=true;boundary=Some reason}
+      {actions=List.rev (Option.value !enclosing_actions ~default:!actions);cutoff=true;boundary=Some (Incomplete reason)}

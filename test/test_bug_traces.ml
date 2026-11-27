@@ -36,6 +36,14 @@ let exhaustive ~loop_bound p =
   let streams = List.map (fun s -> s, stream_plan ~loop_bound p s) p.streams in
   let directions = Hashtbl.create 16 and truncated = ref false in
   let rec visit length completed streams queues tokens allocated =
+    if List.for_all (fun (_,plan) -> plan.actions=[] && plan.boundary=None) streams &&
+       List.for_all (fun (_,items) -> items=[]) queues then
+      List.iter (fun (b,fp,last) -> List.iter (fun (a,old,first) -> if first<last then
+        let hits=List.sort_uniq compare (List.filter (fun v -> List.mem v (fp.reads @ fp.writes)) old.writes
+          @ List.filter (fun v -> List.mem v fp.writes) old.reads) in
+        if hits<>[] then
+          let size=Option.fold ~none:last ~some:(fun (_,n) -> min last n) (Hashtbl.find_opt directions (a,b)) in
+          Hashtbl.replace directions (a,b) (hits,size)) completed) completed;
     List.iteri (fun i (s, plan) -> match plan.actions with
       | [] -> if plan.cutoff then truncated := true
       | (id, action) :: rest ->
@@ -54,13 +62,7 @@ let exhaustive ~loop_bound p =
                  advance queues (ks @ tokens)
            | Immediate (Operation (_,fp)) ->
                if List.for_all (function Input _,_ -> true | a -> List.mem a allocated) (fp.reads @ fp.writes) then (
-                 List.iter (fun (a,old) ->
-                   let hits = List.sort_uniq compare (List.filter (fun v -> List.mem v (fp.reads @ fp.writes)) old.writes
-                     @ List.filter (fun v -> List.mem v fp.writes) old.reads) in
-                   if hits <> [] then
-                     let size = Option.fold ~none:(length+1) ~some:(fun (_,n) -> min n (length+1))
-                       (Hashtbl.find_opt directions (a,id)) in Hashtbl.replace directions (a,id) (hits,size)) completed;
-                 advance ~completed:((id,fp)::completed) queues tokens)
+                 advance ~completed:((id,fp,length+1)::completed) queues tokens)
            | Immediate (Wait_peers ks) ->
                if List.for_all (fun k -> List.mem k tokens) ks then
                  advance queues (List.filter (fun k -> not (List.mem k ks)) tokens)
@@ -79,16 +81,7 @@ let exhaustive ~loop_bound p =
             (match item with
              | Operation (_, fp) when not (List.for_all valid (fp.reads @ fp.writes)) -> ()
              | Operation (_, fp) ->
-                 List.iter (fun (a, old) ->
-                   let conflicts = List.sort_uniq compare
-                     (List.filter (fun v -> List.mem v (fp.reads @ fp.writes)) old.writes @
-                      List.filter (fun v -> List.mem v fp.writes) old.reads) in
-                   if conflicts <> [] then (
-                     let size = match Hashtbl.find_opt directions (a, id) with
-                       | None -> length + 1 | Some (_, n) -> min (length + 1) n in
-                     Hashtbl.replace directions (a, id) (conflicts, size))
-                 ) completed;
-                 finish ((id, fp) :: completed) tokens
+                 finish ((id,fp,length+1)::completed) tokens
              | Wait k -> if List.mem k tokens then finish completed (List.filter ((<>) k) tokens)
              | Wait_peers ks -> if List.for_all (fun k -> List.mem k tokens) ks then
                  finish completed (List.filter (fun k -> not (List.mem k ks)) tokens)
@@ -178,7 +171,22 @@ let () =
   check 0 (program [stream 0 (Alloc (0, 0, [int 1], End)); use 1]);
   check 1 (local (Branch (Literal (VBool false), End, copies Fun.id, End)));
   let local_sync mode f next = Sync (mode, 0, Data 1, flag f, next) in
-  check 1 (local (local_sync LocalSet 0 (local_sync LocalSet 0 (copies Fun.id))));
+  check 0 (local (local_sync LocalSet 0 (local_sync LocalSet 0 (copies Fun.id))));
+  let wait_forever=Sync (LocalWait,0,ScalarEnd,flag 7,End) in
+  check 0 (local (write 0 one (read 1 one wait_forever)));
+  let beyond_bound=local (For (0,int 0,int 3,int 1,write 0 one End,wait_forever)) in
+  List.iter (fun backend ->
+    let result=generate_bug_traces ~backend ~loop_bound:2 beyond_bound in
+    assert (result.truncated && result.races=[])) [Search;Solve];
+  let signal k next=Sync (BlockSet,scalar_pipe,ScalarEnd,flag k,next)
+  and consume k next=Sync (BlockWait,scalar_pipe,ScalarEnd,flag k,next) in
+  let mixed streams={ (program streams) with block_edge=(fun _ _ r _ -> r=2) } in
+  check 0 (mixed [stream 0 (signal 0 (write scalar_pipe one (signal 1 End)));
+                  stream 1 (signal 0 (read scalar_pipe one End));
+                  stream 2 (consume 1 (consume 0 End))]);
+  check 1 (mixed [stream 0 (write scalar_pipe one (signal 0 (signal 1 End)));
+                  stream 1 (read scalar_pipe one (signal 0 End));
+                  stream 2 (consume 1 (consume 0 End))]);
   check 0 (local (write 0 one (local_sync LocalSet 0 (local_sync LocalWait 0 (read 1 one End)))));
   check 0 (local (local_sync LocalWait 1 (write 0 one (local_sync LocalSet 0 (read 1 one End)))));
   let send next = Sync (BlockSet, 0, ScalarEnd, flag 0, next) in
@@ -275,6 +283,16 @@ let () =
   ) [Search; Solve]
 
 let symbolic_pipeline = Race_benchmarks.issue316
+
+let () =
+  let open Event_order in
+  let rules=[|{requires=[];excludes=[1]};{requires=[];excludes=[]};{requires=[];excludes=[]}|] in
+  replay rules [1;2];
+  assert (not (can_extend rules [1;2]));
+  List.iter (fun backend ->
+    match generate backend rules [0,1;1,2] with
+    | [1,2,f,r] -> assert (can_extend rules f && can_extend rules r)
+    | _ -> failwith "expected only the pair reversible in complete schedules") Precedence.[Bfs;Smt]
 
 let () =
   let f = symbolic_pipeline ~wait_ready:false in

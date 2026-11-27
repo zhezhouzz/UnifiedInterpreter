@@ -10,10 +10,10 @@ type race_witness = Race_schedule.Result.race_witness = {
 
 type bug_trace_set = { races : race_witness list; truncated : bool }
 
-(** 每对完成顺序可以交换的冲突访问，各返回两个方向的一条最短前缀。
+(** 每对完成顺序可以交换的冲突访问，各返回能够延伸到原程序结束的一条最短前缀。
     Search 为默认后端。两种后端省略 loop_bound 时，
     根据具体入口实参展开每个 For，直到循环结束或遇到 Return。
-    显式传入的 loop_bound 独立限制每次进入循环时可以执行的轮数。
+    显式传入的 loop_bound 限制前缀可以包含的循环轮数，后续仍使用原始入口实参。
     capacity 是每个令牌键的计数容量，默认值为 1。
     truncated 表示实际可达的控制前缀在仍有下一轮时达到上界。 *)
 val generate_bug_traces : ?backend:backend -> ?loop_bound:int -> ?capacity:int -> Core_lang.program -> bug_trace_set

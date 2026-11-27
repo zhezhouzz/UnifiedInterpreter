@@ -27,8 +27,15 @@ let replay ?loop_bound ?capacity program trace =
   ) Race_schedule.initial trace |> ignore
 
 let generate_bug_traces ?(backend = Search) ?loop_bound ?capacity program =
-  match backend with
-  | Search -> Race_search.generate (Race_schedule.compile ?loop_bound ?capacity program)
-  | Solve ->
-      (try Race_solve.generate (Race_schedule.compile ?loop_bound ?capacity program) with
-       | Race_solve.Inconclusive reason -> failwith ("Bug_traces.Solve: " ^ reason))
+  let bounded=Race_schedule.compile ?loop_bound ?capacity program in
+  let generate ?within schedule=match backend with
+    | Search -> Race_search.generate ?within schedule
+    | Solve -> Race_solve.generate ?within schedule in
+  if bounded.boundaries<>[] then {races=[];truncated=bounded.cutoffs<>[]}
+  else if bounded.cutoffs=[] then generate bounded else
+  let truncated=(Race_search.generate {bounded with pairs=[]}).truncated in
+  if bounded.pairs=[] then {races=[];truncated}
+  else
+    let full=Race_schedule.compile ?capacity program in
+    if full.boundaries<>[] then {races=[];truncated} else
+    {(generate ~within:(Race_schedule.visibility bounded full) full) with truncated}

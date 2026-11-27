@@ -10,6 +10,31 @@ let replay rules events =
     if not (enabled rules seen i) then invalid_arg "event is disabled";
     Z.logor seen (Z.shift_left Z.one i)) Z.zero events)
 
+(* 全部事件必须执行，所以 i 排斥先执行的 j 等价于 i 必须先于 j。
+   转换后调度动作只增加已满足的前提，任一合法前缀均可接上同一完整顺序的剩余事件。 *)
+let completion_rules rules =
+  let result=Array.map (fun rule -> {rule with excludes=[]}) rules in
+  Array.iteri (fun i rule -> List.iter (fun j ->
+    result.(j)<-{requires=[i]::result.(j).requires;excludes=[]}) rule.excludes) rules;
+  result
+
+let all_reachable rules =
+  let seen=ref Z.zero and count=ref 0 in
+  let rec advance () =
+    let previous= !count in
+    Array.iteri (fun i _ -> if enabled rules !seen i then (
+      seen:=Z.logor !seen (Z.shift_left Z.one i);incr count)) rules;
+    !count=Array.length rules || (!count>previous && advance ()) in
+  advance ()
+
+let can_extend rules =
+  let rules=completion_rules rules in
+  let complete=lazy (all_reachable rules) in
+  fun events ->
+    let seen=ref Z.zero in
+    Lazy.force complete && List.for_all (fun i -> enabled rules !seen i &&
+      (seen:=Z.logor !seen (Z.shift_left Z.one i);true)) events
+
 let search rules pairs =
   let relevant = Hashtbl.create 32 in
   let rec include_node i = if not (Hashtbl.mem relevant i) then begin
@@ -24,10 +49,9 @@ let search rules pairs =
   while not (Queue.is_empty queue) && Hashtbl.length prefixes < 2 * List.length pairs do
     let seen,prefix = Queue.take queue in
     List.iter (fun i -> if enabled rules seen i then begin
-      let rev = i::prefix in
+      let rev = i::prefix and next=Z.logor seen (Z.shift_left Z.one i) in
       List.iter (fun j -> if Z.testbit seen j && not (Hashtbl.mem prefixes (j,i)) then
         Hashtbl.add prefixes (j,i) (List.rev rev)) partners.(i);
-      let next = Z.logor seen (Z.shift_left Z.one i) in
       if not (Hashtbl.mem visited next) then begin
         Hashtbl.add visited next (); Queue.add (next,rev) queue
       end
@@ -48,9 +72,10 @@ let solve ?timeout_ms rules =
   let present i = Arithmetic.mk_ge ctx times.(i) zero in
   let before a b = Boolean.mk_and ctx [present a; Arithmetic.mk_lt ctx times.(a) times.(b)] in
   Array.iteri (fun i rule ->
-    let require term = Solver.add solver [Boolean.mk_implies ctx (present i) term] in
+    let require term = Solver.add solver [term] in
+    require (present i);
     List.iter (fun xs -> require (Boolean.mk_or ctx (List.map (fun j -> before j i) xs))) rule.requires;
-    List.iter (fun j -> require (Boolean.mk_not ctx (present j))) rule.excludes) rules;
+    List.iter (fun j -> require (before i j)) rule.excludes) rules;
   fun a b -> match Solver.check solver [before a b; present b] with
     | UNSATISFIABLE -> None
     | UNKNOWN -> raise (Inconclusive (Solver.get_reason_unknown solver))
@@ -65,12 +90,15 @@ let solve ?timeout_ms rules =
 
 let generate ?timeout_ms ?(first_only=false) backend rules pairs =
   if pairs=[] then [] else
+  let rules=completion_rules rules in
+  if not (all_reachable rules) then [] else
   let deterministic = Array.for_all (fun r -> r.excludes=[] &&
     List.for_all (function [] | [_] -> true | _ -> false) r.requires) rules in
   let prefix = if deterministic then
       let graph = Precedence.compile backend (Array.map (fun r ->
         List.map (function [i] -> i | [] -> -1 | _ -> assert false) r.requires) rules) in
-      fun a b -> if Precedence.unordered graph a b then Some (Precedence.prefix graph a b) else None
+      let complete=Array.length graph.order=Array.length rules in
+      fun a b -> if complete && Precedence.unordered graph a b then Some (Precedence.prefix graph a b) else None
     else match backend with Precedence.Bfs -> search rules pairs | Smt -> solve ?timeout_ms rules in
   let witness (a,b) = Option.bind (prefix a b) (fun f ->
     Option.map (fun r -> replay rules f; replay rules r; a,b,f,r) (prefix b a)) in
