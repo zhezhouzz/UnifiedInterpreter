@@ -30,7 +30,7 @@ module {
   let launch = configuration {|{"streams":[
     {"entry":"consumer","core":"vector","arguments":[{"storage":"src","initial":[2]},{"storage":"out"}]},
     {"entry":"producer","core":"cube","arguments":[]}]}|} in
-  let result = R.run_module ~stage:"hivm" ~launch ast in
+  let result = R.run_builtin ~stage:"hivm" ~launch ast in
   assert (result.status=Finished && result.tasks=3 && word result "out" 0=11l)
 
 let view_and_loop () =
@@ -49,7 +49,7 @@ func.func @kernel(%src: memref<4xi32>, %n: index) -> (index, memref<1xi32, strid
   return %count, %v : index, memref<1xi32, strided<[1], offset: 1>>
 }|} in
   let launch = configuration {|{"arguments":[{"storage":"src","base_bytes":4,"initial":[1,2,3,4,5]},50000]}|} in
-  let run ?max_steps () = R.run_module ?max_steps ~stage:"hfusion" ~launch ast in
+  let run ?max_steps () = R.run_builtin ?max_steps ~stage:"hfusion" ~launch ast in
   let result = run () in
   assert (result.status=Finished && result.steps>100000);
   assert (List.init 5 (word result "src")=[1l;2l;9l;4l;5l]);
@@ -59,4 +59,14 @@ func.func @kernel(%src: memref<4xi32>, %n: index) -> (index, memref<1xi32, strid
    | _ -> assert false);
   match (run ~max_steps:10 ()).status with R.Step_limit _ -> () | _ -> assert false
 
-let () = delayed_copy (); view_and_loop ()
+let scheduler_by_default () =
+  let file = "../benchmarks/ir-pairs/fixture/fifo-copy/hivm.mlir" in
+  let ast = H.Module_ast.parse ~file (In_channel.with_open_bin file In_channel.input_all) in
+  let launch = configuration {|{"entry":"stream_0","arguments":[{"storage":"x","shape":[3],"initial":[7]}]}|} in
+  let db_path = Filename.temp_file ~temp_dir:"." "schedule" ".sqlite" in
+  Fun.protect ~finally:(fun () -> Sys.remove db_path) (fun () ->
+    let run () = R.run_module ~db_path ~stage:"hivm" ~launch ast in
+    assert (word (run ()) "x" 2=7l);
+    assert (word (run ()) "x" 2=0l))
+
+let () = delayed_copy (); view_and_loop (); scheduler_by_default ()

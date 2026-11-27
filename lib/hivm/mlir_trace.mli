@@ -1,4 +1,9 @@
 type lowered_mlir = Core_mlir of Mlir_lowering.t | Device_mlir of Mlir_device.t
+type stage = HFusion | HIVM
+val stage_name : stage -> string
+val configuration_for : stage -> Yojson.Safe.t -> Yojson.Safe.t
+val report_for_launch : ?entry:string -> ?configuration:Yojson.Safe.t -> ?timeout_ms:int ->
+  stage -> Unified_interpreter.Precedence.backend -> Hivm_module.t -> Yojson.Safe.t
 val lower_mlir : ?entry:string -> ?configuration:Yojson.Safe.t -> ?allow_prefix:bool ->
   Hivm_module.t -> lowered_mlir
 val analyze_mlir : ?timeout_ms:int -> backend:Unified_interpreter.Bug_traces.backend ->

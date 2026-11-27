@@ -46,6 +46,7 @@ let () = match Array.to_list Sys.argv with
   | _::"run"::file::args ->
       (try Source_run.run file args with
        | Arg.Help message -> print_string message
+       | Ir_scheduler.Delivery.Incomplete reason -> Printf.eprintf "scheduler incomplete: %s\n" reason; exit 3
        | Arg.Bad message -> prerr_endline message; exit 2)
   | [_] -> Demo.run_all ()
   | _::"race"::"pairs"::args ->

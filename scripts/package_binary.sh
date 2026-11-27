@@ -11,7 +11,7 @@ mkdir -p "$bundle/bin" "$bundle/scripts" "$bundle/artifacts/flash_attention/ir"
 install -m 755 _build/default/bin/main.exe "$bundle/bin/unified-interpreter"
 install -m 755 _build/default/attention_cli/main.exe "$bundle/bin/attention"
 install -m 755 _build/default/kernel_cli/main.exe "$bundle/bin/kernel-example"
-cp scripts/attention_frontend.py scripts/attention_dialects.py scripts/mlir_frontend.py \
+cp scripts/attention_frontend.py scripts/attention_dialects.py scripts/mlir_frontend.py scripts/scheduler_affine.py \
   scripts/scheduler_module.py scripts/scheduler_inputs.py scripts/scheduler_device.py scripts/scheduler_scene.py \
   scripts/bootstrap_attention.sh "$bundle/scripts/"
 cp requirements-attention.txt "$bundle/"

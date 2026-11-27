@@ -81,19 +81,22 @@ let of_json doc =
 
 let read file = of_json (Yojson.Safe.from_file file)
 
-let scheduling_json ast =
+let module_json ~execution ast =
   let list f xs = `List (List.map f xs) and str x = `String x in
   let assoc f xs = `Assoc (List.map (fun (k,v) -> k,f v) xs) in
   let value (id,ty) = `List [`Int id;str ty] in
-  let rec op o = `Assoc [
+  let rec op o = `Assoc ([
     "opcode",str o.opcode;"operands",list (fun i -> `Int i) o.operands;
     "results",list value o.results;"attributes",assoc str o.attributes;
     "properties",assoc str o.properties;"literals",`Assoc o.literals;
-    "regions",list (list block) o.regions]
+    "regions",list (list block) o.regions] @
+    (if execution then ["decoded",`Assoc o.decoded;"generic",`Bool o.generic] else []))
   and block b = `Assoc ["arguments",list value b.arguments;"body",list op b.body] in
-  `Assoc ["format",str ast.format;"types",`Assoc ast.types;"attributes",assoc str ast.attributes;
-          "source_sha256",str (Option.get ast.source_sha256);
+  `Assoc (["format",str ast.format;"types",`Assoc ast.types;"attributes",assoc str ast.attributes;
           "functions",assoc op (List.map (fun (k,v) -> String.sub k 1 (String.length k-1),v) ast.functions)]
+          @ (if execution then [] else ["source_sha256",str (Option.get ast.source_sha256)]))
+let execution_json = module_json ~execution:true
+let scheduling_json = module_json ~execution:false
 type syntax = Custom | Generic | BiSheng of string
 
 let parse ?(syntax=Custom) ~file input =

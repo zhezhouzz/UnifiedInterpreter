@@ -1,31 +1,38 @@
-# 在 HFusion 和 HIVM 模块 AST 上执行 trace
+# 在 HFusion 和 HIVM 模块 AST 上按 trace 执行
 
 ## 1. scheduler 的输入
 
-解释器将内存中的 OCaml 模块 AST 和本次执行的实参传给 `Ir_scheduler.generate_mlir ~configuration stage backend ast`。`stage` 取 `HFusion` 或 `HIVM`，`backend` 取 `Bfs` 或 `Smt`。单个入口使用 `~entry` 和按形参顺序排列的 `arguments`。多个实例通过 `configuration.streams` 分别给出入口和实参。缓冲区通过 `storage` 标识底层分配，`base_bytes` 以字节计，`offset` 和 `strides` 以元素计。命令行从 MLIR 文件读取 AST，供测试使用。[OCaml 接口](../lib/scheduler/ir_scheduler.mli) · [模块 AST 定义](../lib/hivm/hivm_module.mli) · [启动参数](mlir-to-core.md#启动参数)
+使用 `Hivm_trace.Execution.run_module` 时，解释器在每次执行前向 scheduler 请求一条 trace。需要同时取得 trace 和执行结果时，调用 `Ir_scheduler.run_module ~stage ~launch ast`。`ast` 是 parser 返回的 OCaml 模块，`stage` 取 `HFusion` 或 `HIVM`。`launch` 指定入口、实参、初始内存和执行流。多个实参通过相同的 `storage` 引用同一块内存。[调用接口](../lib/scheduler/ir_scheduler.mli) · [解释器入口](../lib/hivm/module_execution.ml) · [模块 AST](../lib/hivm/hivm_module.mli) · [启动参数](mlir-to-core.md#启动参数)
+
+命令行 `run FILE --stage hivm --launch launch.json` 从文件解析 AST。相同模块、IR 层和具体启动配置共享跨进程的 trace 历史。默认数据库位于 `$XDG_STATE_HOME/unified-interpreter/traces.sqlite3`，未设置该变量时使用 `~/.local/state/unified-interpreter/traces.sqlite3`。可以通过 `--trace-db FILE` 指定数据库。[命令行入口](../bin/source_run.ml)
 
 ## 2. scheduler 返回的 trace 结构
 
-两个 IR 层都返回 `hivm-race-1`。报告的 `streams` 给出每个实例的入口，`inputs` 给出 IR 层、AST 标识、实参和初始内存。每个 `races[]` 元素包含两个端点和两条事件序列。`forward` 先执行 `first` 再执行 `second`，`reverse` 采用相反顺序。
+命令行输出的 `schedule` 字段与 OCaml 的 `Delivery.encode trace` 相同。[trace 接口](../lib/scheduler/ir_scheduler.mli)
 
-报告带有 `trace_extent: "program_end"` 时，两条序列都覆盖整个程序，`prefix_rounds` 给出覆盖两个端点所需的循环轮数。其余竞争报告给出在第二个目标事件处结束的前缀。`status` 为 `complete` 表示完成本次输入的分析，`race` 表示找到竞争，`no-race` 表示没有冲突事件对能在两次正常结束的执行中交换完成顺序。`unknown` 的具体原因记录在 `reason` 中。[事件定义](../lib/hivm/hivm_trace.mli)
-
-| 事件字段 | 解释器的使用方式 |
+| 字段 | 含义 |
 | --- | --- |
-| `stream`、`entry`、`path`、`opcode` | 选择实例，在当前函数中用 `Module_ast.resolve ast ~entry path` 取得原始操作。路径从零开始，每进入一层区域，依次给出父操作、region、block 的下标。 |
-| `iterations`、`calls` | 循环轮次从零开始。嵌套调用的 `calls` 从最外层开始，每项记录调用者的 `entry`、调用指令的 `path` 和调用时的 `iterations`。事件自身的 `iterations` 属于当前函数。 |
-| `phase`、`tasks` | `execute` 执行当前操作。按 `submit` 保存本次调用的实参和待完成任务，按 `complete` 完成相应任务。使用 `(stream, tasks[].id)` 配对。HFusion 的异步任务使用 `HFUSION_ASYNC`，HIVM 的任务记录设备管线。 |
-| `action`、`signals`、`part` | `action` 区分计算、置位、等待和屏障。`signals` 给出涉及的同步信号。同一源操作有多个阶段时，`part` 指定当前阶段。 |
+| `events` | 按执行顺序排列的事件。每项依次为执行流编号、源操作位置、管线、动态出现序号、阶段。 |
+| `extent` | `race_prefix` 在第二个竞争端点结束。`terminal` 覆盖本次执行直至终止。 |
+| `targets` | 竞争前缀包含按执行顺序排列的两个端点。`event` 是可与 `events` 直接比较的事件，`source` 包含原始 AST 位置和循环轮次。终止 trace 的值为 `null`。 |
+| `terminal` | 终止状态为 `returned`、`deadlock` 或 `invalid-memory`。竞争前缀的值为 `null`。 |
+| `hash`、`reused` | `hash` 是紧凑 JSON 事件数组的 SHA-256。`reused` 表示本次是否复用已交付的 trace。只有耗尽当前输入的可选调度后才允许复用。 |
+
+例如，`[0,"@stream_0/10 func.call","V",0,"complete"]` 表示执行流 0 中，函数 `@stream_0` 的路径 `[10]` 上，第一次提交至 V 管线的调用完成。动态序号在同一执行流、源操作位置和管线内从零开始计数。同一任务的提交和完成共用序号。[事件定义](../lib/dispatch.ml)
 
 ## 3. interpreter 如何利用 trace
 
-使用报告中的原始实参和初始内存分别执行两次，每次选择一条序列。解释器自行执行常量、标量运算、分支和地址分配。到达需要调度的位置时，读取下一个事件。若为 `submit` 或 `execute`，推进指定实例到相应的动态位置并执行动作。若为 `complete`，从待完成任务中找到相同编号的任务并执行其中的读写。完整 trace 中的所有事件都需要消费，包括两个端点之后的事件。对于前缀，scheduler 保证每个方向至少有一种后续调度能让所有流结束、所有已提交任务完成。解释器自行选择其他后续调度时仍可能遇到死锁。[位置查询接口](../lib/hivm/hivm_module.mli)
+使用现有执行器时，`Ir_scheduler.run_module` 完成请求、执行和消费检查。已通过 `next_trace` 取得 trace 时，可以直接调用 `Hivm_trace.Execution.execute_trace ~stage ~launch ast schedule`。需要自行驱动解释器时，用 `Delivery.replay` 取得 `choose` 和 `verify`。解释器自行计算标量、分支、循环条件和地址。每当有可执行的调度动作时，将这些动作传给 `choose`，执行它选出的事件。提交阶段保存任务和实参，完成阶段执行该任务的读写，原子阶段执行对应操作。[执行接口](../lib/hivm/module_execution.ml) · [事件选择与检查](../lib/scheduler/trace_delivery.ml)
+
+竞争前缀消费完以后，可以使用任意合法的调度策略继续执行。现有 `choose` 在此时选择执行器给出的第一个可执行动作。终止后调用 `verify result.status`。scheduler 优先交付已发现竞争的两个顺序。可以通过 `--scheduler-timeout-ms` 调整请求的分析时间预算，默认值为 30000 毫秒。分析预算耗尽时，接口抛出 `Delivery.Incomplete`，命令行以状态码 3 退出。[OCaml 调用实现](../lib/hivm/module_execution.ml)
 
 ## 4. fifo-copy 例子
 
-`fixture/fifo-copy` 的 HIVM 入口 `@stream_0` 在路径 `[10]` 和 `[19]` 两次调用 `@copy`。第一次将 `x[0]` 复制到 `x[1]`，第二次将 `x[1]` 复制到 `x[2]`。初始值为 `[7, 0, 0]`。解释器依次执行两处调用之前的视图和索引计算，按两个 `submit` 事件保存实参。此时两次复制都还在等待完成。[HIVM 源程序](../benchmarks/ir-pairs/fixture/fifo-copy/hivm.mlir)
+`fixture/fifo-copy` 的 HIVM 入口 `@stream_0` 两次调用 `@copy`。路径 `[10]` 将 `x[0]` 复制到 `x[1]`，路径 `[19]` 将 `x[1]` 复制到 `x[2]`。初始值为 `[7, 0, 0]`。使用同一份新的数据库连续启动解释器，可以观察到以下结果。[HIVM 源程序](../benchmarks/ir-pairs/fixture/fifo-copy/hivm.mlir) · [跨进程回归测试](../test/test_trace_delivery.py)
 
-| 前缀 | 两个 `complete` 事件对应的调用位置 | 完成后的内存 |
-| --- | --- | --- |
-| `forward` | `[10]`、`[19]` | `[7, 7, 7]` |
-| `reverse` | `[19]`、`[10]` | `[7, 7, 0]` |
+| 请求 | 调度顺序 | 最终内存 | `reused` |
+| --- | --- | --- | --- |
+| 第一次 | 提交 10，提交 19，完成 10，完成 19 | `[7, 7, 7]` | `false` |
+| 第二次 | 提交 10，提交 19，完成 19，完成 10 | `[7, 7, 0]` | `false` |
+| 第三次 | 提交 10，完成 10，提交 19，完成 19 | `[7, 7, 7]` | `false` |
+| 第四次 | 复用第一次的 trace | `[7, 7, 7]` | `true` |

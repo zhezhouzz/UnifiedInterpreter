@@ -141,6 +141,20 @@ let analyze_mlir ?(timeout_ms=5000) ~backend ?(hivm=false) = function
       let coverage,races=Device_races.analyze ~timeout_ms model in
       device_mlir_report ~coverage ~backend ~hivm p model races
 
+type stage = HFusion | HIVM
+let stage_name = function HFusion -> "hfusion" | HIVM -> "hivm"
+
+let configuration_for stage configuration =
+  let expected=`String (stage_name stage) in
+  (match J.member "stage" configuration with `Null -> () | value when value=expected -> ()
+   | _ -> invalid_arg "IR stage and launch stage differ");
+  `Assoc (("stage",expected)::List.remove_assoc "stage" (J.to_assoc configuration))
+
+let report_for_launch ?entry ?(configuration=`Assoc []) ?timeout_ms stage backend ast =
+  let lowered=lower_mlir ?entry ~configuration:(configuration_for stage configuration) ast in
+  let backend=match backend with Precedence.Bfs -> Bug_traces.Search | Smt -> Solve in
+  analyze_mlir ?timeout_ms ~backend ~hivm:true lowered
+
 let verify_mlir_report report inputs capacity unit events =
   if J.member "format" report <> `String "core-race-1" || J.member "inputs" report <> inputs ||
      J.member "capacity" report <> `Int capacity || J.member "address_unit" report <> `String unit ||

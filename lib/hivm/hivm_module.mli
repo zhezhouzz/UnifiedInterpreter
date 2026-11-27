@@ -27,6 +27,7 @@ val parse : ?syntax:syntax -> file:string -> string -> t
 val read : string -> t
 val of_json : Yojson.Safe.t -> t
 val scheduling_json : t -> Yojson.Safe.t
+val execution_json : t -> Yojson.Safe.t
 val entry : t -> string -> block
 val resolve : t -> entry:string -> int list -> operation
 
