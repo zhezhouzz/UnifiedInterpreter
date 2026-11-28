@@ -13,8 +13,6 @@ sha256sum -c unified-interpreter.sha256
 
 ## 运行程序
 
-运行 `./unified-interpreter run --help` 查看执行命令的用法。
-
 按源文件所属的 IR 层选择 `--stage`。离线可执行文件会自动选择解析器。首次试运行可从同一版本的仓库下载 [HIVM 向量加法源码](../examples/kernels/vector_add_hivm.mlir) 和 [HFusion 向量加法源码](../examples/kernels/vector_add_hfusion.mlir)，按原文件名保存在可执行文件旁。两个版本都应返回 `returned`。如果手里只有发行文件，可在构建对应的 GitHub 提交页面打开 `examples/kernels/`，分别下载两个 `.mlir` 原文件，再复制到离线机器。
 
 ```sh
@@ -40,11 +38,8 @@ jq '.launch' result.json > launch.json
 | `returned` | 程序正常返回。 |
 | `deadlock` | 程序发生死锁，`detail` 列出阻塞位置。 |
 | `invalid-memory` | 内存访问无效，`detail` 给出访问错误。 |
-| `step-limit` | 使用 `--builtin` 直接执行时达到步数上限。 |
 
-每次解释执行的步数上限为 10,000,000 步。默认调度模式下，如果生成 trace 时达到步数上限，程序会以退出码 3 结束，将 `scheduler incomplete: execution step limit` 和操作位置写入标准错误。纯标量程序正常返回时，`schedule.events` 为空。只需按解释器自身顺序执行时，可使用 `--builtin`，此时结果中的 `schedule` 为 `null`。
-
-单次调度请求的默认超时为 120 秒。使用 `--scheduler-timeout-ms N` 可按毫秒调整。超时时退出码为 3，标准错误以 `scheduler incomplete:` 开头，随后给出超时原因，例如 `timeout`。
+纯标量程序正常返回时，`schedule.events` 为空。
 
 `returns` 按执行流列出函数返回值。通过缓冲区输出结果的程序，请查看 `memory_hex` 中对应存储名称的最终字节。`schedule` 记录本次执行的调度。相同输入可能因调度顺序不同而产生不同结果。
 
@@ -75,7 +70,7 @@ jq '{status, detail, extent: .schedule.extent, targets: .schedule.targets}' "$ou
 | 任一次 `status = invalid-memory` | 该输入触发无效内存访问。分别查看两次的 `detail`：同一个程序可能一次报告下标越界，另一次报告读取未初始化的描述符。 |
 | `schedule.extent = "race_prefix"` | 调度器报告数据竞争。`targets` 是按本次完成或执行顺序排列的两个冲突访问。即使 `status = returned`，程序也可能存在竞争。 |
 | 两次均正常返回，且均无竞争目标 | 这两次执行未观察到上述问题。其他输入或调度仍可能触发问题。 |
-| 命令失败、未生成有效 JSON，或达到步数上限 | 该次测试未完成，保留标准错误和操作位置。 |
+| 命令失败或未生成有效 JSON | 该次测试未完成，保留标准错误和操作位置。 |
 
 每个目标的 `source` 给出入口、操作和循环轮次。`event` 的五个元素依次是流编号、操作位置、管线、该操作的动态出现编号、事件阶段。循环中的同一个操作可以执行多次，比较时需要保留动态编号。
 
@@ -120,7 +115,9 @@ jq -s '
 jq '{status, detail, output_bytes: (.memory_hex.output | length / 2)}' tiles-result.json
 ```
 
-这里的输出缓冲区为 2048 字节。函数通过缓冲区写回结果，因此即使正常返回，`returns` 也可以是 `[[]]`。若保持两轮并将输入缩为 1024 个元素，第二轮需要的子视图会超出输入范围。此例以退出码 2 结束，标准错误包含 `memref.subview: subview is out of range`，结果文件为空。
+这里的输出缓冲区为 2048 字节。函数通过缓冲区写回结果，因此即使正常返回，`returns` 也可以是 `[[]]`。
+
+若保持两轮并将输入的 `shape` 改为 `[1024]`，第二轮创建子视图时请求下标 1024 至 2047，超出了输入范围。程序以退出码 0 输出 JSON，`status` 为 `invalid-memory`。`detail` 指出出错的 `memref.subview`、请求的下标和维度大小，以及本例的源码位置 `issue316_missing_ready_hivm.mlir:24:5`。可用 `jq '{status, detail}' tiles-result.json` 查看。
 
 整数和 `index` 参数填写 JSON 整数，浮点参数填写 JSON 数字，`i1` 填写 `true`、`false`、`0` 或 `1`。缓冲区使用下表中的字段。静态形状和布局均已确定、使用独立存储和默认初值时，该参数可以直接填 `null`。
 
