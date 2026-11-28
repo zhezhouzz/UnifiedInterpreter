@@ -84,7 +84,7 @@ jq '{status, detail, extent: .schedule.extent, targets: .schedule.targets}' "$ou
 要确认两条 trace 实际展示了同一对访问交换顺序，可以执行下面的命令。它比较完整的动态事件标识，并检查两个事件在各自的 `schedule.events` 中按目标顺序出现。输出 `true` 即确认了这对竞争；输出 `false` 时仍需按上表检查各次结果。两个 trace 的哈希不同或最终缓冲区的值相同，都无法单独判定竞争。
 
 ```sh
-jq -s '
+jq -es '
   def pair:
     .schedule as $s
     | if $s.extent == "race_prefix" and ($s.targets | length) == 2 then
@@ -92,9 +92,14 @@ jq -s '
         | if $p[0] != $p[1] and $s.events[-1] == $p[1]
              and any($s.events[:-1][]; . == $p[0]) then $p else null end
       else null end;
-  map(pair) | length == 2 and .[0] != null and .[1] == (.[0] | reverse)
+  if length != 2 or any(.[]; (.status | type) != "string" or (.schedule | type) != "object")
+    then error("需要两份完整的调度执行结果")
+  elif .[0].launch != .[1].launch then error("两次启动配置不同")
+  else map(pair) | .[0] != null and .[1] == (.[0] | reverse) end
 ' "$out/1.json" "$out/2.json"
 ```
+
+批量处理时，上述 `jq` 命令输出 `true` 的退出码为 0，输出 `false` 的退出码为 1。读取文件或校验输入失败时查看标准错误，将该组记为未完成。手工指定启动配置时，请在两次执行之间保持该文件内容相同。
 
 ## 填写启动配置
 
