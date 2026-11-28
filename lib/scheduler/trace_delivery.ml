@@ -125,13 +125,23 @@ let next_trace ?db_path ?(timeout_ms=120_000) ~identity ~analyze ~execute () =
     execute choose in
   try H.with_db ~timeout_ms filename (fun db->
     let state ()=H.row db "SELECT guide,cursor,revision FROM searches WHERE id=?" [key] in
+    let empty_leaf = ref None in
     if state ()=None then (
-      let report=analyze ~timeout_ms in
-      if J.member "status" report=`String "unknown" then raise (Incomplete (J.to_string (J.member "reason" report)));
-      let races=J.to_list (J.member "races" report) in
+      (* Until the first dispatch callback there is no scheduling choice. A run
+         that terminates here has exactly one trace, including for a blocked entry. *)
+      let exception First_dispatch in
+      let terminal, races =
+        match run (fun _ -> raise First_dispatch) with
+        | outcome ->
+            empty_leaf := Some (make [] (Terminal (status outcome)) `Null);
+            `Null, []
+        | exception First_dispatch ->
+            let report=analyze ~timeout_ms in
+            if J.member "status" report=`String "unknown" then raise (Incomplete (J.to_string (J.member "reason" report)));
+            J.member "trace" report, J.to_list (J.member "races" report) in
       H.transaction db (fun ()->if state ()=None then (
         H.write db "INSERT INTO searches VALUES (?,0,'[]',0)" [key];
-        (match J.member "trace" report with
+        (match terminal with
          | `Assoc _ as trace when J.member "extent" trace=`String "terminal" ->
              H.write db "INSERT INTO guides VALUES (?,0,?)" [key;H.text (Yojson.Safe.to_string trace)]
          | _ -> ());
@@ -164,7 +174,11 @@ let next_trace ?db_path ?(timeout_ms=120_000) ~identity ~analyze ~execute () =
                   | _->race_trace run guide path in
                 (match next with Some _->t,next,s.(0) | None->
                   t,Some [],Sqlite3.Data.INT (Int64.succ (Sqlite3.Data.to_int64_exn s.(0))))
-            | None->let t,next=next_leaf run path in Some t,next,s.(0) in
+            | None->
+                let t,next=match !empty_leaf with
+                  | Some trace -> trace,None
+                  | None -> next_leaf run path in
+                Some t,next,s.(0) in
           let next=match next with None->Sqlite3.Data.NULL
             | Some xs->H.text (Yojson.Safe.to_string (`List (List.map (fun i->`Int i) xs))) in
           budget ();
