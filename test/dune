@@ -30,7 +30,8 @@
        ../scripts/mlir_frontend.py ../scripts/scheduler_affine.py ../scripts/attention_frontend.py
        ../scripts/attention_dialects.py ../requirements-attention.txt)
  (action (run python3 %{dep:test_trace_delivery.py} %{exe:../bin/main.exe}
-          %{dep:../benchmarks/ir-pairs/fixture/fifo-copy/hivm.mlir} .)))
+          %{dep:../benchmarks/ir-pairs/fixture/fifo-copy/hivm.mlir} .
+          %{dep:../examples/kernels/issue316_missing_ready_hivm.mlir})))
 
 (test
  (name test_symbolic_races)

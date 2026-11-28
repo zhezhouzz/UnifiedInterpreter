@@ -22,9 +22,24 @@ let next_trace ?db_path ?timeout_ms ?max_steps ?(backend=Precedence.Bfs) ~stage 
   let identity = `List [Hivm_module.execution_json ast; `String stage_name; Mlir_launch.inputs bound;
                         `List (List.map stream bound.streams); `Int bound.capacity; edges; local] in
   let identity=match backend with Precedence.Smt->identity | Bfs->`List [`String "bfs-terminal";identity] in
-  let analyze ~timeout_ms = Mlir_trace.report_for_launch ~configuration ~timeout_ms stage backend ast in
   let execute choose =
     (Source_execution.run_module ~quiet:true ~choose ?max_steps ~stage:stage_name ~launch ast).status in
+  let analyze ~timeout_ms =
+    let deadline = Unix.gettimeofday () +. float timeout_ms /. 1000. in
+    try Mlir_trace.report_for_launch ~configuration ~timeout_ms stage backend ast with
+    | Device_value.Subview_out_of_bounds _ ->
+        (* 子视图可以在第一次内存读写前越界，按源程序执行顺序记录终止事件。 *)
+        let run select = execute (fun options ->
+          if Unix.gettimeofday () >= deadline then raise (Delivery.Incomplete "scheduler request timed out");
+          select options) in
+        let rec reproduce cursor =
+          let trace,next = Delivery.next_leaf run cursor in
+          match trace.extent,next with
+          | Delivery.Terminal "invalid-memory",_ ->
+              `Assoc ["status",`String "invalid-memory";"trace",Delivery.encode trace;"races",`List []]
+          | _,Some cursor -> reproduce cursor
+          | _,None -> raise (Delivery.Incomplete "subview bounds error did not reproduce during source execution") in
+        reproduce [] in
   Delivery.next_trace ?db_path ?timeout_ms ~identity ~analyze ~execute ()
 
 let execute_trace ?max_steps ?trace ?on_read ~stage ~launch ast schedule =

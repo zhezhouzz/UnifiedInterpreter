@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 def main():
-    exe, source, scratch = (Path(arg).resolve() for arg in sys.argv[1:])
+    exe, source, scratch, issue316 = (Path(arg).resolve() for arg in sys.argv[1:])
     with tempfile.TemporaryDirectory(dir=scratch) as folder:
         directory = Path(folder)
         env = dict(os.environ, XDG_STATE_HOME=folder, TMPDIR=folder)
@@ -55,6 +55,16 @@ def main():
         launch.write_text(json.dumps({"entry": "stream_0", "arguments": [arg]}))
         changed, memory = request()
         assert not changed["reused"] and memory == (19, 19, 19)
+
+        launch.write_text(json.dumps({"arguments": [{"shape": [1024]}, None, 2]}))
+        command = [exe, "run", issue316, "--stage", "hivm", "--launch", launch]
+        for options in (["--trace-db", ":memory:"], ["--builtin"]):
+            result = json.loads(subprocess.check_output([*command, *options], env=env))
+            assert result["status"] == "invalid-memory"
+            assert "memref.subview" in result["detail"] and issue316.name in result["detail"]
+            assert "1024 through 2047" in result["detail"]
+            if result["schedule"] is not None:
+                assert result["schedule"]["terminal"] == "invalid-memory"
 
 
 if __name__ == "__main__":
