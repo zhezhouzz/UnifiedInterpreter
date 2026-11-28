@@ -48,6 +48,54 @@ jq '.launch' result.json > launch.json
 
 `returns` 按执行流列出函数返回值。通过缓冲区输出结果的程序，请查看 `memory_hex` 中对应存储名称的最终字节。`schedule` 记录本次执行的调度。相同输入可能因调度顺序不同而产生不同结果。
 
+### 用两次运行判断 benchmark 是否暴露问题
+
+只需要可执行文件和 benchmark 的 MLIR 源文件。选择源文件及其 IR 层，使用默认调度执行两次。两次使用相同的输入、同一个新建的历史数据库，并分别保存输出。下面的命令适用于 Bash，`src` 和 `stage` 按实际文件填写。
+
+```bash
+src=vector_add_hivm.mlir
+stage=hivm
+out=$(mktemp -d ./benchmark-run-XXXXXX)
+for n in 1 2; do
+  ./unified-interpreter run "$src" --stage "$stage" --seed 17 \
+    --trace-db "$out/history.sqlite3" > "$out/$n.json" 2> "$out/$n.err" ||
+    { cat "$out/$n.err" >&2; break; }
+done
+```
+
+对每份 IR 源文件分别运行以上步骤。已有指定输入时，两次均将 `--seed 17` 换为同一个 `--launch launch.json`。核对两个 JSON 的 `status`、`detail` 和竞争目标：
+
+```sh
+jq '{status, detail, extent: .schedule.extent, targets: .schedule.targets}' "$out/1.json" "$out/2.json"
+```
+
+| 输出证据 | 可作出的判断 |
+|---|---|
+| 任一次 `status = deadlock` | 该输入触发死锁。`detail` 列出阻塞位置。 |
+| 任一次 `status = invalid-memory` | 该输入触发无效内存访问。分别查看两次的 `detail`：同一个程序可能一次报告下标越界，另一次报告读取未初始化的描述符。 |
+| `schedule.extent = "race_prefix"` | 调度器报告数据竞争。`targets` 是按本次完成或执行顺序排列的两个冲突访问。即使 `status = returned`，程序也可能存在竞争。 |
+| 两次均正常返回，且均无竞争目标 | 这两次执行未观察到上述问题。其他输入或调度仍可能触发问题。 |
+| 命令失败、未生成有效 JSON，或达到步数上限 | 该次测试未完成，保留标准错误和操作位置。 |
+
+每个目标的 `source` 给出入口、操作和循环轮次。`event` 的五个元素依次是流编号、操作位置、管线、该操作的动态出现编号、事件阶段。循环中的同一个操作可以执行多次，比较时需要保留动态编号。
+
+定位操作时先查找 `source.entry`，再按 `source.path` 中从 0 开始的序号查找。例如 `[2,0,0,1]` 表示入口的第 3 个操作、该操作的第 1 个 region、第 1 个 block 中的第 2 个操作。可用 `source.opcode` 核对名称。竞争目标给出的是解析后的操作位置；要确定冲突字节范围，还需结合源码的访存操作和本次启动配置。
+
+要确认两条 trace 实际展示了同一对访问交换顺序，可以执行下面的命令。它比较完整的动态事件标识，并检查两个事件在各自的 `schedule.events` 中按目标顺序出现。输出 `true` 即确认了这对竞争；输出 `false` 时仍需按上表检查各次结果。两个 trace 的哈希不同或最终缓冲区的值相同，都无法单独判定竞争。
+
+```sh
+jq -s '
+  def pair:
+    .schedule as $s
+    | if $s.extent == "race_prefix" and ($s.targets | length) == 2 then
+        ($s.targets | map(.event)) as $p
+        | if $p[0] != $p[1] and $s.events[-1] == $p[1]
+             and any($s.events[:-1][]; . == $p[0]) then $p else null end
+      else null end;
+  map(pair) | length == 2 and .[0] != null and .[1] == (.[0] | reverse)
+' "$out/1.json" "$out/2.json"
+```
+
 ## 填写启动配置
 
 在源文件中找到要执行的 `func.func`，将函数名写入 `entry`，按声明顺序为每个形参填写一个 `arguments` 元素，包括输出缓冲区。模块只有一个函数时可以省略 `entry`。
