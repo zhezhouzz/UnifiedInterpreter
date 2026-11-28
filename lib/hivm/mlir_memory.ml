@@ -123,9 +123,7 @@ let addresses b =
 
 let subview b ~offsets ~sizes ~steps expected =
   let offset, strides = List.fold_left2 (fun (base,strides) (offset,length,step,dim) stride ->
-    let last = Z.add offset (Z.mul (z (length-1)) step) in
-    if length > 0 && (Z.sign (Z.min offset last)<0 || Z.geq (Z.max offset last) (z dim)) then
-      invalid_arg "subview is out of range";
+    Device_value.check_subview_axis ~offset ~length ~step ~dimension:dim;
     Z.add base (Z.mul offset stride), Z.mul step stride :: strides
   ) (b.offset,[]) (List.map2 (fun (offset,size) (step,dim) -> offset,size,step,dim)
                     (List.combine offsets sizes) (List.combine steps b.shape)) b.strides in

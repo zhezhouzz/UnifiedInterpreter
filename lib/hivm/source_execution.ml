@@ -59,6 +59,8 @@ let run_module ?choose ?(quiet=false) ?trace ?on_read ?on_bounds ?(max_steps=10_
           ~record_choices:false ~observe_accesses:false ~on_finish:(fun ()->incr tasks) ~copy_bank:(fun _->false)
           ~on_blocked:(fun reason->status:=Blocked [reason]) device.program device.memory device.bindings))).memory
       with Budget site->status:=Step_limit site;device.memory
+         | Device_value.Subview_out_of_bounds reason->Option.iter (fun f->f ()) on_bounds;
+             status:=Invalid_memory (!current^": "^reason);device.memory
          | Device_eval.Invalid_indirect_address i->Option.iter (fun f->f ()) on_bounds;
              status:=Invalid_memory (Printf.sprintf "%s: indirect index %d" !current i);device.memory in
     {status= !status;steps= !steps;tasks= !tasks;returned=Array.make (List.length launch.streams) [];
@@ -135,7 +137,11 @@ let run_module ?choose ?(quiet=false) ?trace ?on_read ?on_bounds ?(max_steps=10_
             offset=Z.of_int ((src.base-src.origin)/width src.element);
             element_bytes=width src.element;shape=Array.to_list src.shape;
             strides=Array.to_list (Array.map Z.of_int src.strides)} in
-          let view=Mlir_memory.subview template ~offsets ~sizes ~steps target in
+          let view=try Mlir_memory.subview template ~offsets ~sizes ~steps target with
+            | Device_value.Subview_out_of_bounds reason ->
+                let location=Option.fold ~none:"" ~some:(fun span ->
+                  Attention_runtime.Source.describe span ^ ": ") op.span in
+                raise (Out_of_bounds (location ^ reason)) in
           {src with base=src.origin+Z.to_int view.offset*width src.element;
                     shape=Array.of_list view.shape;strides=dims view.strides} in
         let f frame nested ordinal args =

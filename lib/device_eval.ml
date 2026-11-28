@@ -160,9 +160,10 @@ let rec eval c env expr =
          || Array.length shape <> Array.length step then invalid_arg "slice rank";
       let bit = ref v.bit in
       let strides = Array.mapi (fun i stride ->
-        if off.(i) < 0 || shape.(i) < 0 || step.(i) <= 0 ||
-           (shape.(i) > 0 && plus off.(i) (times (shape.(i)-1) step.(i)) >= v.shape.(i))
-        then invalid_arg "slice extent";
+        if shape.(i) < 0 || step.(i) <= 0 then invalid_arg "slice extent";
+        check_subview_axis ~offset:(Z.of_int off.(i)) ~length:shape.(i)
+          ~step:(Z.of_int step.(i)) ~dimension:v.shape.(i);
+        if off.(i) < 0 then raise (Subview_out_of_bounds "subview has a negative offset");
         bit := plus !bit (times (times off.(i) stride) (bits v.ty));
         times stride step.(i)) v.strides in
       View {v with bit = !bit; shape; strides}

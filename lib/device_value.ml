@@ -8,6 +8,17 @@ type view = { bank : bank; ty : dtype; bit : int; shape : int array; strides : i
 type tensor = { element : dtype; dimensions : int array; cells : int64 option array }
 type value = Reg of vector | View of view | Tensor of tensor
 
+exception Subview_out_of_bounds of string
+
+let check_subview_axis ~offset ~length ~step ~dimension =
+  if length > 0 then begin
+    let last = Z.add offset (Z.mul (Z.of_int (length - 1)) step) in
+    if Z.sign (Z.min offset last) < 0 || Z.geq (Z.max offset last) (Z.of_int dimension) then
+      raise (Subview_out_of_bounds (Printf.sprintf
+        "subview is out of range: indices %s through %s in dimension of size %d"
+        (Z.to_string offset) (Z.to_string last) dimension))
+  end
+
 let reg = function Reg r -> r | _ -> invalid_arg "expected register"
 let view = function View v -> v | _ -> invalid_arg "expected buffer"
 let tensor = function Tensor t -> t | _ -> invalid_arg "expected an SSA tensor value"
