@@ -24,7 +24,7 @@
 
 使用现有执行器时，`Ir_scheduler.run_module` 完成请求、执行和消费检查。已通过 `next_trace` 取得 trace 时，可以直接调用 `Hivm_trace.Execution.execute_trace ~stage ~launch ast schedule`。需要自行驱动解释器时，用 `Delivery.replay` 取得 `choose` 和 `verify`。解释器自行计算标量、分支、循环条件和地址。每当有可执行的调度动作时，将这些动作传给 `choose`，执行它选出的事件。提交阶段保存任务和实参，完成阶段执行该任务的读写，原子阶段执行对应操作。[执行接口](../lib/hivm/module_execution.ml) · [事件选择与检查](../lib/scheduler/trace_delivery.ml)
 
-竞争前缀消费完以后，可以使用任意合法的调度策略继续执行。现有 `choose` 在此时选择执行器给出的第一个可执行动作。终止后调用 `verify result.status`。scheduler 优先交付已发现竞争的两个顺序。可以通过 `--scheduler-timeout-ms` 调整请求的分析时间预算，默认值为 30000 毫秒。分析预算耗尽时，接口抛出 `Delivery.Incomplete`，命令行以状态码 3 退出。[OCaml 调用实现](../lib/hivm/module_execution.ml)
+竞争前缀消费完以后，可以使用任意合法的调度策略继续执行。现有 `choose` 在此时选择执行器给出的第一个可执行动作。终止后调用 `verify result.status`。scheduler 优先交付已发现竞争的两个顺序。单次调度请求的默认超时为 120 秒（120000 毫秒），可通过 `--scheduler-timeout-ms` 调整。请求超时时，接口抛出 `Delivery.Incomplete`，命令行以状态码 3 退出。[OCaml 调用实现](../lib/hivm/module_execution.ml)
 
 ## 4. fifo-copy 例子
 

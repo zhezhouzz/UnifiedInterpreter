@@ -38,6 +38,8 @@ jq '.launch' result.json > launch.json
 | `invalid-memory` | 内存访问无效，`detail` 给出访问错误。 |
 | `step-limit` | 执行达到步数上限，可通过 `--max-steps N` 调整。 |
 
+单次调度请求的默认超时为 120 秒。使用 `--scheduler-timeout-ms N` 可按毫秒调整该限制。调度请求超时时，程序输出 `scheduler incomplete: scheduler request timed out`，以状态码 3 退出。
+
 `returns` 按执行流列出函数返回值。通过缓冲区输出结果的程序，请查看 `memory_hex` 中对应存储名称的最终字节。`schedule` 记录本次执行的调度。相同输入可能因调度顺序不同而产生不同结果。
 
 ## 填写启动配置

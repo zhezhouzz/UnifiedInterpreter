@@ -114,7 +114,7 @@ let next_leaf run cursor =
   let terminal=status (run choose) in
   make (List.rev !events) (Terminal terminal) `Null,next ()
 
-let next_trace ?db_path ?(timeout_ms=30000) ~identity ~analyze ~execute () =
+let next_trace ?db_path ?(timeout_ms=120_000) ~identity ~analyze ~execute () =
   if timeout_ms<=0 then invalid_arg "scheduler timeout must be positive";
   let deadline=Unix.gettimeofday ()+.float timeout_ms/.1000. in
   let budget ()=if Unix.gettimeofday ()>=deadline then raise (Incomplete "scheduler request timed out") in
