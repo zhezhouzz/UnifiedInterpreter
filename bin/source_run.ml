@@ -1,7 +1,7 @@
 module R = Hivm_trace.Execution
 module A = Hivm_trace.Module_ast
 module V = Hivm_trace.Execution_value
-let usage = "unified-interpreter run FILE --stage {hfusion|hivm} [--launch JSON | --seed N] [--trace-db FILE | --builtin] [--scheduler-backend {bfs|smt}] [--trace] [--max-steps N] [--scheduler-timeout-ms N]"
+let usage = "unified-interpreter run FILE --stage {hfusion|hivm} [--launch JSON | --seed N] [--trace-db FILE | --builtin] [--scheduler-backend {bfs|smt}] [--trace] [--scheduler-timeout-ms N]"
 
 let hex bytes =
   let digits="0123456789abcdef" in
@@ -25,7 +25,7 @@ let rec value = function
               "values",`List (List.init (V.size b.shape) (fun i -> value (V.get b i)))]
 
 let run file args =
-  let stage=ref "" and launch=ref "" and compiler=ref "" and limit=ref 10_000_000
+  let stage=ref "" and launch=ref "" and compiler=ref ""
   and trace=ref false and inspect=ref [] and builtin=ref false and db_path=ref None and timeout_ms=ref None in
   let backend=ref None and seed=ref None in
   Arg.parse_argv ~current:(ref 0) (Array.of_list ("run"::args))
@@ -38,7 +38,7 @@ let run file args =
        (if s="bfs" then Unified_interpreter.Precedence.Bfs else Smt)),"race analysis backend";
      "--trace-db",Arg.String (fun p->db_path:=Some p),"scheduler history database";
      "--scheduler-timeout-ms",Arg.Int (fun n->timeout_ms:=Some n),"scheduler request budget in milliseconds";
-     "--max-steps",Arg.Set_int limit,"maximum interpreter steps";"--trace",Arg.Set trace,"emit execution sites on stderr";
+     "--trace",Arg.Set trace,"emit execution sites on stderr";
      "--inspect-input",Arg.Symbol (["hivm.hir.load";"hivm.hir.vabs"],fun code->inspect:=code::!inspect),
          "sample the input tensor when a load or vabs completes"]
     (fun s->raise (Arg.Bad ("unexpected argument "^s))) usage;
@@ -66,13 +66,13 @@ let run file args =
   let trace=if !trace then Some (Printf.eprintf "%d %s\n") else None in
   let schedule,started,r=if !builtin then
     let started=Unix.gettimeofday () in
-    None,started,R.run_builtin ~max_steps:!limit ?on_read ?trace ~stage:!stage ~launch ast
+    None,started,R.run_builtin ?on_read ?trace ~stage:!stage ~launch ast
   else
     let stage=if !stage="hivm" then Ir_scheduler.HIVM else HFusion in
     let schedule=Ir_scheduler.next_trace ?db_path:!db_path ?timeout_ms:!timeout_ms ?backend:!backend
-      ~max_steps:!limit ~stage ~launch ast in
+      ~stage ~launch ast in
     let started=Unix.gettimeofday () in
-    Some schedule,started,R.execute_trace ~max_steps:!limit ?on_read ?trace ~stage ~launch ast schedule in
+    Some schedule,started,R.execute_trace ?on_read ?trace ~stage ~launch ast schedule in
   let finished=Unix.gettimeofday () in
   let status,detail=match r.status with Finished->"returned",`Null | Blocked xs->"deadlock",`List (List.map (fun x->`String x) xs)
     | Invalid_memory msg->"invalid-memory",`String msg | Step_limit msg->"step-limit",`String msg in

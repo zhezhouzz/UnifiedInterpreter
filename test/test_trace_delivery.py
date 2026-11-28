@@ -31,7 +31,7 @@ def main():
         args[2] = path_alias
         launch.write_text(json.dumps({"streams": [{"entry": "@stream_0", "arguments": [arg]}], "capacity": 1}))
         limited = subprocess.run([*args, "--max-steps", "1"], env=env, capture_output=True)
-        assert limited.returncode == 3 and b"scheduler incomplete" in limited.stderr
+        assert limited.returncode == 2 and b"unknown option" in limited.stderr
         second, memory = request()
         assert second["extent"] == "race_prefix" and not second["reused"]
         assert memory == (7, 7, 0)
