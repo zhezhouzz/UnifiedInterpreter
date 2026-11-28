@@ -1,5 +1,16 @@
 # 离线执行 HIVM 和 HFusion
 
+在收到的 tar 文件所在目录解包：
+
+```sh
+tar -xf unified-interpreter-benchmarks-linux-x86_64.tar
+cd unified-interpreter-benchmarks
+```
+
+以下示例在解包目录中运行。包内的 84 个 benchmark 位于 `benchmarks/<用例名称>/`，每个用例都有 `hivm.mlir` 和 `hfusion.mlir`。
+
+### 单独下载可执行文件
+
 在 GitHub 仓库的 **Actions → Build binaries and Docker image** 中选择 `release_v0` 分支的一次成功构建，在 **Artifacts** 下载 `offline-interpreter-linux-x86_64`。解压下载的 ZIP 后，进入其中的 `_build/release/offline/`，执行：
 
 ```sh
@@ -105,7 +116,7 @@ jq -es '
 
 在源文件中找到要执行的 `func.func`，将函数名写入 `entry`，按声明顺序为每个形参填写一个 `arguments` 元素，包括输出缓冲区。模块只有一个函数时可以省略 `entry`。
 
-例如，`@issue316_vexp` 的三个形参依次是输入缓冲区、输出缓冲区和循环次数。每轮读取 1024 个 f16 元素。下面的配置执行两轮，因此输入有 2048 个元素。输出的 1024 个元素已在 IR 中声明，可以省略其形状。[示例源码](../examples/kernels/issue316_missing_ready_hivm.mlir)
+解包目录中的 `issue316_missing_ready_hivm.mlir` 定义了 `@issue316_vexp`。三个形参依次是输入缓冲区、输出缓冲区和循环次数。每轮读取 1024 个 f16 元素。下面的配置执行两轮，因此输入有 2048 个元素。输出的 1024 个元素已在 IR 中声明，可以省略其形状。
 
 ```json
 {
@@ -118,7 +129,7 @@ jq -es '
 }
 ```
 
-将此 JSON 保存为 `tiles.json`，下载链接中的源文件后执行：
+将此 JSON 保存为 `tiles.json`，然后执行：
 
 ```sh
 ./unified-interpreter run issue316_missing_ready_hivm.mlir --stage hivm --launch tiles.json > tiles-result.json
@@ -142,7 +153,7 @@ jq '{status, detail, output_bytes: (.memory_hex.output | length / 2)}' tiles-res
 
 ### 启动多个执行实例
 
-需要同时运行多个实例时，使用 `streams` 数组。每项填写该实例的入口和参数，数组下标就是流编号，从 0 开始。下面的程序启动一个 cube 生产者和一个 vector 消费者。两个入口的形参都是循环次数，因此流 0 调用 `@producer(2)` 发送两次通知，流 1 调用 `@consumer(2)` 等待两次通知。`edges: [[0, 1]]` 指定通知从流 0 发往流 1。[示例源码](../benchmark/L2/cross-loop-placement/fixed.hivm.mlir)
+需要同时运行多个实例时，使用 `streams` 数组。每项填写该实例的入口和参数，数组下标就是流编号，从 0 开始。解包目录中的 `fixed.hivm.mlir` 定义了一个 cube 生产者和一个 vector 消费者。两个入口的形参都是循环次数，因此流 0 调用 `@producer(2)` 发送两次通知，流 1 调用 `@consumer(2)` 等待两次通知。`edges: [[0, 1]]` 指定通知从流 0 发往流 1。
 
 ```json
 {
@@ -154,7 +165,7 @@ jq '{status, detail, output_bytes: (.memory_hex.output | length / 2)}' tiles-res
 }
 ```
 
-将此 JSON 保存为 `streams.json`，下载该示例的 `fixed.hivm.mlir` 后执行：
+将此 JSON 保存为 `streams.json`，然后执行：
 
 ```sh
 ./unified-interpreter run fixed.hivm.mlir --stage hivm --launch streams.json > streams-result.json
