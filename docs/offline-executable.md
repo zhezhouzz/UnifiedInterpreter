@@ -24,21 +24,35 @@ sha256sum -c unified-interpreter.sha256
 
 ## 运行程序
 
-按源文件所属的 IR 层选择 `--stage`。离线可执行文件会自动选择解析器。首次试运行可从同一版本的仓库下载 [HIVM 向量加法源码](../examples/kernels/vector_add_hivm.mlir) 和 [HFusion 向量加法源码](../examples/kernels/vector_add_hfusion.mlir)，按原文件名保存在可执行文件旁。两个版本都应返回 `returned`。如果手里只有发行文件，可在构建对应的 GitHub 提交页面打开 `examples/kernels/`，分别下载两个 `.mlir` 原文件，再复制到离线机器。
+将尖括号内的内容替换为实际参数，去掉尖括号。`<IR层>` 取 `hivm` 或 `hfusion`，与源文件一致。省略输出重定向时，结果直接显示在终端。
+
+```text
+./unified-interpreter run <MLIR源文件路径> --stage <IR层> --seed 17 > <结果文件路径>
+```
+
+省略 `--launch` 时会自动生成输入。发行版收录的 benchmark 可以直接运行。对其他程序，解释器启动一个入口实例，自动选择的动态维度和普通整数参数在 11 至 20 之间。程序要求特定输入、多个执行实例或共享缓冲区时，用 `--launch <启动配置文件路径>` 指定配置。
+
+要用相同输入再次运行同一程序，重复使用相同的 `--seed` 即可。需要查看、保存或修改自动生成的输入时，可以用 `jq` 提取启动配置，再通过 `--launch` 传入。显式传入的配置文件请自行保留。
+
+```text
+jq '.launch' <结果文件路径> > <启动配置文件路径>
+./unified-interpreter run <MLIR源文件路径> --stage <IR层> --launch <启动配置文件路径> > <重放结果文件路径>
+```
+
+例如，在解包目录中用相同输入运行 HIVM 向量加法两次：
 
 ```sh
 ./unified-interpreter run vector_add_hivm.mlir --stage hivm --seed 17 > result.json
+./unified-interpreter run vector_add_hivm.mlir --stage hivm --seed 17 > second.json
+```
+
+运行 HFusion 版本：
+
+```sh
 ./unified-interpreter run vector_add_hfusion.mlir --stage hfusion --seed 17 > hfusion-result.json
 ```
 
-省略 `--launch` 时会自动生成输入。发行版收录的 benchmark 可以直接运行。对其他程序，解释器启动一个入口实例，自动选择的动态维度和普通整数参数在 11 至 20 之间。程序要求特定输入、多个执行实例或共享缓冲区时，请提供 `--launch launch.json`。
-
-要复用输入，可以指定相同种子，也可以从自动运行的结果中保存实际配置。下面的命令需要 `jq`。显式传入配置后，请保留 `launch.json` 供下次使用，该次结果不会再次附上配置。
-
-```sh
-jq '.launch' result.json > launch.json
-./unified-interpreter run vector_add_hivm.mlir --stage hivm --launch launch.json > replay.json
-```
+这三个结果文件中的 `status` 都应为 `returned`。
 
 ## 查看结果
 
