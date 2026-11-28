@@ -51,14 +51,19 @@ jq '.launch' result.json > launch.json
 src=vector_add_hivm.mlir
 stage=hivm
 out=$(mktemp -d ./benchmark-run-XXXXXX)
-for n in 1 2; do
-  ./unified-interpreter run "$src" --stage "$stage" --seed 17 \
-    --trace-db "$out/history.sqlite3" > "$out/$n.json" 2> "$out/$n.err" ||
-    { cat "$out/$n.err" >&2; break; }
-done
+run_pair() {
+  for n in 1 2; do
+    ./unified-interpreter run "$src" --stage "$stage" --seed 17 \
+      --trace-db "$out/history.sqlite3" > "$out/$n.json" 2> "$out/$n.err" ||
+      { rc=$?; cat "$out/$n.err" >&2; return "$rc"; }
+    jq -es 'length == 1 and (.[0].status | type == "string")' "$out/$n.json" >/dev/null ||
+      { echo "无法读取 $out/$n.json" >&2; return 1; }
+  done
+}
+run_pair
 ```
 
-对每份 IR 源文件分别运行以上步骤。已有指定输入时，两次均将 `--seed 17` 换为同一个 `--launch launch.json`。核对两个 JSON 的 `status`、`detail` 和竞争目标：
+将示例中的 `src` 换为手头文件的实际路径。例如文件名为 `benchmarks/12.hfusion.mlir` 时，使用该路径并设置 `stage=hfusion`。每份 IR 源文件使用一个新的 `out` 目录。需要指定输入时，两次均将 `--seed 17` 换为同一个 `--launch launch.json`。保存或复用启动配置只会复现输入；复用历史数据库会影响下次选中的调度。只有 `run_pair` 成功时才比较两份结果；若只有一次成功，该次已报告的故障仍然有效。
 
 ```sh
 jq '{status, detail, extent: .schedule.extent, targets: .schedule.targets}' "$out/1.json" "$out/2.json"
