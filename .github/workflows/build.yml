@@ -31,16 +31,19 @@ jobs:
           '
           docker cp offline-matrix:/build/_build/offline _build/release/offline
           docker rm offline-matrix
-          cd _build/release/offline
-          sha256sum unified-interpreter > unified-interpreter.sha256
-          tar -czf unified-interpreter-linux-x86_64.tar.gz unified-interpreter unified-interpreter.sha256
+
+      - name: Package the tested executable, user guide and benchmarks
+        run: python3 scripts/package_offline_release.py _build/release/offline/unified-interpreter _build/release/unified-interpreter-benchmarks-linux-x86_64.tar
 
       - uses: actions/upload-artifact@v7
         with:
           name: offline-interpreter-linux-x86_64
-          path: |
-            _build/release/offline/*.tar.gz
-            _build/release/offline/results.csv
-            docs/offline-executable.md
+          path: _build/release/unified-interpreter-benchmarks-linux-x86_64.tar
           if-no-files-found: error
           compression-level: 0
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: offline-benchmark-results
+          path: _build/release/offline/results.csv
+          if-no-files-found: error

@@ -1,6 +1,6 @@
 # 离线执行 HIVM 和 HFusion
 
-在收到的 tar 文件所在目录解包：
+在收到的 tar 文件所在目录解包。如果从 GitHub 下载，请在 **Actions → Build and verify offline interpreter** 中选择一次成功构建，下载 **Artifacts** 下的 `offline-interpreter-linux-x86_64`，解开 ZIP 即可得到 tar 文件。
 
 ```sh
 tar -xf unified-interpreter-benchmarks-linux-x86_64.tar
@@ -9,16 +9,7 @@ cd unified-interpreter-benchmarks
 
 以下示例在解包目录中运行。包内的 84 个 benchmark 位于 `benchmarks/<用例名称>/`，每个用例都有 `hivm.mlir` 和 `hfusion.mlir`。
 
-### 单独下载可执行文件
-
-在 GitHub 仓库的 **Actions → Build binaries and Docker image** 中选择 `release_v0` 分支的一次成功构建，在 **Artifacts** 下载 `offline-interpreter-linux-x86_64`。解压下载的 ZIP 后，进入其中的 `_build/release/offline/`，执行：
-
-```sh
-tar -xzf unified-interpreter-linux-x86_64.tar.gz
-sha256sum -c unified-interpreter.sha256
-```
-
-看到 `unified-interpreter: OK` 后，将这个可执行文件复制到目标机器即可。下文命令在可执行文件所在目录执行，也可以用其绝对路径从其他目录启动。发行文件面向 Ubuntu 24.04 x86_64，需要兼容的 glibc、`/proc`、`/bin/tar` 和 PATH 中的 `gzip`。Ubuntu 22.04 自带的 glibc 无法运行此发行文件。
+可执行文件面向 Ubuntu 24.04 x86_64，需要兼容的 glibc、`/proc`、`/bin/tar` 和 PATH 中的 `gzip`。Ubuntu 22.04 自带的 glibc 无法运行此发行文件。
 
 首次运行会解包到 `$XDG_CACHE_HOME/unified-interpreter`，默认使用 `~/.cache/unified-interpreter`，需要允许写入和执行。请确保运行用户可以在 `$XDG_STATE_HOME`（默认 `~/.local/state`）下创建和读写文件。
 
