@@ -29,6 +29,8 @@ let strided _ =
   List.mapi (fun pid lane -> ["%input",buffer ("input"^string_of_int pid) true [1];
     "%out",buffer "output" false [7];"%lane",H.Integer lane;"%start",H.Integer 0;"%n",H.Parameter]) [0;3]
 let catalog = [
+  "tensor-entry-add",("benchmarks/hfusion/tensor-entry-add.mlir",
+    (fun _ -> [["%a",buffer "%a" true [8]; "%b",buffer "%b" true [8]; "%out",buffer "%out" false [8]]]),None);
   "vector-add",kernels "vector-add";"row-sum",kernels "row-sum";
   "flash-attention",("artifacts/flash_attention/ir/hfusion_level.mlir",attention,None);
   "strided-output",("benchmarks/hfusion/strided-output.mlir",strided,Some 4)]

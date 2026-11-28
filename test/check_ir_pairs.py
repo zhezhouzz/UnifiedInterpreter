@@ -14,7 +14,7 @@ def race(*args):
 
 
 cases = json.loads(race("pairs", "--json"))
-required = set(race("list").splitlines()) | {"vector-add","row-sum","flash-attention","strided-output"}
+required = set(race("list").splitlines()) | {"vector-add","tensor-entry-add","row-sum","flash-attention","strided-output"}
 required.update(["cv/scene1/correct", "cv/scene1/error"])
 if set(cases) != required:
     raise ValueError(f"unpaired benchmarks: {sorted(set(cases) ^ required)}")

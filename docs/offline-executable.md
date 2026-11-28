@@ -7,7 +7,7 @@ tar -xf unified-interpreter-benchmarks-linux-x86_64.tar
 cd unified-interpreter-benchmarks
 ```
 
-以下示例在解包目录中运行。包内的 84 个 benchmark 位于 `benchmarks/<用例名称>/`，每个用例都有 `hivm.mlir` 和 `hfusion.mlir`。
+以下示例在解包目录中运行。包内的 85 个 benchmark 位于 `benchmarks/<用例名称>/`，每个用例都有 `hivm.mlir` 和 `hfusion.mlir`。
 
 可执行文件面向 Ubuntu 24.04 x86_64，需要兼容的 glibc、`/proc`、`/bin/tar` 和 PATH 中的 `gzip`。Ubuntu 22.04 自带的 glibc 无法运行此发行文件。
 

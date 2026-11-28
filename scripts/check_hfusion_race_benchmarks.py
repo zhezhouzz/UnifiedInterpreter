@@ -23,7 +23,7 @@ def main():
     cli = [str(args.exe.resolve()), "race", "--hfusion"]
     catalog = json.loads(subprocess.check_output([*cli, "list", "--json"], cwd=root))
     catalog = [case for case in catalog if case["native_catalog"]]
-    expected = {"vector-add": 0, "row-sum": 0, "flash-attention": 0, "strided-output": 1}
+    expected = {"vector-add": 0, "tensor-entry-add": 0, "row-sum": 0, "flash-attention": 0, "strided-output": 1}
     if {case["name"] for case in catalog} != expected.keys():
         raise ValueError("HFusion regression expectations must cover the catalog")
     rows = []

@@ -1399,6 +1399,17 @@
         "sha256": "3ebe4094657d70a91d946e1a78aa37d203632dd94ca8dc83e1134b706f1d5eeb"
       }
     },
+    "tensor-entry-add": {
+      "origin": "forward",
+      "hfusion": {
+        "path": "benchmarks/hfusion/tensor-entry-add.mlir",
+        "sha256": "406d443764c0ed36dcafbf4135f4b5a5d4281997daad5178543e6e54671abfaf"
+      },
+      "hivm": {
+        "path": "benchmarks/ir-pairs/tensor-entry-add/hivm.mlir",
+        "sha256": "402b0bc58f53d3772366d5e847a0aac701e01a6259442bd948fd7dc9759a4a8c"
+      }
+    },
     "vector-add": {
       "origin": "forward",
       "hfusion": {

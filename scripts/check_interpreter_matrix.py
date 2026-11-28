@@ -21,7 +21,7 @@ def inputs(name, launch):
         "row-sum": {"%input": [1, 2, 3, 4, -1, 0, 1, 2, .5, .25, -.5, -.25]},
         "strided-output": {"input0": [2], "input1": [4]},
         "fixture/hivm-two-loads": {"gm:0": [-5], "gm:1": [13], "gm:2": [-9]},
-    }.get(name, {})
+    }.get("vector-add" if name == "tensor-entry-add" else name, {})
     if name == "flash-attention":
         values = {"%arg5": [1 + i % 8 / 8 for i in range(128 * 128)],
                   "%arg6": [-9] * 128, "%arg7": [-9] * (128 * 128)}
@@ -117,6 +117,8 @@ def verify(name, stage, launch, result, config):
         "fixture/hivm-two-loads": ("gm:2", "f", [13]),
         "strided-output": ("output", "e", [2, 2, 2, 4, 4, 4, 4]),
     }
+    if name == "tensor-entry-add":
+        return check(*simple["vector-add"])
     if name in simple:
         return check(*simple[name])
     if name.startswith("fixture/"):
